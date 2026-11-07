@@ -91,7 +91,7 @@ async fn setup(zarf_wasm: &str) -> anyhow::Result<Env> {
         .await?
         .into_result()?;
     sender
-        .call(zarf.id(), "storage_deposit")
+        .call(zarf.id(), "prepay_deposit")
         .args_json(json!({}))
         .deposit(NearToken::from_near(1))
         .transact()
@@ -108,7 +108,7 @@ async fn now_ns(e: &Env) -> anyhow::Result<u64> {
 async fn create(e: &Env, deadline_ns: u64) -> anyhow::Result<u64> {
     let msg = json!({
         "merkle_root": hex(&leaf(&COMMITMENT, AMOUNT)),
-        "deadline_ns": deadline_ns.to_string(), "policy": "owner",
+        "deadline_ns": deadline_ns.to_string(), "policy": "owner", "leaf_count": 1,
     });
     let out = e
         .sender
@@ -195,17 +195,20 @@ async fn failed_transfer_rolls_back_but_keeps_storage_debit() -> anyhow::Result<
     for (transfers, storage) in [(true, false), (false, true)] {
         e.ft.call("set_fail").args_json(json!({ "transfers": transfers, "storage": storage }))
             .transact().await?.into_result()?;
-        let prepay: String = e.zarf.view("storage_balance_of")
-            .args_json(json!({ "account_id": e.sender.id() })).await?.json()?;
+        let reserved = campaign(&e, id).await?["storage_reserved"].as_str().unwrap().parse::<u128>()?;
         let out = claim(&e, id, &bob).await?;
         assert!(out.logs().iter().any(|l| l.contains("claim_reverted") && l.contains("E115")), "{out:?}");
         assert_eq!(state(&e, id).await?, "unclaimed");
         let c = campaign(&e, id).await?;
         assert_eq!((c["balance"].as_str(), c["in_flight"].as_str()), (Some(&*DEPOSIT.to_string()), Some("0")));
         assert_eq!(ft_balance(&e, &bob).await?, 0);
-        let after: String = e.zarf.view("storage_balance_of")
-            .args_json(json!({ "account_id": e.sender.id() })).await?.json()?;
-        assert!(after.parse::<u128>()? < prepay.parse::<u128>()?, "debit is not credited back");
+        let after = c["storage_reserved"].as_str().unwrap().parse::<u128>()?;
+        assert!(after < reserved, "the reservation debit is not credited back");
+        // Top the one-leaf reservation up again for the next attempt.
+        e.sender.call(e.zarf.id(), "fund_campaign_storage")
+            .args_json(json!({ "campaign_id": id.to_string() }))
+            .deposit(NearToken::from_millinear(10))
+            .transact().await?.into_result()?;
     }
     // Once the token works again, the same commitment can still be claimed.
     e.ft.call("set_fail").args_json(json!({ "transfers": false, "storage": false }))

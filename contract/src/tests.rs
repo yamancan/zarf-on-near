@@ -28,6 +28,13 @@ fn usdc() -> AccountId {
 fn sender() -> AccountId {
     acc("sender.testnet")
 }
+fn me() -> AccountId {
+    acc("zarf-near.testnet")
+}
+fn init(network: &str) -> Contract {
+    at(me(), now());
+    Contract::new(owner(), network.into(), vec![usdc()], U64(n(&v()["context"]["min_lifetime_ns"])), U64(7 * DAY_NS))
+}
 
 fn set_ctx(predecessor: AccountId, now: u64, deposit: u128, gas_tgas: u64) {
     let ctx = VMContextBuilder::new()
@@ -79,30 +86,33 @@ fn deadline() -> u64 {
 }
 
 fn create_msg(root: &str, deadline_ns: u64, policy: &str) -> String {
-    json!({ "merkle_root": root, "deadline_ns": U64(deadline_ns), "policy": policy }).to_string()
+    json!({ "merkle_root": root, "deadline_ns": U64(deadline_ns), "policy": policy, "leaf_count": 5 })
+        .to_string()
 }
 
 /// Contract with the vector signer registered, USDC bounds read, sender pre-paid.
 fn base() -> Contract {
-    let ctx = v()["context"].clone();
-    at(owner(), now());
-    let mut c = Contract::new(
-        owner(),
-        ctx["network"].as_str().unwrap().into(),
-        vec![usdc()],
-        U64(n(&ctx["min_lifetime_ns"])),
-        U64(7 * DAY_NS),
-    );
+    base_on("testnet")
+}
+fn base_on(network: &str) -> Contract {
+    let mut c = init(network);
     c.ft_storage_deposit.insert(usdc(), USDC_MIN);
+    at(owner(), now());
     c.add_owner_key(v()["keys"]["signer"].as_str().unwrap().into(), U64(deadline() + DAY_NS));
     set_ctx(sender(), now(), 10u128.pow(24), 300);
-    c.storage_deposit(None);
+    c.prepay_deposit(None);
     c
+}
+fn per_claim(c: &Contract) -> u128 {
+    c.storage_costs(usdc()).per_claim_storage.0
 }
 
 /// `base()` plus the vector campaigns at ids 7 (main) and 8 (single).
 fn seeded() -> Contract {
-    let mut c = base();
+    seeded_on("testnet")
+}
+fn seeded_on(network: &str) -> Contract {
+    let mut c = base_on(network);
     let vs = v();
     for name in ["main", "single"] {
         let camp = &vs["campaigns"][name];
@@ -312,7 +322,7 @@ fn removed_or_expired_signer_is_e101() {
     let mut c = seeded();
     let a = valid(0);
     at(acc("relayer.testnet"), now());
-    c.agents.get_mut(&hex32(&a.signer)).unwrap().valid_until_ns = now() - 1;
+    *c.owner_keys.get_mut(&hex32(&a.signer)).unwrap() = now() - 1;
     assert_err(E101, || {
         c.check_claim(&a);
     });
@@ -338,6 +348,18 @@ fn signer_added_after_creation_is_not_in_snapshot() {
     let mut both = vec![signer, rogue];
     both.sort();
     assert_eq!(fresh, both);
+    // M2: the rogue key is registered and valid, but campaign 7's snapshot predates it.
+    let rogue_vec = v()["claims"]["invalid"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|x| x["name"] == "signer-not-registered")
+        .unwrap()
+        .clone();
+    at(acc("relayer.testnet"), now());
+    assert_err(E101, || {
+        c.check_claim(&args(&rogue_vec));
+    });
 }
 
 #[test]
@@ -351,12 +373,15 @@ fn underfunded_campaign_is_e129() {
 }
 
 #[test]
-fn sender_without_prepay_for_destination_storage_is_e128() {
+fn campaign_reservation_too_low_is_e128() {
     let mut c = seeded();
-    c.storage.insert(sender(), USDC_MIN - 1);
+    let need = per_claim(&c);
+    c.campaigns.get_mut(&7).unwrap().storage_reserved = need - 1;
     assert_err(E128, || {
         c.check_claim(&valid(0));
     });
+    // Another campaign's reservation is never used.
+    assert!(c.campaigns.get(&8).unwrap().storage_reserved >= need);
 }
 
 #[test]
@@ -378,7 +403,7 @@ fn root() -> String {
 #[test]
 fn create_assigns_counter_ids_snapshots_and_emits() {
     let mut c = base();
-    let before = c.storage_balance_of(sender()).0;
+    let before = c.prepay_balance_of(sender()).0;
     at(usdc(), now());
     let r = c.ft_on_transfer(sender(), U128(500), create_msg(&root(), deadline(), "owner"));
     assert!(matches!(r, PromiseOrValue::Value(U128(0))));
@@ -397,7 +422,25 @@ fn create_assigns_counter_ids_snapshots_and_emits() {
     assert_eq!(view["deadline_ns"], deadline().to_string());
     assert_eq!(view["policy"], "owner");
     assert_eq!(view["snapshot"], json!([v()["keys"]["signer"]]));
-    assert!(c.storage_balance_of(sender()).0 < before, "campaign storage is charged to the sender");
+    let reserved = 5 * per_claim(&c);
+    assert_eq!(view["storage_reserved"], reserved.to_string());
+    // Two campaigns: each reserved 5 claims and paid its own bytes.
+    assert!(c.prepay_balance_of(sender()).0 < before - 2 * reserved);
+}
+
+#[test]
+fn create_reserves_or_refuses_e128_and_rejects_zero_leaves() {
+    let mut c = base();
+    let need = 5 * per_claim(&c);
+    c.prepay.insert(sender(), need - 1);
+    at(usdc(), now());
+    assert_err(E128, || {
+        c.ft_on_transfer(sender(), U128(1), create_msg(&root(), deadline(), "owner"));
+    });
+    let zero = json!({ "merkle_root": root(), "deadline_ns": U64(deadline()), "policy": "owner", "leaf_count": 0 });
+    assert_err(E108, || {
+        c.ft_on_transfer(sender(), U128(1), zero.to_string());
+    });
 }
 
 #[test]
@@ -425,7 +468,8 @@ fn create_refuses_zero_amount_and_bad_msg() {
         "not json".to_string(),
         create_msg(&root().to_uppercase(), deadline(), "owner"),
         create_msg(&root(), deadline(), "anyone"),
-        json!({ "merkle_root": root(), "deadline_ns": U64(deadline()), "policy": "owner", "sealed_salt": "00" }).to_string(),
+        json!({ "merkle_root": root(), "deadline_ns": U64(deadline()), "policy": "owner", "leaf_count": 1, "sealed_salt": "00" }).to_string(),
+        json!({ "merkle_root": root(), "deadline_ns": U64(deadline()), "policy": "owner" }).to_string(),
     ] {
         assert_err(E108, || {
             c.ft_on_transfer(sender(), U128(1), msg.clone());
@@ -462,7 +506,7 @@ fn create_with_empty_snapshot_is_e127() {
 #[test]
 fn create_without_storage_prepay_is_e128() {
     let mut c = base();
-    c.storage.insert(sender(), 0);
+    c.prepay.insert(sender(), 0);
     at(usdc(), now());
     assert_err(E128, || {
         c.ft_on_transfer(sender(), U128(1), create_msg(&root(), deadline(), "owner"));
@@ -497,25 +541,75 @@ fn registry_owner_path() {
 // ---- storage pre-pay ----
 
 #[test]
-fn storage_deposit_charges_new_entry_and_accumulates() {
-    at(owner(), now());
-    let mut c = Contract::new(owner(), "testnet".into(), vec![usdc()], U64(1), U64(1));
+fn prepay_deposit_charges_new_entry_and_accumulates() {
+    let mut c = init("testnet");
     set_ctx(sender(), now(), 10u128.pow(22), 300);
-    let first = c.storage_deposit(None).0;
+    let first = c.prepay_deposit(None).0;
     assert!(first > 0 && first < 10u128.pow(22), "entry bytes are paid from the deposit");
-    let second = c.storage_deposit(None).0;
+    let second = c.prepay_deposit(None).0;
     assert_eq!(second, first + 10u128.pow(22));
+    assert_eq!(c.prepay_balance_of(sender()).0, second);
 
     set_ctx(acc("poor.testnet"), now(), 1, 300);
     assert_err(E128, || {
-        c.storage_deposit(None);
+        c.prepay_deposit(None);
+    });
+}
+
+#[test]
+fn prepay_withdraw_takes_only_free_balance() {
+    let mut c = seeded();
+    let free = c.prepay_balance_of(sender()).0;
+    at(sender(), now());
+    assert_err(E128, || {
+        c.prepay_withdraw(Some(U128(free + 1)));
+    });
+    assert_err(E109, || {
+        c.prepay_withdraw(Some(U128(0)));
+    });
+    c.prepay_withdraw(Some(U128(1)));
+    assert_eq!(c.prepay_balance_of(sender()).0, free - 1);
+    c.prepay_withdraw(None);
+    assert_eq!(c.prepay_balance_of(sender()).0, 0);
+    // Reservations are untouched by a withdraw.
+    assert_eq!(c.campaigns.get(&7).unwrap().storage_reserved, 5 * per_claim(&c));
+}
+
+#[test]
+fn fund_campaign_storage_tops_up_until_the_deadline() {
+    let mut c = seeded();
+    let before = c.campaigns.get(&7).unwrap().storage_reserved;
+    set_ctx(acc("anyone.testnet"), now(), 7, 300);
+    assert_eq!(c.fund_campaign_storage(U64(7)).0, before + 7);
+    assert_err(E110, || {
+        c.fund_campaign_storage(U64(99));
+    });
+    set_ctx(acc("anyone.testnet"), now(), 0, 300);
+    assert_err(E109, || {
+        c.fund_campaign_storage(U64(7));
+    });
+    set_ctx(acc("anyone.testnet"), deadline() + 1, 7, 300);
+    assert_err(E125, || {
+        c.fund_campaign_storage(U64(7));
+    });
+}
+
+#[test]
+fn storage_costs_view() {
+    let c = base();
+    let s = serde_json::to_value(c.storage_costs(usdc())).unwrap();
+    let entry: u128 = s["claim_entry_cost"].as_str().unwrap().parse().unwrap();
+    assert_eq!(s["ft_storage_deposit"], USDC_MIN.to_string());
+    assert!(entry > 0, "claim entry bytes are measured in new");
+    assert_eq!(s["per_claim_storage"], (USDC_MIN + entry).to_string());
+    assert_err(E126, || {
+        c.storage_costs(acc("evil.testnet"));
     });
 }
 
 #[test]
 fn token_bounds_are_read_from_the_token() {
-    at(owner(), now());
-    let mut c = Contract::new(owner(), "testnet".into(), vec![usdc()], U64(1), U64(1));
+    let mut c = init("testnet");
     at(sender(), now());
     assert_err(E107, || {
         c.refresh_token_storage(usdc());
@@ -530,6 +624,11 @@ fn token_bounds_are_read_from_the_token() {
     assert_eq!(c.ft_storage_deposit.get(&usdc()).copied(), Some(USDC_MIN));
     with_result(acc("someone.testnet"), now(), PromiseResult::Failed);
     assert_err(E107, || {
+        c.on_token_storage(usdc());
+    });
+    // m4: the right caller, but the view failed.
+    with_result(me(), now(), PromiseResult::Failed);
+    assert_err(E108, || {
         c.on_token_storage(usdc());
     });
 }
@@ -576,21 +675,91 @@ fn reclaim_excludes_in_flight_and_reverts_on_failed_transfer() {
     assert!(get_logs()[0].contains("\"event\":\"reclaim_reverted\""));
     assert!(get_logs()[0].contains(E115));
 
+    // m3: success leaves the balance where reclaim put it.
+    let before = c.campaigns.get(&7).unwrap().balance;
     with_result(acc("zarf-near.testnet"), deadline() + 1, PromiseResult::Successful(vec![]));
     c.on_reclaim(U64(7), U128(free));
     assert!(get_logs()[0].contains("\"event\":\"reclaimed\""));
+    assert_eq!(c.campaigns.get(&7).unwrap().balance, before);
+}
+
+#[test]
+fn reclaim_releases_unused_reservation_even_when_fully_claimed() {
+    let mut c = seeded();
+    let reserved = c.campaigns.get(&8).unwrap().storage_reserved;
+    let free = c.prepay_balance_of(sender()).0;
+    c.campaigns.get_mut(&8).unwrap().balance = 0; // as if every leaf was paid
+    at(sender(), deadline() + 1);
+    c.reclaim(U64(8));
+    assert_eq!(c.prepay_balance_of(sender()).0, free + reserved);
+    assert_eq!(c.campaigns.get(&8).unwrap().storage_reserved, 0);
+    assert_err(E118, || {
+        c.reclaim(U64(8));
+    });
 }
 
 // ---- init ----
 
 #[test]
 fn network_is_validated_and_exposed() {
-    at(owner(), now());
+    at(me(), now());
     assert_err(E108, || {
         Contract::new(owner(), "devnet".into(), vec![], U64(1), U64(1));
     });
-    let c = Contract::new(owner(), "mainnet".into(), vec![], U64(1), U64(1));
-    assert_eq!(c.get_network(), "mainnet");
+    assert_eq!(init("mainnet").get_network(), "mainnet");
+}
+
+#[test]
+fn new_is_private() {
+    at(owner(), now());
+    assert_err(E107, || {
+        Contract::new(owner(), "testnet".into(), vec![], U64(1), U64(1));
+    });
+}
+
+#[test]
+fn valid_vector_fails_on_another_network_or_contract() {
+    // m5: the vectors are signed for testnet / zarf-near.testnet.
+    let c = seeded_on("mainnet");
+    assert_err(E101, || {
+        c.check_claim(&valid(0));
+    });
+    let c = seeded();
+    let ctx = VMContextBuilder::new()
+        .current_account_id(acc("other-zarf.testnet"))
+        .predecessor_account_id(acc("relayer.testnet"))
+        .block_timestamp(now())
+        .prepaid_gas(Gas::from_tgas(300))
+        .build();
+    testing_env!(ctx);
+    assert_err(E101, || {
+        c.check_claim(&valid(0));
+    });
+}
+
+#[test]
+fn check_order_pairs() {
+    // m6: an input hitting two conditions reports the earlier one.
+    let mut c = seeded();
+    let a = valid(0);
+    let key = (a.campaign_id.0, hex32(&a.commitment));
+    let wrong_proof = { let mut x = a.clone(); x.proof = valid(2).proof; x };
+    c.claims.insert(key, ClaimStatus::Claimed);
+    assert_err(E105, || { c.check_claim(&wrong_proof); });
+    c.claims.remove(&key);
+    let bad_both = { let mut x = wrong_proof.clone(); x.signature = valid(1).signature; x };
+    assert_err(E102, || { c.check_claim(&bad_both); });
+
+    let need = per_claim(&c);
+    let camp = c.campaigns.get_mut(&7).unwrap();
+    camp.balance = a.amount.0 - 1;
+    camp.storage_reserved = need - 1;
+    set_ctx(acc("relayer.testnet"), now(), 0, 1);
+    assert_err(E129, || { c.check_claim(&a); });
+    c.campaigns.get_mut(&7).unwrap().balance = a.amount.0;
+    assert_err(E128, || { c.check_claim(&a); });
+    c.campaigns.get_mut(&7).unwrap().storage_reserved = need;
+    assert_err(E130, || { c.check_claim(&a); });
 }
 
 // ---- claim (async) ----
@@ -609,16 +778,19 @@ fn do_claim(c: &mut Contract, a: &ClaimArgs) {
 }
 
 #[test]
-fn claim_moves_funds_to_in_flight_and_debits_storage() {
+fn claim_moves_funds_to_in_flight_and_draws_its_reservation() {
     let mut c = seeded();
     let a = valid(0);
     let before = c.campaigns.get(&7).unwrap().clone();
-    let prepay = c.storage_balance_of(sender()).0;
+    let other = c.campaigns.get(&8).unwrap().storage_reserved;
+    let prepay = c.prepay_balance_of(sender()).0;
     do_claim(&mut c, &a);
     let after = c.campaigns.get(&7).unwrap().clone();
     assert_eq!(after.balance, before.balance - a.amount.0);
     assert_eq!(after.in_flight, a.amount.0);
-    assert_eq!(c.storage_balance_of(sender()).0, prepay - USDC_MIN);
+    assert_eq!(after.storage_reserved, before.storage_reserved - per_claim(&c));
+    assert_eq!(c.campaigns.get(&8).unwrap().storage_reserved, other);
+    assert_eq!(c.prepay_balance_of(sender()).0, prepay, "free pre-pay is not touched");
     assert_eq!(c.claim_state(a.campaign_id, a.commitment.clone()), "pending");
     assert!(get_logs()[0].contains("\"event\":\"claim_started\""));
     // storage_deposit, ft_transfer and the callback are all scheduled.
@@ -646,14 +818,14 @@ fn callback_failure_restores_claim_but_not_storage_debit() {
     let mut c = seeded();
     let a = valid(0);
     let balance = c.campaigns.get(&7).unwrap().balance;
-    let prepay = c.storage_balance_of(sender()).0;
+    let reserved = c.campaigns.get(&7).unwrap().storage_reserved;
     do_claim(&mut c, &a);
     with_result(acc("zarf-near.testnet"), now(), PromiseResult::Failed);
     c.on_claim(a.campaign_id, a.commitment.clone(), a.amount, acc(&a.destination));
     assert_eq!(c.claim_state(a.campaign_id, a.commitment.clone()), "unclaimed");
     let camp = c.campaigns.get(&7).unwrap().clone();
     assert_eq!((camp.balance, camp.in_flight), (balance, 0));
-    assert_eq!(c.storage_balance_of(sender()).0, prepay - USDC_MIN);
+    assert_eq!(camp.storage_reserved, reserved - per_claim(&c), "the debit is not credited back");
     assert!(get_logs()[0].contains("\"event\":\"claim_reverted\""));
     assert!(get_logs()[0].contains(E115));
 }

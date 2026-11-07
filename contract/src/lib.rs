@@ -1,9 +1,9 @@
 //! Zarf on NEAR: NEP-141 escrow paying claims signed by a registered verifier.
-//! Byte formats, check order, errors, events and views: `spec/claim.md` (v2).
+//! Byte formats, check order, errors, events and views: `spec/claim.md` (v2.1).
 //!
-//! Init, verifier registry (owner path; Mode T is T11), sender storage pre-pay, campaign
-//! creation, `claim` (ordered checks, then storage_deposit -> ft_transfer -> callback),
-//! the owner's `resolve_pending` exit, and reclaim.
+//! Init, verifier registry (owner path; Mode T is T11), sender pre-pay and per-campaign
+//! storage reservations, campaign creation, `claim` (ordered checks, then
+//! storage_deposit -> ft_transfer -> callback), the owner's `resolve_pending` exit, reclaim.
 
 use near_sdk::json_types::{U128, U64};
 use near_sdk::serde::{Deserialize, Serialize};
@@ -54,10 +54,11 @@ fn fail(code: &str) -> ! {
 #[near(serializers = [borsh])]
 #[derive(BorshStorageKey)]
 enum StorageKey {
+    OwnerKeys,
     Agents,
     Campaigns,
     Claims,
-    Storage,
+    Prepay,
     FtStorage,
 }
 
@@ -69,17 +70,11 @@ pub enum Policy {
     Attested,
 }
 
-#[near(serializers = [borsh])]
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub enum AgentKind {
-    Owner,
-    Attested { measurement_id: [u8; 32] },
-}
-
+/// A Mode T agent, registered through attestation (T11).
 #[near(serializers = [borsh])]
 #[derive(Clone, Debug)]
-pub struct Agent {
-    pub kind: AgentKind,
+pub struct AttestedAgent {
+    pub measurement_id: [u8; 32],
     pub valid_until_ns: u64,
 }
 
@@ -103,6 +98,8 @@ pub struct Campaign {
     pub policy: Policy,
     /// Owner: allowed signer keys. Attested: allowed measurement ids.
     pub snapshot: Vec<[u8; 32]>,
+    /// Pre-paid NEAR this campaign's claims draw `per_claim_storage` from.
+    pub storage_reserved: u128,
 }
 
 #[derive(Deserialize)]
@@ -111,6 +108,7 @@ struct CreateMsg {
     merkle_root: String,
     deadline_ns: U64,
     policy: Policy,
+    leaf_count: u32,
 }
 
 #[near(serializers = [json])]
@@ -148,6 +146,15 @@ pub struct CampaignView {
     pub in_flight: U128,
     pub policy: Policy,
     pub snapshot: Vec<String>,
+    pub storage_reserved: U128,
+}
+
+#[derive(Serialize)]
+#[serde(crate = "near_sdk::serde")]
+pub struct StorageCosts {
+    pub ft_storage_deposit: U128,
+    pub claim_entry_cost: U128,
+    pub per_claim_storage: U128,
 }
 
 #[derive(Serialize)]
@@ -169,16 +176,24 @@ pub struct Contract {
     #[allow(dead_code)] // read by register_agent (T11)
     agent_ttl_ns: u64,
     next_campaign_id: u64,
-    agents: IterableMap<[u8; 32], Agent>,
+    /// Storage bytes of one (pending) claim entry, measured in `new`.
+    claim_entry_bytes: u64,
+    /// Mode W signer -> valid_until_ns. Kept apart from attested agents so a snapshot
+    /// never scans re-registered TEE agents.
+    owner_keys: IterableMap<[u8; 32], u64>,
+    agents: LookupMap<[u8; 32], AttestedAgent>,
     campaigns: LookupMap<u64, Campaign>,
     claims: LookupMap<(u64, [u8; 32]), ClaimStatus>,
-    storage: LookupMap<AccountId, u128>,
+    /// Sender -> free pre-pay (not reserved by any campaign).
+    prepay: LookupMap<AccountId, u128>,
     /// token -> its `storage_balance_bounds().min`, read on chain by `refresh_token_storage`.
     ft_storage_deposit: LookupMap<AccountId, u128>,
 }
 
 #[near]
 impl Contract {
+    /// Private: deploy and `new` go in one batched transaction. Checked by hand (not
+    /// `#[private]`) so the panic carries E107 and unit tests exercise it.
     #[init]
     pub fn new(
         owner_id: AccountId,
@@ -187,9 +202,20 @@ impl Contract {
         min_lifetime_ns: U64,
         agent_ttl_ns: U64,
     ) -> Self {
+        if env::predecessor_account_id() != env::current_account_id() {
+            fail(E107);
+        }
         if network != "testnet" && network != "mainnet" {
             fail(E108);
         }
+        let mut claims = LookupMap::new(StorageKey::Claims);
+        let probe = (u64::MAX, [0xff; 32]);
+        let before = env::storage_usage();
+        claims.insert(probe, ClaimStatus::Pending { amount: u128::MAX, started_ns: u64::MAX });
+        claims.flush();
+        let claim_entry_bytes = env::storage_usage().saturating_sub(before);
+        claims.remove(&probe);
+        claims.flush();
         Self {
             owner_id,
             network,
@@ -197,10 +223,12 @@ impl Contract {
             min_lifetime_ns: min_lifetime_ns.0,
             agent_ttl_ns: agent_ttl_ns.0,
             next_campaign_id: 0,
-            agents: IterableMap::new(StorageKey::Agents),
+            claim_entry_bytes,
+            owner_keys: IterableMap::new(StorageKey::OwnerKeys),
+            agents: LookupMap::new(StorageKey::Agents),
             campaigns: LookupMap::new(StorageKey::Campaigns),
-            claims: LookupMap::new(StorageKey::Claims),
-            storage: LookupMap::new(StorageKey::Storage),
+            claims,
+            prepay: LookupMap::new(StorageKey::Prepay),
             ft_storage_deposit: LookupMap::new(StorageKey::FtStorage),
         }
     }
@@ -246,54 +274,94 @@ impl Contract {
     pub fn add_owner_key(&mut self, signer: String, valid_until_ns: U64) {
         self.assert_owner();
         let key = hex32(&signer);
-        if self.agents.contains_key(&key) {
+        if self.owner_keys.contains_key(&key) || self.agents.contains_key(&key) {
             fail(E108);
         }
-        self.agents.insert(key, Agent { kind: AgentKind::Owner, valid_until_ns: valid_until_ns.0 });
+        self.owner_keys.insert(key, valid_until_ns.0);
     }
 
     pub fn remove_agent(&mut self, account_id: String) {
         self.assert_owner();
-        self.agents.remove(&hex32(&account_id));
+        let key = hex32(&account_id);
+        self.owner_keys.remove(&key);
+        self.agents.remove(&key);
     }
 
     /// `account_id` is the signer hex (a Shade agent's implicit account id).
     pub fn get_agent(&self, account_id: String) -> Option<AgentView> {
-        self.agents.get(&hex32(&account_id)).map(|a| match &a.kind {
-            AgentKind::Owner => AgentView {
-                kind: "owner",
-                measurement_id: None,
-                valid_until_ns: U64(a.valid_until_ns),
-            },
-            AgentKind::Attested { measurement_id } => AgentView {
-                kind: "attested",
-                measurement_id: Some(to_hex(measurement_id)),
-                valid_until_ns: U64(a.valid_until_ns),
-            },
+        let key = hex32(&account_id);
+        if let Some(until) = self.owner_keys.get(&key) {
+            return Some(AgentView { kind: "owner", measurement_id: None, valid_until_ns: U64(*until) });
+        }
+        self.agents.get(&key).map(|a| AgentView {
+            kind: "attested",
+            measurement_id: Some(to_hex(&a.measurement_id)),
+            valid_until_ns: U64(a.valid_until_ns),
         })
     }
 
-    // ---- sender storage pre-pay (ft_on_transfer cannot carry NEAR) ----
+    // ---- sender pre-pay (ft_on_transfer cannot carry NEAR) ----
 
     #[payable]
-    pub fn storage_deposit(&mut self, account_id: Option<AccountId>) -> U128 {
+    pub fn prepay_deposit(&mut self, account_id: Option<AccountId>) -> U128 {
         let account = account_id.unwrap_or_else(env::predecessor_account_id);
         let mut deposit = env::attached_deposit().as_yoctonear();
-        if !self.storage.contains_key(&account) {
+        if !self.prepay.contains_key(&account) {
             // A new entry pays for its own bytes first.
             let before = env::storage_usage();
-            self.storage.insert(account.clone(), 0);
-            self.storage.flush();
+            self.prepay.insert(account.clone(), 0);
+            self.prepay.flush();
             let cost = storage_cost(env::storage_usage().saturating_sub(before));
             deposit = deposit.checked_sub(cost).unwrap_or_else(|| fail(E128));
         }
-        let balance = self.storage.get(&account).copied().unwrap_or(0) + deposit;
-        self.storage.insert(account, balance);
+        let balance = self.prepay.get(&account).copied().unwrap_or(0) + deposit;
+        self.prepay.insert(account, balance);
         U128(balance)
     }
 
-    pub fn storage_balance_of(&self, account_id: AccountId) -> U128 {
-        U128(self.storage.get(&account_id).copied().unwrap_or(0))
+    pub fn prepay_balance_of(&self, account_id: AccountId) -> U128 {
+        U128(self.prepay.get(&account_id).copied().unwrap_or(0))
+    }
+
+    /// Sends the caller's free pre-pay (all of it by default) back to the caller.
+    pub fn prepay_withdraw(&mut self, amount: Option<U128>) -> Promise {
+        let account = env::predecessor_account_id();
+        let free = self.prepay.get(&account).copied().unwrap_or(0);
+        let amount = amount.map_or(free, |a| a.0);
+        if amount == 0 {
+            fail(E109);
+        }
+        if amount > free {
+            fail(E128);
+        }
+        self.prepay.insert(account.clone(), free - amount);
+        Promise::new(account).transfer(NearToken::from_yoctonear(amount))
+    }
+
+    /// Anyone may top up a campaign's reservation (e.g. `leaf_count` was understated).
+    #[payable]
+    pub fn fund_campaign_storage(&mut self, campaign_id: U64) -> U128 {
+        let deposit = env::attached_deposit().as_yoctonear();
+        let c = self.campaigns.get_mut(&campaign_id.0).unwrap_or_else(|| fail(E110));
+        // After the deadline no claim can draw on it; refuse rather than strand NEAR.
+        if env::block_timestamp() > c.deadline_ns {
+            fail(E125);
+        }
+        if deposit == 0 {
+            fail(E109);
+        }
+        c.storage_reserved += deposit;
+        U128(c.storage_reserved)
+    }
+
+    pub fn storage_costs(&self, token_id: AccountId) -> StorageCosts {
+        let ft = self.ft_storage_deposit.get(&token_id).copied().unwrap_or_else(|| fail(E126));
+        let entry = storage_cost(self.claim_entry_bytes);
+        StorageCosts {
+            ft_storage_deposit: U128(ft),
+            claim_entry_cost: U128(entry),
+            per_claim_storage: U128(ft + entry),
+        }
     }
 
     // ---- campaign creation ----
@@ -315,6 +383,9 @@ impl Contract {
         }
         let msg: CreateMsg = serde_json::from_str(&msg).unwrap_or_else(|_| fail(E108));
         let merkle_root = hex32(&msg.merkle_root);
+        if msg.leaf_count == 0 {
+            fail(E108);
+        }
         let now = env::block_timestamp();
         if msg.deadline_ns.0 < now.saturating_add(self.min_lifetime_ns) {
             fail(E119);
@@ -326,6 +397,7 @@ impl Contract {
 
         let campaign_id = self.next_campaign_id;
         self.next_campaign_id += 1;
+        let reserve = msg.leaf_count as u128 * self.per_claim_storage(&token);
         let before = env::storage_usage();
         self.campaigns.insert(
             campaign_id,
@@ -339,10 +411,13 @@ impl Contract {
                 in_flight: 0,
                 policy: msg.policy,
                 snapshot,
+                storage_reserved: reserve,
             },
         );
         self.campaigns.flush();
-        self.charge_storage(&sender_id, env::storage_usage().saturating_sub(before));
+        // Campaign bytes are spent; the per-claim part is reserved for this campaign only.
+        let bytes_cost = storage_cost(env::storage_usage().saturating_sub(before));
+        self.debit_prepay(&sender_id, bytes_cost + reserve);
 
         emit(
             "campaign_created",
@@ -384,18 +459,18 @@ impl Contract {
             signer,
             signature,
         });
+        let token = self.campaigns.get(&ok.campaign_id).unwrap_or_else(|| fail(E110)).token.clone();
+        // check_claim proved the token's bounds exist and the reservation covers this (E128).
+        let ft_storage = self.ft_storage_deposit.get(&token).copied().unwrap_or_else(|| fail(E128));
+        let per_claim = self.per_claim_storage(&token);
         let c = self.campaigns.get_mut(&ok.campaign_id).unwrap_or_else(|| fail(E110));
         c.balance -= ok.amount;
         c.in_flight += ok.amount;
-        let (token, sender) = (c.token.clone(), c.sender.clone());
+        c.storage_reserved -= per_claim;
         self.claims.insert(
             (ok.campaign_id, ok.commitment),
             ClaimStatus::Pending { amount: ok.amount, started_ns: env::block_timestamp() },
         );
-        // check_claim already proved both exist and the pre-pay covers it (E128).
-        let ft_storage = self.ft_storage_deposit.get(&token).copied().unwrap_or_else(|| fail(E128));
-        let prepay = self.storage.get(&sender).copied().unwrap_or(0);
-        self.storage.insert(sender, prepay - ft_storage);
 
         emit(
             "claim_started",
@@ -491,7 +566,9 @@ impl Contract {
 
     // ---- reclaim ----
 
-    pub fn reclaim(&mut self, campaign_id: U64) -> Promise {
+    /// Returns the token balance and releases the unused storage reservation to the
+    /// sender's free pre-pay. In-flight claims are a separate bucket and stay put.
+    pub fn reclaim(&mut self, campaign_id: U64) -> PromiseOrValue<()> {
         let mut c = self.campaigns.get(&campaign_id.0).cloned().unwrap_or_else(|| fail(E110));
         if env::predecessor_account_id() != c.sender {
             fail(E107);
@@ -499,19 +576,30 @@ impl Contract {
         if env::block_timestamp() <= c.deadline_ns {
             fail(E117);
         }
-        // In-flight claims sit in their own bucket, so the whole balance is free.
         let available = c.balance;
-        if available == 0 {
+        // A fully claimed campaign can still hold a reservation; release it, don't E118.
+        if available == 0 && c.storage_reserved == 0 {
             fail(E118);
         }
+        let released = c.storage_reserved;
         c.balance = 0;
+        c.storage_reserved = 0;
         let (token, sender) = (c.token.clone(), c.sender.clone());
         self.campaigns.insert(campaign_id.0, c);
-        ft_transfer(token, sender, available).then(
-            Self::ext(env::current_account_id())
-                .with_static_gas(GAS_CALLBACK)
-                .on_reclaim(campaign_id, U128(available)),
-        )
+        if released > 0 {
+            let free = self.prepay.get(&sender).copied().unwrap_or(0);
+            self.prepay.insert(sender.clone(), free + released);
+        }
+        if available == 0 {
+            return PromiseOrValue::Value(());
+        }
+        ft_transfer(token, sender, available)
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(GAS_CALLBACK)
+                    .on_reclaim(campaign_id, U128(available)),
+            )
+            .into()
     }
 
     /// Private callback; checked by hand so the panic carries E107.
@@ -552,6 +640,7 @@ impl Contract {
             in_flight: U128(c.in_flight),
             policy: c.policy,
             snapshot: c.snapshot.iter().map(|k| to_hex(k)).collect(),
+            storage_reserved: U128(c.storage_reserved),
         })
     }
 
@@ -574,9 +663,9 @@ impl Contract {
     fn policy_snapshot(&self, policy: Policy, deadline_ns: u64) -> Vec<[u8; 32]> {
         match policy {
             Policy::Owner => self
-                .agents
+                .owner_keys
                 .iter()
-                .filter(|(_, a)| a.kind == AgentKind::Owner && a.valid_until_ns >= deadline_ns)
+                .filter(|(_, until)| **until >= deadline_ns)
                 .map(|(k, _)| *k)
                 .collect(),
             // shortcut: no approved measurements exist until T11 adds approve_measurements,
@@ -601,11 +690,16 @@ impl Contract {
         }
     }
 
-    fn charge_storage(&mut self, account: &AccountId, bytes: u64) {
-        let cost = storage_cost(bytes);
-        let balance = self.storage.get(account).copied().unwrap_or(0);
-        let left = balance.checked_sub(cost).unwrap_or_else(|| fail(E128));
-        self.storage.insert(account.clone(), left);
+    fn debit_prepay(&mut self, account: &AccountId, cost: u128) {
+        let free = self.prepay.get(account).copied().unwrap_or(0);
+        let left = free.checked_sub(cost).unwrap_or_else(|| fail(E128));
+        self.prepay.insert(account.clone(), left);
+    }
+
+    /// ft_storage_deposit + one claim entry's bytes. Callers have checked the token.
+    fn per_claim_storage(&self, token: &AccountId) -> u128 {
+        let ft = self.ft_storage_deposit.get(token).copied().unwrap_or_else(|| fail(E126));
+        ft + storage_cost(self.claim_entry_bytes)
     }
 
     /// The synchronous half of `claim`, in the spec's fixed order (1-11).
@@ -649,15 +743,15 @@ impl Contract {
             fail(E102);
         }
         // 8: policy, then ed25519 over the payload rebuilt from our own context.
-        let agent = self.agents.get(&signer).unwrap_or_else(|| fail(E101));
-        let allowed = agent.valid_until_ns >= now
-            && match (&c.policy, &agent.kind) {
-                (Policy::Owner, AgentKind::Owner) => c.snapshot.contains(&signer),
-                (Policy::Attested, AgentKind::Attested { measurement_id }) => {
-                    c.snapshot.contains(measurement_id)
-                }
-                _ => false,
-            };
+        let allowed = match c.policy {
+            Policy::Owner => self
+                .owner_keys
+                .get(&signer)
+                .is_some_and(|until| *until >= now && c.snapshot.contains(&signer)),
+            Policy::Attested => self.agents.get(&signer).is_some_and(|a| {
+                a.valid_until_ns >= now && c.snapshot.contains(&a.measurement_id)
+            }),
+        };
         if !allowed {
             fail(E101);
         }
@@ -678,8 +772,7 @@ impl Contract {
             fail(E129);
         }
         // 10
-        let ft_storage = self.ft_storage_deposit.get(&c.token).copied().unwrap_or_else(|| fail(E128));
-        if self.storage.get(&c.sender).copied().unwrap_or(0) < ft_storage {
+        if c.storage_reserved < self.per_claim_storage(&c.token) {
             fail(E128);
         }
         // 11
