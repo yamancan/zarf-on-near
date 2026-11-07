@@ -177,6 +177,16 @@ Any error panics, so NEP-141 refunds the whole amount. On success it returns `"0
 
 `reclaim({ campaign_id })`: sender only.
 
+Sender storage pre-pay (create app):
+
+- `storage_deposit({ account_id? })`, payable. Credits the attached NEAR to `account_id`
+  (default: the caller) and returns the new pre-pay balance as `"<u128>"` yocto.
+- `storage_balance_of({ account_id })` returns `"<u128>"` (`"0"` if none). Campaign bytes and
+  per-claim `ft_storage_deposit` are debited from it.
+- `refresh_token_storage({ token_id })`, owner only. Reads the token's
+  `storage_balance_bounds().min` into `ft_storage_deposit`. Until it has run for a token,
+  `ft_on_transfer` from that token is refused with `E126_UNKNOWN_TOKEN`.
+
 **Deadline boundary:** `claim` iff `now <= deadline_ns`; `reclaim` iff `now > deadline_ns`.
 
 **`claim` check order.** It is fixed so that input hitting two conditions has one expected code:
