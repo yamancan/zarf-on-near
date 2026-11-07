@@ -387,8 +387,10 @@ fn campaign_reservation_too_low_is_e128() {
 #[test]
 fn low_gas_is_e130_and_view_reports_requirement() {
     let c = seeded();
-    assert_eq!(c.required_claim_gas().0, Gas::from_tgas(50).as_gas());
-    set_ctx(acc("relayer.testnet"), now(), 0, 49);
+    let need = c.required_claim_gas().0;
+    assert_eq!(need, required_claim_gas().as_gas());
+    assert!(need >= (GAS_STORAGE_DEPOSIT.as_gas() + GAS_FT_TRANSFER.as_gas() + GAS_CALLBACK.as_gas()));
+    set_ctx(acc("relayer.testnet"), now(), 0, need / 1_000_000_000_000 - 1);
     assert_err(E130, || {
         c.check_claim(&valid(0));
     });
@@ -805,7 +807,7 @@ fn callback_success_marks_claimed() {
     let a = valid(0);
     do_claim(&mut c, &a);
     with_result(acc("zarf-near.testnet"), now(), PromiseResult::Successful(vec![]));
-    c.on_claim(a.campaign_id, a.commitment.clone(), a.amount, acc(&a.destination));
+    c.on_claim(a.campaign_id, a.commitment.clone(), a.amount, acc(&a.destination), U64(now()));
     assert_eq!(c.claim_state(a.campaign_id, a.commitment.clone()), "claimed");
     assert_eq!(c.campaigns.get(&7).unwrap().in_flight, 0);
     assert!(get_logs()[0].contains("\"event\":\"claim_paid\""));
@@ -821,11 +823,12 @@ fn callback_failure_restores_claim_but_not_storage_debit() {
     let reserved = c.campaigns.get(&7).unwrap().storage_reserved;
     do_claim(&mut c, &a);
     with_result(acc("zarf-near.testnet"), now(), PromiseResult::Failed);
-    c.on_claim(a.campaign_id, a.commitment.clone(), a.amount, acc(&a.destination));
+    c.on_claim(a.campaign_id, a.commitment.clone(), a.amount, acc(&a.destination), U64(now()));
     assert_eq!(c.claim_state(a.campaign_id, a.commitment.clone()), "unclaimed");
     let camp = c.campaigns.get(&7).unwrap().clone();
     assert_eq!((camp.balance, camp.in_flight), (balance, 0));
-    assert_eq!(camp.storage_reserved, reserved - per_claim(&c), "the debit is not credited back");
+    // m1: the removed entry's bytes come back; the ft_storage_deposit part does not.
+    assert_eq!(camp.storage_reserved, reserved - USDC_MIN);
     assert!(get_logs()[0].contains("\"event\":\"claim_reverted\""));
     assert!(get_logs()[0].contains(E115));
 }
@@ -836,7 +839,7 @@ fn callback_rejects_outside_callers() {
     let a = valid(0);
     do_claim(&mut c, &a);
     with_result(acc("relayer.testnet"), now(), PromiseResult::Successful(vec![]));
-    assert_err(E107, || c.on_claim(a.campaign_id, a.commitment.clone(), a.amount, acc(&a.destination)));
+    assert_err(E107, || c.on_claim(a.campaign_id, a.commitment.clone(), a.amount, acc(&a.destination), U64(now())));
 }
 
 #[test]
@@ -850,7 +853,7 @@ fn reclaim_during_in_flight_claim_leaves_it_alone() {
     assert_eq!(c.campaigns.get(&7).unwrap().in_flight, a.amount.0);
     // The late callback still settles the claim against in_flight.
     with_result(acc("zarf-near.testnet"), deadline() + 1, PromiseResult::Failed);
-    c.on_claim(a.campaign_id, a.commitment.clone(), a.amount, acc(&a.destination));
+    c.on_claim(a.campaign_id, a.commitment.clone(), a.amount, acc(&a.destination), U64(now()));
     let camp = c.campaigns.get(&7).unwrap().clone();
     assert_eq!((camp.balance, camp.in_flight), (a.amount.0, 0));
     assert!(free > 0);
@@ -869,8 +872,10 @@ fn resolve_pending_is_owner_only_and_waits_an_hour() {
     at(owner(), now() + PENDING_TIMEOUT_NS - 1);
     assert_err(E107, || resolve(&mut c, true));
     at(owner(), now() + PENDING_TIMEOUT_NS);
+    let reserved = c.campaigns.get(&7).unwrap().storage_reserved;
     resolve(&mut c, false);
     assert_eq!(c.claim_state(a.campaign_id, a.commitment.clone()), "unclaimed");
+    assert_eq!(c.campaigns.get(&7).unwrap().storage_reserved, reserved + (per_claim(&c) - USDC_MIN));
     assert!(get_logs()[0].contains("\"event\":\"pending_resolved\""));
     assert!(get_logs()[0].contains("receipt-id"));
     assert_eq!(c.campaigns.get(&7).unwrap().in_flight, 0);
@@ -878,7 +883,7 @@ fn resolve_pending_is_owner_only_and_waits_an_hour() {
     assert_err(E108, || resolve(&mut c, true));
     // A callback arriving after the resolution is a no-op.
     with_result(acc("zarf-near.testnet"), now(), PromiseResult::Successful(vec![]));
-    c.on_claim(a.campaign_id, a.commitment.clone(), a.amount, acc(&a.destination));
+    c.on_claim(a.campaign_id, a.commitment.clone(), a.amount, acc(&a.destination), U64(now()));
     assert_eq!(c.claim_state(a.campaign_id, a.commitment.clone()), "unclaimed");
     assert!(get_logs().is_empty());
 }
@@ -894,4 +899,28 @@ fn resolve_pending_paid_marks_claimed() {
     assert_eq!(c.claim_state(a.campaign_id, a.commitment.clone()), "claimed");
     let camp = c.campaigns.get(&7).unwrap().clone();
     assert_eq!((camp.balance, camp.in_flight), (balance - a.amount.0, 0));
+}
+
+#[test]
+fn late_callback_of_a_resolved_attempt_does_not_settle_the_next_one() {
+    // M1: A's callback is delayed past the hour, the owner resolves A as unpaid, the
+    // recipient claims again (B); A's late Failed callback must leave B pending.
+    let mut c = seeded();
+    let a = valid(0);
+    do_claim(&mut c, &a); // attempt A at now()
+    at(owner(), now() + PENDING_TIMEOUT_NS);
+    c.resolve_pending(a.campaign_id, a.commitment.clone(), false, "receipt-a".into());
+    // B would need a fresh signature; insert its pending entry directly.
+    let key = (a.campaign_id.0, hex32(&a.commitment));
+    let b_started = now() + PENDING_TIMEOUT_NS;
+    c.claims.insert(key, ClaimStatus::Pending { amount: a.amount.0, started_ns: b_started });
+    c.campaigns.get_mut(&7).unwrap().in_flight += a.amount.0;
+    with_result(me(), b_started + 1, PromiseResult::Failed);
+    c.on_claim(a.campaign_id, a.commitment.clone(), a.amount, acc(&a.destination), U64(now()));
+    assert_eq!(c.claim_state(a.campaign_id, a.commitment.clone()), "pending");
+    assert_eq!(c.campaigns.get(&7).unwrap().in_flight, a.amount.0);
+    assert!(get_logs().is_empty());
+    // B's own callback still settles B.
+    c.on_claim(a.campaign_id, a.commitment.clone(), a.amount, acc(&a.destination), U64(b_started));
+    assert_eq!(c.claim_state(a.campaign_id, a.commitment.clone()), "unclaimed");
 }

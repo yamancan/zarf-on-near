@@ -129,6 +129,15 @@ async fn create(e: &Env, deadline_ns: u64) -> anyhow::Result<u64> {
 }
 
 async fn claim(e: &Env, id: u64, dest: &Account) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
+    claim_with_gas(e, id, dest, Gas::from_tgas(300)).await
+}
+
+async fn claim_with_gas(
+    e: &Env,
+    id: u64,
+    dest: &Account,
+    gas: Gas,
+) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
     let expires = now_ns(e).await? + 10 * 60 * 1_000_000_000;
     let mut p = b"ZARF-NEAR-CLAIM-V1".to_vec();
     push_str(&mut p, "testnet");
@@ -147,7 +156,7 @@ async fn claim(e: &Env, id: u64, dest: &Account) -> anyhow::Result<near_workspac
             "proof": [], "destination": dest.id(), "expires_at_ns": expires.to_string(),
             "signer": hex(&key.verifying_key().to_bytes()), "signature": hex(&sig),
         }))
-        .gas(Gas::from_tgas(100))
+        .gas(gas)
         .transact()
         .await?)
 }
@@ -191,8 +200,12 @@ async fn claim_pays_an_unregistered_destination_once() -> anyhow::Result<()> {
 async fn failed_transfer_rolls_back_but_keeps_storage_debit() -> anyhow::Result<()> {
     let e = setup("release/zarf_near.wasm").await?;
     let id = create(&e, now_ns(&e).await? + HOUR_NS).await?;
-    let bob = e.worker.dev_create_account().await?;
+    let costs: Value = e.zarf.view("storage_costs").args_json(json!({ "token_id": e.ft.id() })).await?.json()?;
+    let ft_storage: u128 = costs["ft_storage_deposit"].as_str().unwrap().parse()?;
     for (transfers, storage) in [(true, false), (false, true)] {
+        // A fresh destination each round: a successful storage_deposit registers it, and a
+        // registered destination would make the storage-fail round's ft_transfer succeed.
+        let bob = e.worker.dev_create_account().await?;
         e.ft.call("set_fail").args_json(json!({ "transfers": transfers, "storage": storage }))
             .transact().await?.into_result()?;
         let reserved = campaign(&e, id).await?["storage_reserved"].as_str().unwrap().parse::<u128>()?;
@@ -203,7 +216,8 @@ async fn failed_transfer_rolls_back_but_keeps_storage_debit() -> anyhow::Result<
         assert_eq!((c["balance"].as_str(), c["in_flight"].as_str()), (Some(&*DEPOSIT.to_string()), Some("0")));
         assert_eq!(ft_balance(&e, &bob).await?, 0);
         let after = c["storage_reserved"].as_str().unwrap().parse::<u128>()?;
-        assert!(after < reserved, "the reservation debit is not credited back");
+        // The entry's bytes come back; the ft_storage_deposit part does not.
+        assert_eq!(after, reserved - ft_storage);
         // Top the one-leaf reservation up again for the next attempt.
         e.sender.call(e.zarf.id(), "fund_campaign_storage")
             .args_json(json!({ "campaign_id": id.to_string() }))
@@ -213,7 +227,22 @@ async fn failed_transfer_rolls_back_but_keeps_storage_debit() -> anyhow::Result<
     // Once the token works again, the same commitment can still be claimed.
     e.ft.call("set_fail").args_json(json!({ "transfers": false, "storage": false }))
         .transact().await?.into_result()?;
-    assert!(claim(&e, id, &bob).await?.is_success());
+    let carol = e.worker.dev_create_account().await?;
+    assert!(claim(&e, id, &carol).await?.is_success());
+    assert_eq!(ft_balance(&e, &carol).await?, AMOUNT);
+    Ok(())
+}
+
+#[tokio::test]
+async fn claim_succeeds_with_exactly_required_claim_gas() -> anyhow::Result<()> {
+    // Sets GAS_CLAIM_MARGIN: if this fails, read the burnt gas from the outcome and raise it.
+    let e = setup("release/zarf_near.wasm").await?;
+    let id = create(&e, now_ns(&e).await? + HOUR_NS).await?;
+    let need: String = e.zarf.view("required_claim_gas").await?.json()?;
+    let bob = e.worker.dev_create_account().await?;
+    let out = claim_with_gas(&e, id, &bob, Gas::from_gas(need.parse()?)).await?;
+    println!("required_claim_gas = {need}, total burnt = {}", out.total_gas_burnt);
+    assert!(out.is_success(), "{out:?}");
     assert_eq!(ft_balance(&e, &bob).await?, AMOUNT);
     Ok(())
 }
