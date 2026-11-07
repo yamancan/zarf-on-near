@@ -163,7 +163,7 @@ the token is allow-listed, and stored (USDC: 0.00125 NEAR).
 `ft_on_transfer(sender_id, amount, msg)`, where `msg` is
 
 ```json
-{ "merkle_root": "<hex32>", "deadline_ns": "<u64>", "policy": "owner" | "attested" }
+{ "merkle_root": "<hex32>", "deadline_ns": "<u64>", "policy": "owner" | "attested", "leaf_count": <u32> }
 ```
 
 Any error panics, so NEP-141 refunds the whole amount. On success it returns `"0"`.
@@ -190,15 +190,37 @@ for a claim stranded in `pending` because its callback never completed (out of g
   can't touch any other allocation. The callback is built so this should never be needed:
   static reserved gas, no result bytes read, no branch that can panic.
 
-Sender storage pre-pay (create app):
+Storage, per campaign (create app):
 
-- `storage_deposit({ account_id? })`, payable. Credits the attached NEAR to `account_id`
-  (default: the caller) and returns the new pre-pay balance as `"<u128>"` yocto.
-- `storage_balance_of({ account_id })` returns `"<u128>"` (`"0"` if none). Campaign bytes and
-  per-claim `ft_storage_deposit` are debited from it.
+- `prepay_deposit({ account_id? })`, payable. Credits the attached NEAR to the sender's free
+  pre-pay (default: the caller) and returns the new free balance as `"<u128>"` yocto.
+- `prepay_balance_of({ account_id })` returns the free pre-pay as `"<u128>"` (`"0"` if none).
+- `prepay_withdraw({ amount? })` transfers the caller's free pre-pay (all of it by default) to
+  the caller.
+- At creation, `ft_on_transfer` **reserves** from the free pre-pay
+  `campaign_bytes_cost + leaf_count × per_claim_storage`, where
+  `per_claim_storage = ft_storage_deposit + claim_entry_cost`, into `campaign.storage_reserved`.
+  Too little free pre-pay → `E128` (refunded).
+- Each claim draws `per_claim_storage` from **its own campaign's** reservation. One campaign
+  never spends another's.
+- `reclaim` releases the unused reservation back to the sender's free pre-pay.
+- `fund_campaign_storage({ campaign_id })`, payable, anyone. It tops up a reservation when
+  `leaf_count` was understated.
+- `claim_entry_cost` is measured by the contract (storage bytes of one claim entry ×
+  storage price) and exposed with `ft_storage_deposit` by `storage_costs({ token_id })` →
+  `{ ft_storage_deposit, claim_entry_cost, per_claim_storage }`.
 - `refresh_token_storage({ token_id })`, owner only. Reads the token's
   `storage_balance_bounds().min` into `ft_storage_deposit`. Until it has run for a token,
   `ft_on_transfer` from that token is refused with `E126_UNKNOWN_TOKEN`.
+- Names avoid NEP-145's `storage_*`, because the return shapes differ.
+
+`new` is `#[private]`. Deploy and `new` happen in **one batched transaction**, so nobody can
+initialise the contract first.
+
+Owner keys live in their own set, separate from attested agents, so building a campaign
+snapshot never scans re-registered TEE agents.
+
+`resolve_pending` on an entry that is not pending → `E108_INVALID_INPUT`.
 
 **Deadline boundary:** `claim` iff `now <= deadline_ns`; `reclaim` iff `now > deadline_ns`.
 
@@ -213,13 +235,13 @@ Sender storage pre-pay (create app):
 7. `E102_INVALID_MERKLE_PROOF`
 8. `E101_INVALID_SIGNATURE` (policy, then ed25519)
 9. `E129_INSUFFICIENT_BALANCE`
-10. `E128_INSUFFICIENT_STORAGE` (the sender's pre-pay < `ft_storage_deposit`)
+10. `E128_INSUFFICIENT_STORAGE` (`campaign.storage_reserved < per_claim_storage`)
 11. `E130_INSUFFICIENT_GAS` (prepaid gas < `required_claim_gas()`)
 
 Only after all of them pass does the claim proceed:
 
 1. The claim becomes `pending` and the amount moves to in-flight.
-2. `ft_storage_deposit` is debited from the sender's pre-pay.
+2. `per_claim_storage` is debited from the campaign's reservation; the claim entry's bytes are paid from it.
 3. The contract **always** calls
    `token.storage_deposit({ account_id: destination, registration_only: true })` with exactly
    `ft_storage_deposit` attached. There is no registration check: that would need an
@@ -338,7 +360,7 @@ where the name matches; everything else is new.
 | `E125_CAMPAIGN_ENDED` | claim while `now > deadline_ns` |
 | `E126_UNKNOWN_TOKEN` | `ft_on_transfer` from a token not on the allow-list |
 | `E127_NO_VERIFIER` | the policy snapshot would be empty |
-| `E128_INSUFFICIENT_STORAGE` | sender's storage pre-pay too low |
+| `E128_INSUFFICIENT_STORAGE` | free pre-pay too low at creation, or the campaign reservation too low at claim |
 | `E129_INSUFFICIENT_BALANCE` | campaign balance < amount |
 | `E130_INSUFFICIENT_GAS` | prepaid gas below what the transfer + callback need (checked before `pending`) |
 | `E131_INVALID_ATTESTATION` | `register_agent` quote/measurement/ppid check fails |
