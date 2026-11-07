@@ -1,0 +1,5 @@
+# Pinned for shade-attestation 0.2.0 (Mode T, T11); NEAR needs wasm32-unknown-unknown.
+[toolchain]
+channel = "1.86.0"
+components = ["rustfmt", "clippy"]
+targets = ["wasm32-unknown-unknown"]

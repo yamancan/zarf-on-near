@@ -1,0 +1,25 @@
+[package]
+name = "zarf-near"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+# Build: cargo near build non-reproducible-wasm --no-abi
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk = "=5.26.1"
+
+[dev-dependencies]
+near-sdk = { version = "=5.26.1", features = ["unit-testing"] }
+
+[profile.release]
+codegen-units = 1
+opt-level = "z"
+lto = true
+debug = false
+panic = "abort"
+overflow-checks = true
