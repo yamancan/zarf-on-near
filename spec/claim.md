@@ -219,7 +219,7 @@ Storage, per campaign (create app):
   rest stays in the free pre-pay (withdrawable).
 - The create app deposits only the shortfall:
   `campaign_bytes_cost + leaf_count × per_claim_storage − prepay_balance_of(sender)`.
-- `get_config()` → `{ network, min_lifetime_ns, agent_ttl_ns, token_ids }`, so the create form
+- `get_config()` → `{ network, min_lifetime_ns, agent_ttl_ns, token_ids, storage_byte_cost }` (`storage_byte_cost` = `env::storage_byte_cost()`, yocto per byte; the create app adds one owner key's slack, 32 × this, to its shortfall), so the create form
   can refuse a too-early deadline before sending.
 - `refresh_token_storage({ token_id })`, owner only. Reads the token's
   `storage_balance_bounds().min` into `ft_storage_deposit`. Until it has run for a token,
