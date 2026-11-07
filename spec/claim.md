@@ -334,14 +334,14 @@ E102 → E101 → E129 → sign. Nothing is signed on any error.
 | `E105_ALREADY_CLAIMED`, `E123_CLAIM_PENDING` | 409 | from `claim_state` |
 | `COMMITMENT_MISMATCH` | 403 | HMAC(salt, email) ≠ commitment (wrong account or wrong link) |
 | `E102_INVALID_MERKLE_PROOF` | 403 | (commitment, amount) not in the tree |
-| `E101_INVALID_SIGNATURE` | 403 | our signer (or measurement) is not in the campaign snapshot |
+| `E101_INVALID_SIGNATURE` | 403 | our signer (or measurement) is not in the campaign snapshot, or `get_agent(our signer)` is null or expires before `expires_at_ns` |
 | `E129_INSUFFICIENT_BALANCE` | 409 | balance < amount |
 | `VERIFIER_MISCONFIGURED` | 500 | SIGNER_SEED, CONTRACT_ID or GOOGLE_CLIENT_ID unset |
 | `UPSTREAM_UNAVAILABLE` | 503 | Google JWKS or a chain read failed |
 
 200 returns `{ campaign_id, commitment, amount, proof, destination, expires_at_ns, signer, signature }`.
-In Mode T the verifier must also check its own `get_agent` `valid_until_ns >= expires_at_ns`
-(Owner keys are already bounded by the deadline snapshot).
+In both modes the verifier checks its own `get_agent`: it is refused while a key is removed,
+for example in the window of a remove + add extension.
 
 ## Errors
 
