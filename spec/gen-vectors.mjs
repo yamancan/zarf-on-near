@@ -1,4 +1,4 @@
-// Generates spec/vectors.json from fixed inputs (spec/claim.md v2) and self-checks it.
+// Generates spec/vectors.json from fixed inputs (spec/claim.md v2.1) and self-checks it.
 // Run: node spec/gen-vectors.mjs   (zero dependencies, Node >= 20)
 import crypto from 'node:crypto';
 import { writeFileSync } from 'node:fs';
@@ -114,9 +114,18 @@ const invalid = [
   { name: 'proof-of-other-leaf', campaign: 'main', expect: 'E102_INVALID_MERKLE_PROOF', ...claim(main, 0, 'alice.testnet', { args: { proof: proofFor(main.levels, 2).map(hex) } }) },
 ];
 
+// Illustrative FullMeasurementsHex shape; the real field set comes from shade-attestation 0.2.0.
+const canonicalJson = (v) => Array.isArray(v) ? `[${v.map(canonicalJson).join(',')}]`
+  : v && typeof v === 'object' ? `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canonicalJson(v[k])}`).join(',')}}`
+  : JSON.stringify(v);
+const measurement = { rtmrs: { rtmr2: hex(fill(0x23, 48)), mrtd: hex(fill(0x20, 48)), rtmr1: hex(fill(0x22, 48)), rtmr0: hex(fill(0x21, 48)) }, key_provider_event_digest: hex(fill(0x24, 48)), app_compose_hash_payload: hex(fill(0x25)) };
+const measurementVector = { measurement, canonical_json: canonicalJson(measurement), measurement_id: hex(sha256(Buffer.from(canonicalJson(measurement), 'utf8'))) };
+assert(measurementVector.canonical_json.startsWith('{"app_compose_hash_payload":'));
+
 const pub = ({ levels, ...c }) => c;
 const out = {
-  spec: 'spec/claim.md v2',
+  spec: 'spec/claim.md v2.1',
+  measurement: measurementVector,
   keys: { signer_seed: hex(fill(1)), signer, rogue_signer: rogue, registered: [signer] },
   context,
   campaigns: { main: pub(main), single: pub(single) },
