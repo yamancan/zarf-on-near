@@ -745,7 +745,7 @@ impl Contract {
     // ---- views ----
 
     pub fn required_claim_gas(&self) -> U64 {
-        U64(required_claim_gas().as_gas())
+        U64(claim_gas_needed().as_gas())
     }
 
     pub fn get_network(&self) -> String {
@@ -902,7 +902,7 @@ impl Contract {
             fail(E128);
         }
         // 11
-        if env::prepaid_gas().as_gas() < required_claim_gas().as_gas() {
+        if env::prepaid_gas().as_gas() < claim_gas_needed().as_gas() {
             fail(E130);
         }
         CheckedClaim {
@@ -968,7 +968,7 @@ fn push_str(b: &mut Vec<u8>, s: &str) {
 // ---- helpers ----
 
 /// Gas a relayer attaches to `claim`: storage_deposit + ft_transfer + callback + own work.
-pub fn required_claim_gas() -> Gas {
+pub fn claim_gas_needed() -> Gas {
     Gas::from_gas(
         GAS_STORAGE_DEPOSIT.as_gas()
             + GAS_FT_TRANSFER.as_gas()

@@ -396,7 +396,7 @@ fn campaign_reservation_too_low_is_e128() {
 fn low_gas_is_e130_and_view_reports_requirement() {
     let c = seeded();
     let need = c.required_claim_gas().0;
-    assert_eq!(need, required_claim_gas().as_gas());
+    assert_eq!(need, claim_gas_needed().as_gas());
     assert!(need >= (GAS_STORAGE_DEPOSIT.as_gas() + GAS_FT_TRANSFER.as_gas() + GAS_CALLBACK.as_gas()));
     set_ctx(acc("relayer.testnet"), now(), 0, need / 1_000_000_000_000 - 1);
     assert_err(E130, || {
@@ -774,7 +774,7 @@ fn check_order_pairs() {
     camp.balance = a.amount.0 - 1;
     camp.storage_reserved = need - 1;
     // Enough gas to run the checks, too little for the claim (the mock enforces gas).
-    set_ctx(acc("relayer.testnet"), now(), 0, required_claim_gas().as_tgas() - 1);
+    set_ctx(acc("relayer.testnet"), now(), 0, claim_gas_needed().as_tgas() - 1);
     assert_err(E129, || { c.check_claim(&a); });
     c.campaigns.get_mut(&7).unwrap().balance = a.amount.0;
     assert_err(E128, || { c.check_claim(&a); });
