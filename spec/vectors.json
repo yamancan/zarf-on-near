@@ -33,7 +33,7 @@
   "campaigns": {
     "main": {
       "campaign_id": "7",
-      "merkle_root": "ec6f8e7a2ac9e87c373aa954a45f21aaca1b1a668b7100af79930a7010aff24e",
+      "merkle_root": "2f6b58b42e39c7920d482ea11eea63aef3764bfd174b4cd86c61cfa7e44dea94",
       "recipients": [
         {
           "email": "alice@example.com",
@@ -63,9 +63,9 @@
           "email": "dave@example.net",
           "canonical_email": "dave@example.net",
           "salt": "8383838383838383838383838383838383838383838383838383838383838383",
-          "amount": "340282366920938463463374607431768211455",
+          "amount": "340282366920938463463374607431755711412",
           "commitment": "4d1efd71ee7dcaacbdbf0356b7cb109ebf59361bd35f4e68fe6e37ce61fee6ed",
-          "leaf": "b79d203b920fdfc688d119513d9eb35af95f85c1e9d250834138c1414fd18bc0"
+          "leaf": "b50b2c467c7aa106ebc5a984d9790ce7fd35f7fa4344a3a6d89265eba82114e2"
         },
         {
           "email": "alice@example.com",
@@ -103,7 +103,7 @@
           "amount": "10000000",
           "proof": [
             "171eb952aa062b68a13a1be0f531a84764a434e3c95922460cdd972ea5ad2816",
-            "8e7517d945fc6d17588eb49259a731b3b704bb8aca3fffa2236e514deecfa2be",
+            "30d95dc4e35d9151c50a4dbc506ce639d3274b0b9aff66e679c6746236a1a831",
             "720ef3dbecca51ce2beb21fd8319dd3c97d6a806665ed55cc0b6f4f6f0f4377f"
           ],
           "destination": "alice.testnet",
@@ -123,7 +123,7 @@
           "amount": "2500000",
           "proof": [
             "9e539abf0bdd8fa06749611c8b88c57b3120fbe192c84ef48963f3734909dec9",
-            "8e7517d945fc6d17588eb49259a731b3b704bb8aca3fffa2236e514deecfa2be",
+            "30d95dc4e35d9151c50a4dbc506ce639d3274b0b9aff66e679c6746236a1a831",
             "720ef3dbecca51ce2beb21fd8319dd3c97d6a806665ed55cc0b6f4f6f0f4377f"
           ],
           "destination": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -142,7 +142,7 @@
           "commitment": "b9c1cf52f0579f462169a666b87a24e5ea29dd59dd2a42a842f6a5e749091fb1",
           "amount": "42",
           "proof": [
-            "5b03d89bc4501c0884bee7147b610cdf37211baded929649a001e392e387a64a"
+            "0c098e728642fc1f51e9245584c0c8f14df56b1136b318b8aa4fbe80108f1343"
           ],
           "destination": "alice.testnet",
           "expires_at_ns": "1794485400000000000",
@@ -180,7 +180,7 @@
           "amount": "10000000",
           "proof": [
             "171eb952aa062b68a13a1be0f531a84764a434e3c95922460cdd972ea5ad2816",
-            "8e7517d945fc6d17588eb49259a731b3b704bb8aca3fffa2236e514deecfa2be",
+            "30d95dc4e35d9151c50a4dbc506ce639d3274b0b9aff66e679c6746236a1a831",
             "720ef3dbecca51ce2beb21fd8319dd3c97d6a806665ed55cc0b6f4f6f0f4377f"
           ],
           "destination": "alice.testnet",
@@ -201,7 +201,7 @@
           "amount": "10000000",
           "proof": [
             "171eb952aa062b68a13a1be0f531a84764a434e3c95922460cdd972ea5ad2816",
-            "8e7517d945fc6d17588eb49259a731b3b704bb8aca3fffa2236e514deecfa2be",
+            "30d95dc4e35d9151c50a4dbc506ce639d3274b0b9aff66e679c6746236a1a831",
             "720ef3dbecca51ce2beb21fd8319dd3c97d6a806665ed55cc0b6f4f6f0f4377f"
           ],
           "destination": "alice.testnet",
@@ -222,7 +222,7 @@
           "amount": "10000000",
           "proof": [
             "171eb952aa062b68a13a1be0f531a84764a434e3c95922460cdd972ea5ad2816",
-            "8e7517d945fc6d17588eb49259a731b3b704bb8aca3fffa2236e514deecfa2be",
+            "30d95dc4e35d9151c50a4dbc506ce639d3274b0b9aff66e679c6746236a1a831",
             "720ef3dbecca51ce2beb21fd8319dd3c97d6a806665ed55cc0b6f4f6f0f4377f"
           ],
           "destination": "alice.testnet",
@@ -243,7 +243,7 @@
           "amount": "10000000",
           "proof": [
             "171eb952aa062b68a13a1be0f531a84764a434e3c95922460cdd972ea5ad2816",
-            "8e7517d945fc6d17588eb49259a731b3b704bb8aca3fffa2236e514deecfa2be",
+            "30d95dc4e35d9151c50a4dbc506ce639d3274b0b9aff66e679c6746236a1a831",
             "720ef3dbecca51ce2beb21fd8319dd3c97d6a806665ed55cc0b6f4f6f0f4377f"
           ],
           "destination": "alice.testnet",
@@ -264,7 +264,7 @@
           "amount": "10000000",
           "proof": [
             "171eb952aa062b68a13a1be0f531a84764a434e3c95922460cdd972ea5ad2816",
-            "8e7517d945fc6d17588eb49259a731b3b704bb8aca3fffa2236e514deecfa2be",
+            "30d95dc4e35d9151c50a4dbc506ce639d3274b0b9aff66e679c6746236a1a831",
             "720ef3dbecca51ce2beb21fd8319dd3c97d6a806665ed55cc0b6f4f6f0f4377f"
           ],
           "destination": "alice.testnet",
@@ -285,7 +285,7 @@
           "amount": "10000000",
           "proof": [
             "171eb952aa062b68a13a1be0f531a84764a434e3c95922460cdd972ea5ad2816",
-            "8e7517d945fc6d17588eb49259a731b3b704bb8aca3fffa2236e514deecfa2be",
+            "30d95dc4e35d9151c50a4dbc506ce639d3274b0b9aff66e679c6746236a1a831",
             "720ef3dbecca51ce2beb21fd8319dd3c97d6a806665ed55cc0b6f4f6f0f4377f"
           ],
           "destination": "alice.testnet",
@@ -306,7 +306,7 @@
           "amount": "10000000",
           "proof": [
             "171eb952aa062b68a13a1be0f531a84764a434e3c95922460cdd972ea5ad2816",
-            "8e7517d945fc6d17588eb49259a731b3b704bb8aca3fffa2236e514deecfa2be",
+            "30d95dc4e35d9151c50a4dbc506ce639d3274b0b9aff66e679c6746236a1a831",
             "720ef3dbecca51ce2beb21fd8319dd3c97d6a806665ed55cc0b6f4f6f0f4377f"
           ],
           "destination": "alice.testnet",
@@ -327,7 +327,7 @@
           "amount": "10000000",
           "proof": [
             "171eb952aa062b68a13a1be0f531a84764a434e3c95922460cdd972ea5ad2816",
-            "8e7517d945fc6d17588eb49259a731b3b704bb8aca3fffa2236e514deecfa2be",
+            "30d95dc4e35d9151c50a4dbc506ce639d3274b0b9aff66e679c6746236a1a831",
             "720ef3dbecca51ce2beb21fd8319dd3c97d6a806665ed55cc0b6f4f6f0f4377f"
           ],
           "destination": "alice.testnet",
@@ -348,7 +348,7 @@
           "amount": "99",
           "proof": [
             "171eb952aa062b68a13a1be0f531a84764a434e3c95922460cdd972ea5ad2816",
-            "8e7517d945fc6d17588eb49259a731b3b704bb8aca3fffa2236e514deecfa2be",
+            "30d95dc4e35d9151c50a4dbc506ce639d3274b0b9aff66e679c6746236a1a831",
             "720ef3dbecca51ce2beb21fd8319dd3c97d6a806665ed55cc0b6f4f6f0f4377f"
           ],
           "destination": "alice.testnet",
@@ -368,7 +368,7 @@
           "commitment": "695f1878882d70c63509840ca0150e3f3a5c0d965345d792c11347296c612872",
           "amount": "10000000",
           "proof": [
-            "b79d203b920fdfc688d119513d9eb35af95f85c1e9d250834138c1414fd18bc0",
+            "b50b2c467c7aa106ebc5a984d9790ce7fd35f7fa4344a3a6d89265eba82114e2",
             "14b7775f415e71838fafacff1e62a4ddd2c82040de833225a8bcfe7109cffe4e",
             "720ef3dbecca51ce2beb21fd8319dd3c97d6a806665ed55cc0b6f4f6f0f4377f"
           ],
