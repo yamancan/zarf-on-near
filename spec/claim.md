@@ -341,7 +341,17 @@ The create app takes `campaign_id` from `campaign_created`.
 - Emails and salts never appear in it.
 
 **Relayer** (T5). `POST /claim` takes exactly the verifier's 200 body (the contract's `claim`
-args) and returns `{ "tx_hash": "<base58>" }`. It refuses anything else.
+args) and refuses anything else. The transaction's final status can't tell a payout from a
+revert, because `on_claim` returns `()` either way. The relayer therefore decides from the
+NEP-297 events in the receipt logs:
+
+| Events | HTTP | Body |
+| --- | --- | --- |
+| `claim_paid` | 200 | `{ "tx_hash", "status": "paid" }` |
+| `claim_reverted` | 409 | `{ "error": "E115_TOKEN_TRANSFER_FAILED", "tx_hash" }` |
+| neither, or a timeout | 202 | `{ "tx_hash", "status": "submitted" }` |
+
+The claim app polls `claim_state` in every case before it shows "Claimed".
 
 ## Verifier errors (HTTP)
 
