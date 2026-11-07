@@ -272,6 +272,49 @@ The contract logs `EVENT_JSON:{"standard":"zarf-near","version":"1.0.0","event":
 
 The create app takes `campaign_id` from `campaign_created`.
 
+## Off-chain interfaces
+
+**Leaf list** (published by the create app, T7). It is fetched by the claim app from
+`<PUBLIC_LEAVES_URL>/<campaign_id>.json`:
+
+```json
+{ "campaign_id": "<u64>", "merkle_root": "<hex32>",
+  "leaves": [ { "commitment": "<hex32>", "amount": "<u128>" } ] }
+```
+
+- Leaves are in tree order.
+- The claim app recomputes the root and refuses the file if it differs from `get_campaign`.
+- Emails and salts never appear in it.
+
+**Relayer** (T5). `POST /claim` takes exactly the verifier's 200 body (the contract's `claim`
+args) and returns `{ "tx_hash": "<base58>" }`. It refuses anything else.
+
+## Verifier errors (HTTP)
+
+Order: input shape → token → chain views → E110 → E125 → E105/E123 → COMMITMENT_MISMATCH →
+E102 → E101 → E129 → sign. Nothing is signed on any error.
+
+| Code | HTTP | When |
+| --- | --- | --- |
+| `NOT_FOUND` | 404 | any route except `/claim`; any method except POST/OPTIONS |
+| `E108_INVALID_INPUT` | 400 | body not a JSON object; field missing; bad u64/hex32; proof not ≤ 20 lowercase hex32 |
+| `BAD_DESTINATION` | 400 | destination is not a valid AccountId (checked before any token work) |
+| `E109_INVALID_AMOUNT` | 400 | amount 0, not decimal, or ≥ 2^128 |
+| `MALFORMED`, `BAD_ALG`, `UNKNOWN_KID`, `BAD_SIGNATURE`, `BAD_ISSUER`, `BAD_AUDIENCE`, `EXPIRED`, `EMAIL_NOT_VERIFIED`, `NO_EMAIL`, `BAD_EMAIL`, `BAD_NONCE` | 401 | Google id_token checks |
+| `E110_UNKNOWN_CAMPAIGN` | 404 | no such campaign |
+| `E125_CAMPAIGN_ENDED` | 409 | now > deadline_ns |
+| `E105_ALREADY_CLAIMED`, `E123_CLAIM_PENDING` | 409 | from `claim_state` |
+| `COMMITMENT_MISMATCH` | 403 | HMAC(salt, email) ≠ commitment (wrong account or wrong link) |
+| `E102_INVALID_MERKLE_PROOF` | 403 | (commitment, amount) not in the tree |
+| `E101_INVALID_SIGNATURE` | 403 | our signer (or measurement) is not in the campaign snapshot |
+| `E129_INSUFFICIENT_BALANCE` | 409 | balance < amount |
+| `VERIFIER_MISCONFIGURED` | 500 | SIGNER_SEED, CONTRACT_ID or GOOGLE_CLIENT_ID unset |
+| `UPSTREAM_UNAVAILABLE` | 503 | Google JWKS or a chain read failed |
+
+200 returns `{ campaign_id, commitment, amount, proof, destination, expires_at_ns, signer, signature }`.
+In Mode T the verifier must also check its own `get_agent` `valid_until_ns >= expires_at_ns`
+(Owner keys are already bounded by the deadline snapshot).
+
 ## Errors
 
 Panic messages start with a stable code. The numbers reuse Zarf's Stellar vesting codes
