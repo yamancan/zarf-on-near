@@ -970,8 +970,9 @@ fn duplicate_root_is_e132_and_changes_nothing() {
     let mut c = base();
     at(usdc(), now());
     c.ft_on_transfer(sender(), U128(500), create_msg(&root(), deadline(), "owner"));
-    assert_eq!(c.campaign_by_root(root()), Some(U64(0)));
-    assert_eq!(c.campaign_by_root(other_root(1)), None);
+    assert_eq!(c.campaign_by_root(sender(), root()), Some(U64(0)));
+    assert_eq!(c.campaign_by_root(sender(), other_root(1)), None);
+    assert_eq!(c.campaign_by_root(acc("other.testnet"), root()), None);
     let free = c.prepay_balance_of(sender()).0;
     let next = c.next_campaign_id;
     assert_err(E132, || {
@@ -986,5 +987,23 @@ fn duplicate_root_is_e132_and_changes_nothing() {
     });
     assert_err(E132, || {
         c.ft_on_transfer(sender(), U128(1), create_msg(&root(), now(), "owner"));
+    });
+}
+
+#[test]
+fn another_sender_may_use_the_same_root() {
+    // Reviewer M1: a global key would let anyone front-run and occupy a sender's root.
+    let mut c = base();
+    let other = acc("other.testnet");
+    set_ctx(other.clone(), now(), 10u128.pow(24), 300);
+    c.prepay_deposit(None);
+    at(usdc(), now());
+    c.ft_on_transfer(other.clone(), U128(1), create_msg(&root(), deadline(), "owner"));
+    c.ft_on_transfer(sender(), U128(1), create_msg(&root(), deadline(), "owner"));
+    assert_eq!(c.campaign_by_root(other.clone(), root()), Some(U64(0)));
+    assert_eq!(c.campaign_by_root(sender(), root()), Some(U64(1)));
+    assert_eq!(c.get_campaign(U64(1)).unwrap().sender, sender());
+    assert_err(E132, || {
+        c.ft_on_transfer(other.clone(), U128(1), create_msg(&root(), deadline(), "owner"));
     });
 }
