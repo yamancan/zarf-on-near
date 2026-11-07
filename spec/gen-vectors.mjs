@@ -76,7 +76,7 @@ const main = campaign(7, [
   { email: 'alice@example.com', amount: '10000000' },
   { email: '  Bob.Smith@Gmail.com\r\n', amount: '2500000' },
   { email: 'carol+tag@example.org', amount: '1' },
-  { email: 'dave@example.net', amount: '340282366920938463463374607431768211455' }, // u128::MAX encoding
+  { email: 'dave@example.net', amount: '340282366920938463463374607431755711412' }, // u128::MAX − sum(others): high bytes set, campaign total is exactly u128::MAX
   { email: 'alice@example.com', amount: '42' }, // duplicate email, own salt; 5 leaves exercise the odd tail
 ]);
 const single = campaign(8, [{ email: 'solo@example.com', amount: '5000000' }]);
@@ -139,6 +139,7 @@ const sigOk = (c) => c.call_args.signer === signer
   && crypto.verify(null, Buffer.from(c.payload, 'hex'), edPub(Buffer.from(signer, 'hex')), Buffer.from(c.call_args.signature, 'hex'));
 const treeOk = (c) => verifyProof(leafHash(Buffer.from(c.call_args.commitment, 'hex'), c.call_args.amount), c.call_args.proof.map((h) => Buffer.from(h, 'hex')), roots[c.campaign]);
 assert.equal(main.recipients.length, 5);
+assert.equal(main.recipients.reduce((t, r) => t + BigInt(r.amount), 0n), (1n << 128n) - 1n); // creatable in one ft_transfer_call
 assert.equal(main.recipients[1].canonical_email, 'bob.smith@gmail.com');
 assert.notEqual(main.recipients[0].commitment, main.recipients[4].commitment);
 assert.equal(single.merkle_root, single.recipients[0].leaf);
