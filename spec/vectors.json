@@ -1,244 +1,378 @@
 {
-  "spec": "spec/claim.md v1",
+  "spec": "spec/claim.md v2",
   "keys": {
-    "verifier_seed": "0101010101010101010101010101010101010101010101010101010101010101",
-    "verifier_pubkey": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
-    "seal_seed": "0202020202020202020202020202020202020202020202020202020202020202",
-    "seal_pubkey": "ce8d3ad1ccb633ec7b70c17814a5c76ecd029685050d344745ba05870e587d59",
-    "rogue_pubkey": "fd1724385aa0c75b64fb78cd602fa1d991fdebf76b13c58ed702eac835e9f618"
-  },
-  "campaign": {
-    "salt": "0505050505050505050505050505050505050505050505050505050505050505",
-    "merkle_root": "6bd750cf149ebae62bb10bfaebd562ffe89f8af3902bd85fbb3d5ff1fd688955",
-    "seal_eph_seed": "0303030303030303030303030303030303030303030303030303030303030303",
-    "seal_iv": "040404040404040404040404",
-    "sealed_salt": "5dfedd3b6bd47f6fa28ee15d969d5bb0ea53774d488bdaf9df1c6e0124b3ef220404040404040404040404040a197ba43cf898d92371c4cd1a48a6a9ca4b1fd9ddf13bf2b3cb700a1e2fa59587c9123bb401daa0a246cc4d9a9610d8",
-    "recipients": [
-      {
-        "email": "alice@example.com",
-        "canonical_email": "alice@example.com",
-        "amount": "10000000",
-        "commitment": "fed2d45ef31a86d23b4f9cdc05594b1ffdaf46f568db8ae69b03fe19679153b6",
-        "leaf": "5ca14b5045a7be7b6d712bf24b7d1eac5d3955524c95f9792d5526191e82a699"
-      },
-      {
-        "email": "  Bob.Smith@Gmail.com ",
-        "canonical_email": "bob.smith@gmail.com",
-        "amount": "2500000",
-        "commitment": "8626a9295c6eb106d420d63278ee0ebfbcba3496867bf54861e3fc821cf6e2f9",
-        "leaf": "9c224fe89ee3a3c22f198214739fe40299a3816a8fabef181b44a0ce4409f668"
-      },
-      {
-        "email": "carol+tag@example.org",
-        "canonical_email": "carol+tag@example.org",
-        "amount": "1",
-        "commitment": "e83eb55d0f0299ba57b4c46cda18663803cf85eaa67580648e2967c558ef5887",
-        "leaf": "0f0b49c4a2324a4655bd7f10d7df93ef4848ba2d9f14db61847af0b9ffc38aad"
-      },
-      {
-        "email": "dave@example.net",
-        "canonical_email": "dave@example.net",
-        "amount": "340282366920938463463374607431768211455",
-        "commitment": "97ac3798233a42ddaa53bb71f16323896efb90ed65366c0c8854a9e3672bdcd2",
-        "leaf": "1539e9772baaae51950190411e481c465935b9c9163783eaad0e52f39e512b80"
-      },
-      {
-        "email": "erin@example.com",
-        "canonical_email": "erin@example.com",
-        "amount": "42",
-        "commitment": "17d1d37ff781e91122833347872111a70113b341412d8862e922b56db14cf51b",
-        "leaf": "d2befc8eac5d2d16c411d5ca89a325b4308d0aa0a1cd25f365984820f12effb9"
-      }
+    "signer_seed": "0101010101010101010101010101010101010101010101010101010101010101",
+    "signer": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+    "rogue_signer": "fd1724385aa0c75b64fb78cd602fa1d991fdebf76b13c58ed702eac835e9f618",
+    "registered": [
+      "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c"
     ]
   },
-  "claims": {
-    "context": {
-      "network": "testnet",
-      "contract_id": "zarf-near.testnet",
+  "context": {
+    "network": "testnet",
+    "contract_id": "zarf-near.testnet",
+    "now_ns": "1794484800000000000",
+    "min_lifetime_ns": "600000000000",
+    "deadline_ns": "1794488400000000000",
+    "expires_at_ns": "1794485400000000000"
+  },
+  "campaigns": {
+    "main": {
       "campaign_id": "7",
-      "expires_at_ns": "1763150400000000000"
+      "merkle_root": "ec6f8e7a2ac9e87c373aa954a45f21aaca1b1a668b7100af79930a7010aff24e",
+      "recipients": [
+        {
+          "email": "alice@example.com",
+          "canonical_email": "alice@example.com",
+          "salt": "8080808080808080808080808080808080808080808080808080808080808080",
+          "amount": "10000000",
+          "commitment": "695f1878882d70c63509840ca0150e3f3a5c0d965345d792c11347296c612872",
+          "leaf": "9e539abf0bdd8fa06749611c8b88c57b3120fbe192c84ef48963f3734909dec9"
+        },
+        {
+          "email": "  Bob.Smith@Gmail.com\r\n",
+          "canonical_email": "bob.smith@gmail.com",
+          "salt": "8181818181818181818181818181818181818181818181818181818181818181",
+          "amount": "2500000",
+          "commitment": "bbdec160cfb48cb2a7a1c8df2769a2255e21b6aba30cf0e41bd2cad0ed940e58",
+          "leaf": "171eb952aa062b68a13a1be0f531a84764a434e3c95922460cdd972ea5ad2816"
+        },
+        {
+          "email": "carol+tag@example.org",
+          "canonical_email": "carol+tag@example.org",
+          "salt": "8282828282828282828282828282828282828282828282828282828282828282",
+          "amount": "1",
+          "commitment": "e662ca443ac5cf44914fb90ae08be6d529fb385837277cf0bef40aa66d5c8713",
+          "leaf": "75aa3dbcc2ad41a85bccd43c09d1f2dda61d59b14d25717ae62302ad170899e3"
+        },
+        {
+          "email": "dave@example.net",
+          "canonical_email": "dave@example.net",
+          "salt": "8383838383838383838383838383838383838383838383838383838383838383",
+          "amount": "340282366920938463463374607431768211455",
+          "commitment": "4d1efd71ee7dcaacbdbf0356b7cb109ebf59361bd35f4e68fe6e37ce61fee6ed",
+          "leaf": "b79d203b920fdfc688d119513d9eb35af95f85c1e9d250834138c1414fd18bc0"
+        },
+        {
+          "email": "alice@example.com",
+          "canonical_email": "alice@example.com",
+          "salt": "8484848484848484848484848484848484848484848484848484848484848484",
+          "amount": "42",
+          "commitment": "b9c1cf52f0579f462169a666b87a24e5ea29dd59dd2a42a842f6a5e749091fb1",
+          "leaf": "720ef3dbecca51ce2beb21fd8319dd3c97d6a806665ed55cc0b6f4f6f0f4377f"
+        }
+      ]
     },
+    "single": {
+      "campaign_id": "8",
+      "merkle_root": "2ecf6849e839e867d3914717f43e39dceaa566c287c319291f231a33265452e1",
+      "recipients": [
+        {
+          "email": "solo@example.com",
+          "canonical_email": "solo@example.com",
+          "salt": "9090909090909090909090909090909090909090909090909090909090909090",
+          "amount": "5000000",
+          "commitment": "bc2c03033b7958ccf4f02f171bc988c5780c4534a4818f263e43bb61b02d9925",
+          "leaf": "2ecf6849e839e867d3914717f43e39dceaa566c287c319291f231a33265452e1"
+        }
+      ]
+    }
+  },
+  "claims": {
     "valid": [
       {
         "name": "named-account",
-        "args": {
-          "network": "testnet",
-          "contract_id": "zarf-near.testnet",
+        "campaign": "main",
+        "call_args": {
           "campaign_id": "7",
-          "expires_at_ns": "1763150400000000000",
-          "commitment": "fed2d45ef31a86d23b4f9cdc05594b1ffdaf46f568db8ae69b03fe19679153b6",
+          "commitment": "695f1878882d70c63509840ca0150e3f3a5c0d965345d792c11347296c612872",
           "amount": "10000000",
-          "destination": "alice.testnet"
+          "proof": [
+            "171eb952aa062b68a13a1be0f531a84764a434e3c95922460cdd972ea5ad2816",
+            "8e7517d945fc6d17588eb49259a731b3b704bb8aca3fffa2236e514deecfa2be",
+            "720ef3dbecca51ce2beb21fd8319dd3c97d6a806665ed55cc0b6f4f6f0f4377f"
+          ],
+          "destination": "alice.testnet",
+          "expires_at_ns": "1794485400000000000",
+          "signer": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "signature": "f3bab4581536ff0fbedd3750908e93cd8c628ff85c379adeb73d2cd4b228a6793c8d9ff2a51fe1c5bb63460119572f46f6f09edbca4ff677c83fed2ce9830d07"
         },
-        "payload": "5a4152462d4e4541522d434c41494d2d563107746573746e6574117a6172662d6e6561722e746573746e65740700000000000000fed2d45ef31a86d23b4f9cdc05594b1ffdaf46f568db8ae69b03fe19679153b6809698000000000000000000000000000d616c6963652e746573746e65740080967df2f77718",
-        "signature": "a2f15d50f31c471ab0af644e10456d567626ecf39d5bacd8f0ac7f528ef15ddef79cab7068e175b23913f41249f75111052ecaf12ac045ce331a3da3434ec905",
-        "proof": [
-          "9c224fe89ee3a3c22f198214739fe40299a3816a8fabef181b44a0ce4409f668",
-          "191fcad83de5622baf3f3c597c3f28d5ca5c40a268526fe9d7391cc4e6b587b6",
-          "d2befc8eac5d2d16c411d5ca89a325b4308d0aa0a1cd25f365984820f12effb9"
-        ],
+        "payload": "5a4152462d4e4541522d434c41494d2d563107746573746e6574117a6172662d6e6561722e746573746e65740700000000000000695f1878882d70c63509840ca0150e3f3a5c0d965345d792c11347296c612872809698000000000000000000000000000d616c6963652e746573746e657400f09fb5f64ae718",
         "nonce": "9a7068ee6434852cdaff3acb2f7d0f002fdad589c8e388b299e8a48a831ca3e4"
       },
       {
         "name": "implicit-account",
-        "args": {
-          "network": "testnet",
-          "contract_id": "zarf-near.testnet",
+        "campaign": "main",
+        "call_args": {
           "campaign_id": "7",
-          "expires_at_ns": "1763150400000000000",
-          "commitment": "8626a9295c6eb106d420d63278ee0ebfbcba3496867bf54861e3fc821cf6e2f9",
+          "commitment": "bbdec160cfb48cb2a7a1c8df2769a2255e21b6aba30cf0e41bd2cad0ed940e58",
           "amount": "2500000",
-          "destination": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          "proof": [
+            "9e539abf0bdd8fa06749611c8b88c57b3120fbe192c84ef48963f3734909dec9",
+            "8e7517d945fc6d17588eb49259a731b3b704bb8aca3fffa2236e514deecfa2be",
+            "720ef3dbecca51ce2beb21fd8319dd3c97d6a806665ed55cc0b6f4f6f0f4377f"
+          ],
+          "destination": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "expires_at_ns": "1794485400000000000",
+          "signer": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "signature": "7d44408c61a44d23e92f2a02267f2373c4203d19984bc9e1ab2c937cebda0f1cfcc3f8883939dfece8fb5e7da259c9b9a08de0b1ccba378401f5ca8d80510406"
         },
-        "payload": "5a4152462d4e4541522d434c41494d2d563107746573746e6574117a6172662d6e6561722e746573746e657407000000000000008626a9295c6eb106d420d63278ee0ebfbcba3496867bf54861e3fc821cf6e2f9a025260000000000000000000000000040616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161610080967df2f77718",
-        "signature": "50f12a36d14ee7f92882ecc89da03c1af14b289782a6eb543d35e0ed70757edd1c9cb213b48c75f025e0b01a38ffbbb45f1f5f6a42a172914fffb709b3ed400d",
-        "proof": [
-          "5ca14b5045a7be7b6d712bf24b7d1eac5d3955524c95f9792d5526191e82a699",
-          "191fcad83de5622baf3f3c597c3f28d5ca5c40a268526fe9d7391cc4e6b587b6",
-          "d2befc8eac5d2d16c411d5ca89a325b4308d0aa0a1cd25f365984820f12effb9"
-        ],
+        "payload": "5a4152462d4e4541522d434c41494d2d563107746573746e6574117a6172662d6e6561722e746573746e65740700000000000000bbdec160cfb48cb2a7a1c8df2769a2255e21b6aba30cf0e41bd2cad0ed940e58a0252600000000000000000000000000406161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616100f09fb5f64ae718",
         "nonce": "ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb"
       },
       {
         "name": "carried-up-tail",
-        "args": {
-          "network": "testnet",
-          "contract_id": "zarf-near.testnet",
+        "campaign": "main",
+        "call_args": {
           "campaign_id": "7",
-          "expires_at_ns": "1763150400000000000",
-          "commitment": "17d1d37ff781e91122833347872111a70113b341412d8862e922b56db14cf51b",
+          "commitment": "b9c1cf52f0579f462169a666b87a24e5ea29dd59dd2a42a842f6a5e749091fb1",
           "amount": "42",
-          "destination": "erin.testnet"
+          "proof": [
+            "5b03d89bc4501c0884bee7147b610cdf37211baded929649a001e392e387a64a"
+          ],
+          "destination": "alice.testnet",
+          "expires_at_ns": "1794485400000000000",
+          "signer": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "signature": "eaaede3c5d227e5222b5fd05f77d97d026bb8b7f6a6fe059fe701d902685e761da575dbfdf7cc25ac527c3556f2e4a9d2c3bae49ec030edf979f60ba456bc10d"
         },
-        "payload": "5a4152462d4e4541522d434c41494d2d563107746573746e6574117a6172662d6e6561722e746573746e6574070000000000000017d1d37ff781e91122833347872111a70113b341412d8862e922b56db14cf51b2a0000000000000000000000000000000c6572696e2e746573746e65740080967df2f77718",
-        "signature": "302acb6c5f128926f4f3576ad669a04ab7cd93087def39c1822bc5c418b9b43f9e7b701d838704bc17cc9d0ce86276b7da1a2b71a04febd450927e6630a27003",
-        "proof": [
-          "8a2a5013aa1453449c87967fd034aa8d157b9814dbd19006b1a1c291e7d732f1"
-        ],
-        "nonce": "007ee489e3ea7418bb29335c9317c6abc837fe378d00f82ecdca7b22392cfad4"
+        "payload": "5a4152462d4e4541522d434c41494d2d563107746573746e6574117a6172662d6e6561722e746573746e65740700000000000000b9c1cf52f0579f462169a666b87a24e5ea29dd59dd2a42a842f6a5e749091fb12a0000000000000000000000000000000d616c6963652e746573746e657400f09fb5f64ae718",
+        "nonce": "9a7068ee6434852cdaff3acb2f7d0f002fdad589c8e388b299e8a48a831ca3e4"
+      },
+      {
+        "name": "single-leaf-empty-proof",
+        "campaign": "single",
+        "call_args": {
+          "campaign_id": "8",
+          "commitment": "bc2c03033b7958ccf4f02f171bc988c5780c4534a4818f263e43bb61b02d9925",
+          "amount": "5000000",
+          "proof": [],
+          "destination": "solo.testnet",
+          "expires_at_ns": "1794485400000000000",
+          "signer": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "signature": "207947652cbb67f37ce4b60447447bc2443f728ba52e9f75b23fb69800f18668fd3eb4c3310705d029731b11814e86859e318f9d75ca6268bae1402d2783d60c"
+        },
+        "payload": "5a4152462d4e4541522d434c41494d2d563107746573746e6574117a6172662d6e6561722e746573746e65740800000000000000bc2c03033b7958ccf4f02f171bc988c5780c4534a4818f263e43bb61b02d9925404b4c000000000000000000000000000c736f6c6f2e746573746e657400f09fb5f64ae718",
+        "nonce": "aac71786a2af3eb07524f6ba98e9b9bea0a2ce05e7f729414e2f1fb5b5cdec68"
       }
     ],
     "invalid": [
       {
         "name": "amount-differs-from-signed",
+        "campaign": "main",
         "expect": "E101_INVALID_SIGNATURE",
-        "args": {
-          "network": "testnet",
-          "contract_id": "zarf-near.testnet",
+        "call_args": {
           "campaign_id": "7",
-          "expires_at_ns": "1763150400000000000",
-          "commitment": "fed2d45ef31a86d23b4f9cdc05594b1ffdaf46f568db8ae69b03fe19679153b6",
+          "commitment": "695f1878882d70c63509840ca0150e3f3a5c0d965345d792c11347296c612872",
           "amount": "10000000",
-          "destination": "alice.testnet"
+          "proof": [
+            "171eb952aa062b68a13a1be0f531a84764a434e3c95922460cdd972ea5ad2816",
+            "8e7517d945fc6d17588eb49259a731b3b704bb8aca3fffa2236e514deecfa2be",
+            "720ef3dbecca51ce2beb21fd8319dd3c97d6a806665ed55cc0b6f4f6f0f4377f"
+          ],
+          "destination": "alice.testnet",
+          "expires_at_ns": "1794485400000000000",
+          "signer": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "signature": "7c607c670c4ef1afb34f2b84073410e245162ac8ba371e9b3f12c979427aa98130d6f857b835a252391f1fdfeb047df45c2825c9050b8d7be0d62836f457be03"
         },
-        "payload": "5a4152462d4e4541522d434c41494d2d563107746573746e6574117a6172662d6e6561722e746573746e65740700000000000000fed2d45ef31a86d23b4f9cdc05594b1ffdaf46f568db8ae69b03fe19679153b6809698000000000000000000000000000d616c6963652e746573746e65740080967df2f77718",
-        "signature": "498f77a81033d2c0082ee5ef886c5984e49713867de7166bd0627ed133a8aecb475c76ca106bc2b69c4608da56a6266a7589651b7815537399a9720d699d8a0c",
-        "proof": [
-          "9c224fe89ee3a3c22f198214739fe40299a3816a8fabef181b44a0ce4409f668",
-          "191fcad83de5622baf3f3c597c3f28d5ca5c40a268526fe9d7391cc4e6b587b6",
-          "d2befc8eac5d2d16c411d5ca89a325b4308d0aa0a1cd25f365984820f12effb9"
-        ]
+        "payload": "5a4152462d4e4541522d434c41494d2d563107746573746e6574117a6172662d6e6561722e746573746e65740700000000000000695f1878882d70c63509840ca0150e3f3a5c0d965345d792c11347296c612872809698000000000000000000000000000d616c6963652e746573746e657400f09fb5f64ae718",
+        "nonce": "9a7068ee6434852cdaff3acb2f7d0f002fdad589c8e388b299e8a48a831ca3e4"
+      },
+      {
+        "name": "destination-differs-from-signed",
+        "campaign": "main",
+        "expect": "E101_INVALID_SIGNATURE",
+        "call_args": {
+          "campaign_id": "7",
+          "commitment": "695f1878882d70c63509840ca0150e3f3a5c0d965345d792c11347296c612872",
+          "amount": "10000000",
+          "proof": [
+            "171eb952aa062b68a13a1be0f531a84764a434e3c95922460cdd972ea5ad2816",
+            "8e7517d945fc6d17588eb49259a731b3b704bb8aca3fffa2236e514deecfa2be",
+            "720ef3dbecca51ce2beb21fd8319dd3c97d6a806665ed55cc0b6f4f6f0f4377f"
+          ],
+          "destination": "alice.testnet",
+          "expires_at_ns": "1794485400000000000",
+          "signer": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "signature": "0ca8c0b1a60823e95e5f4ac98fd40282dee284bd456e1059957e2929e739ad1473d532a68f4192d3b590e686dd887cdd604098913149be296e52573505936b04"
+        },
+        "payload": "5a4152462d4e4541522d434c41494d2d563107746573746e6574117a6172662d6e6561722e746573746e65740700000000000000695f1878882d70c63509840ca0150e3f3a5c0d965345d792c11347296c612872809698000000000000000000000000000d616c6963652e746573746e657400f09fb5f64ae718",
+        "nonce": "9a7068ee6434852cdaff3acb2f7d0f002fdad589c8e388b299e8a48a831ca3e4"
+      },
+      {
+        "name": "campaign-differs-from-signed",
+        "campaign": "main",
+        "expect": "E101_INVALID_SIGNATURE",
+        "call_args": {
+          "campaign_id": "7",
+          "commitment": "695f1878882d70c63509840ca0150e3f3a5c0d965345d792c11347296c612872",
+          "amount": "10000000",
+          "proof": [
+            "171eb952aa062b68a13a1be0f531a84764a434e3c95922460cdd972ea5ad2816",
+            "8e7517d945fc6d17588eb49259a731b3b704bb8aca3fffa2236e514deecfa2be",
+            "720ef3dbecca51ce2beb21fd8319dd3c97d6a806665ed55cc0b6f4f6f0f4377f"
+          ],
+          "destination": "alice.testnet",
+          "expires_at_ns": "1794485400000000000",
+          "signer": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "signature": "ac8eccb645a7e2123f6ea14355ce99aa734a14747e6af0156047eea0e12c39fd92e750f76e867f6a12f6a4efcdae1418af18289702a6bcdc41d4949cea6ffe06"
+        },
+        "payload": "5a4152462d4e4541522d434c41494d2d563107746573746e6574117a6172662d6e6561722e746573746e65740700000000000000695f1878882d70c63509840ca0150e3f3a5c0d965345d792c11347296c612872809698000000000000000000000000000d616c6963652e746573746e657400f09fb5f64ae718",
+        "nonce": "9a7068ee6434852cdaff3acb2f7d0f002fdad589c8e388b299e8a48a831ca3e4"
+      },
+      {
+        "name": "expiry-differs-from-signed",
+        "campaign": "main",
+        "expect": "E101_INVALID_SIGNATURE",
+        "call_args": {
+          "campaign_id": "7",
+          "commitment": "695f1878882d70c63509840ca0150e3f3a5c0d965345d792c11347296c612872",
+          "amount": "10000000",
+          "proof": [
+            "171eb952aa062b68a13a1be0f531a84764a434e3c95922460cdd972ea5ad2816",
+            "8e7517d945fc6d17588eb49259a731b3b704bb8aca3fffa2236e514deecfa2be",
+            "720ef3dbecca51ce2beb21fd8319dd3c97d6a806665ed55cc0b6f4f6f0f4377f"
+          ],
+          "destination": "alice.testnet",
+          "expires_at_ns": "1794485400000000000",
+          "signer": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "signature": "f3293b49bf317a8555a5351bab9e38a7874ad480f93c7284c7cc37094a3dd9444d92ccdcb200afee8e50ead12a684f12707e9c58ff8defa9dd68e3455444c009"
+        },
+        "payload": "5a4152462d4e4541522d434c41494d2d563107746573746e6574117a6172662d6e6561722e746573746e65740700000000000000695f1878882d70c63509840ca0150e3f3a5c0d965345d792c11347296c612872809698000000000000000000000000000d616c6963652e746573746e657400f09fb5f64ae718",
+        "nonce": "9a7068ee6434852cdaff3acb2f7d0f002fdad589c8e388b299e8a48a831ca3e4"
       },
       {
         "name": "signed-for-other-contract",
+        "campaign": "main",
         "expect": "E101_INVALID_SIGNATURE",
-        "args": {
-          "network": "testnet",
-          "contract_id": "zarf-near.testnet",
+        "call_args": {
           "campaign_id": "7",
-          "expires_at_ns": "1763150400000000000",
-          "commitment": "fed2d45ef31a86d23b4f9cdc05594b1ffdaf46f568db8ae69b03fe19679153b6",
+          "commitment": "695f1878882d70c63509840ca0150e3f3a5c0d965345d792c11347296c612872",
           "amount": "10000000",
-          "destination": "alice.testnet"
+          "proof": [
+            "171eb952aa062b68a13a1be0f531a84764a434e3c95922460cdd972ea5ad2816",
+            "8e7517d945fc6d17588eb49259a731b3b704bb8aca3fffa2236e514deecfa2be",
+            "720ef3dbecca51ce2beb21fd8319dd3c97d6a806665ed55cc0b6f4f6f0f4377f"
+          ],
+          "destination": "alice.testnet",
+          "expires_at_ns": "1794485400000000000",
+          "signer": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "signature": "75a273df9b132c813660ad93fea4da5b1d94a71566bc11b7b4b25f816f2f24ba8f2f2de2d93400f84ea72178039f59189836f23d2a0d897f25938e7e62800a0e"
         },
-        "payload": "5a4152462d4e4541522d434c41494d2d563107746573746e6574117a6172662d6e6561722e746573746e65740700000000000000fed2d45ef31a86d23b4f9cdc05594b1ffdaf46f568db8ae69b03fe19679153b6809698000000000000000000000000000d616c6963652e746573746e65740080967df2f77718",
-        "signature": "18b366759252d16d79fc560fe1441f12f45bc7cae20b7d40bd964ffe7bde42467b0df52da969eaac0e15b5d4c821169db713e6b72b62e30e6583ca67aa420d00",
-        "proof": [
-          "9c224fe89ee3a3c22f198214739fe40299a3816a8fabef181b44a0ce4409f668",
-          "191fcad83de5622baf3f3c597c3f28d5ca5c40a268526fe9d7391cc4e6b587b6",
-          "d2befc8eac5d2d16c411d5ca89a325b4308d0aa0a1cd25f365984820f12effb9"
-        ]
+        "payload": "5a4152462d4e4541522d434c41494d2d563107746573746e6574117a6172662d6e6561722e746573746e65740700000000000000695f1878882d70c63509840ca0150e3f3a5c0d965345d792c11347296c612872809698000000000000000000000000000d616c6963652e746573746e657400f09fb5f64ae718",
+        "nonce": "9a7068ee6434852cdaff3acb2f7d0f002fdad589c8e388b299e8a48a831ca3e4"
       },
       {
         "name": "signed-for-mainnet",
+        "campaign": "main",
         "expect": "E101_INVALID_SIGNATURE",
-        "args": {
-          "network": "testnet",
-          "contract_id": "zarf-near.testnet",
+        "call_args": {
           "campaign_id": "7",
-          "expires_at_ns": "1763150400000000000",
-          "commitment": "fed2d45ef31a86d23b4f9cdc05594b1ffdaf46f568db8ae69b03fe19679153b6",
+          "commitment": "695f1878882d70c63509840ca0150e3f3a5c0d965345d792c11347296c612872",
           "amount": "10000000",
-          "destination": "alice.testnet"
+          "proof": [
+            "171eb952aa062b68a13a1be0f531a84764a434e3c95922460cdd972ea5ad2816",
+            "8e7517d945fc6d17588eb49259a731b3b704bb8aca3fffa2236e514deecfa2be",
+            "720ef3dbecca51ce2beb21fd8319dd3c97d6a806665ed55cc0b6f4f6f0f4377f"
+          ],
+          "destination": "alice.testnet",
+          "expires_at_ns": "1794485400000000000",
+          "signer": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "signature": "8cd7b254ed0810a6732a91bfe1aefc006c32d0ceb322bf63b5fcd3a2255137dfd9e8d0be304f53eaeab94e28c3f040302ef17a1b5105b3563e9fcc3320c07f01"
         },
-        "payload": "5a4152462d4e4541522d434c41494d2d563107746573746e6574117a6172662d6e6561722e746573746e65740700000000000000fed2d45ef31a86d23b4f9cdc05594b1ffdaf46f568db8ae69b03fe19679153b6809698000000000000000000000000000d616c6963652e746573746e65740080967df2f77718",
-        "signature": "78c8d285299b5e3b9382d52f4d051d33f626783876bfa93a0050d45137639493455ade0a0a6cf8fed3f0cb0e94c3f435cc10d375f7f6331f6821ac4878c10a03",
-        "proof": [
-          "9c224fe89ee3a3c22f198214739fe40299a3816a8fabef181b44a0ce4409f668",
-          "191fcad83de5622baf3f3c597c3f28d5ca5c40a268526fe9d7391cc4e6b587b6",
-          "d2befc8eac5d2d16c411d5ca89a325b4308d0aa0a1cd25f365984820f12effb9"
-        ]
+        "payload": "5a4152462d4e4541522d434c41494d2d563107746573746e6574117a6172662d6e6561722e746573746e65740700000000000000695f1878882d70c63509840ca0150e3f3a5c0d965345d792c11347296c612872809698000000000000000000000000000d616c6963652e746573746e657400f09fb5f64ae718",
+        "nonce": "9a7068ee6434852cdaff3acb2f7d0f002fdad589c8e388b299e8a48a831ca3e4"
       },
       {
-        "name": "rogue-verifier-key",
+        "name": "signer-not-registered",
+        "campaign": "main",
         "expect": "E101_INVALID_SIGNATURE",
-        "args": {
-          "network": "testnet",
-          "contract_id": "zarf-near.testnet",
+        "call_args": {
           "campaign_id": "7",
-          "expires_at_ns": "1763150400000000000",
-          "commitment": "fed2d45ef31a86d23b4f9cdc05594b1ffdaf46f568db8ae69b03fe19679153b6",
+          "commitment": "695f1878882d70c63509840ca0150e3f3a5c0d965345d792c11347296c612872",
           "amount": "10000000",
-          "destination": "alice.testnet"
+          "proof": [
+            "171eb952aa062b68a13a1be0f531a84764a434e3c95922460cdd972ea5ad2816",
+            "8e7517d945fc6d17588eb49259a731b3b704bb8aca3fffa2236e514deecfa2be",
+            "720ef3dbecca51ce2beb21fd8319dd3c97d6a806665ed55cc0b6f4f6f0f4377f"
+          ],
+          "destination": "alice.testnet",
+          "expires_at_ns": "1794485400000000000",
+          "signer": "fd1724385aa0c75b64fb78cd602fa1d991fdebf76b13c58ed702eac835e9f618",
+          "signature": "f9273b7da7b95b8792a45f6b7f49808c1c6fca616f9baf7fdc5c6ca188c8bacd7ddc54cee0321ebe99b0f23e284aa25d344f9212a2cfb27bc71aa46d80e4b703"
         },
-        "payload": "5a4152462d4e4541522d434c41494d2d563107746573746e6574117a6172662d6e6561722e746573746e65740700000000000000fed2d45ef31a86d23b4f9cdc05594b1ffdaf46f568db8ae69b03fe19679153b6809698000000000000000000000000000d616c6963652e746573746e65740080967df2f77718",
-        "signature": "b8c90db6ec366267a6fb8a9acd4a63bb5203b8fecffbc2eeffd803ee41d698dff157038c32cfbdedbeeb4fd1bb5a6e43ccb8de3cf102553f43807730c2ceb70f",
-        "proof": [
-          "9c224fe89ee3a3c22f198214739fe40299a3816a8fabef181b44a0ce4409f668",
-          "191fcad83de5622baf3f3c597c3f28d5ca5c40a268526fe9d7391cc4e6b587b6",
-          "d2befc8eac5d2d16c411d5ca89a325b4308d0aa0a1cd25f365984820f12effb9"
-        ]
+        "payload": "5a4152462d4e4541522d434c41494d2d563107746573746e6574117a6172662d6e6561722e746573746e65740700000000000000695f1878882d70c63509840ca0150e3f3a5c0d965345d792c11347296c612872809698000000000000000000000000000d616c6963652e746573746e657400f09fb5f64ae718",
+        "nonce": "9a7068ee6434852cdaff3acb2f7d0f002fdad589c8e388b299e8a48a831ca3e4"
+      },
+      {
+        "name": "signer-field-swapped",
+        "campaign": "main",
+        "expect": "E101_INVALID_SIGNATURE",
+        "call_args": {
+          "campaign_id": "7",
+          "commitment": "695f1878882d70c63509840ca0150e3f3a5c0d965345d792c11347296c612872",
+          "amount": "10000000",
+          "proof": [
+            "171eb952aa062b68a13a1be0f531a84764a434e3c95922460cdd972ea5ad2816",
+            "8e7517d945fc6d17588eb49259a731b3b704bb8aca3fffa2236e514deecfa2be",
+            "720ef3dbecca51ce2beb21fd8319dd3c97d6a806665ed55cc0b6f4f6f0f4377f"
+          ],
+          "destination": "alice.testnet",
+          "expires_at_ns": "1794485400000000000",
+          "signer": "fd1724385aa0c75b64fb78cd602fa1d991fdebf76b13c58ed702eac835e9f618",
+          "signature": "f3bab4581536ff0fbedd3750908e93cd8c628ff85c379adeb73d2cd4b228a6793c8d9ff2a51fe1c5bb63460119572f46f6f09edbca4ff677c83fed2ce9830d07"
+        },
+        "payload": "5a4152462d4e4541522d434c41494d2d563107746573746e6574117a6172662d6e6561722e746573746e65740700000000000000695f1878882d70c63509840ca0150e3f3a5c0d965345d792c11347296c612872809698000000000000000000000000000d616c6963652e746573746e657400f09fb5f64ae718",
+        "nonce": "9a7068ee6434852cdaff3acb2f7d0f002fdad589c8e388b299e8a48a831ca3e4"
       },
       {
         "name": "amount-not-in-tree",
+        "campaign": "main",
         "expect": "E102_INVALID_MERKLE_PROOF",
-        "args": {
-          "network": "testnet",
-          "contract_id": "zarf-near.testnet",
+        "call_args": {
           "campaign_id": "7",
-          "expires_at_ns": "1763150400000000000",
-          "commitment": "fed2d45ef31a86d23b4f9cdc05594b1ffdaf46f568db8ae69b03fe19679153b6",
+          "commitment": "695f1878882d70c63509840ca0150e3f3a5c0d965345d792c11347296c612872",
           "amount": "99",
-          "destination": "alice.testnet"
+          "proof": [
+            "171eb952aa062b68a13a1be0f531a84764a434e3c95922460cdd972ea5ad2816",
+            "8e7517d945fc6d17588eb49259a731b3b704bb8aca3fffa2236e514deecfa2be",
+            "720ef3dbecca51ce2beb21fd8319dd3c97d6a806665ed55cc0b6f4f6f0f4377f"
+          ],
+          "destination": "alice.testnet",
+          "expires_at_ns": "1794485400000000000",
+          "signer": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "signature": "6187d87a8db1e47aa517437f3394e876ed5b807cae92fb2dd9a82a9e15e6088eb4725cb3641e106f95250c4ce8a66dee0783b7041c58e16eb9b0194bf7c57c00"
         },
-        "payload": "5a4152462d4e4541522d434c41494d2d563107746573746e6574117a6172662d6e6561722e746573746e65740700000000000000fed2d45ef31a86d23b4f9cdc05594b1ffdaf46f568db8ae69b03fe19679153b6630000000000000000000000000000000d616c6963652e746573746e65740080967df2f77718",
-        "signature": "62927fb4f5838f7a5ef75b6145cb914f2f39490e11fc3a42fd03e9b45ec5ea574234f8263004ce7a10f9dc1fa896992a68aff768e40fd9f1d025aa98a293130e",
-        "proof": [
-          "9c224fe89ee3a3c22f198214739fe40299a3816a8fabef181b44a0ce4409f668",
-          "191fcad83de5622baf3f3c597c3f28d5ca5c40a268526fe9d7391cc4e6b587b6",
-          "d2befc8eac5d2d16c411d5ca89a325b4308d0aa0a1cd25f365984820f12effb9"
-        ]
+        "payload": "5a4152462d4e4541522d434c41494d2d563107746573746e6574117a6172662d6e6561722e746573746e65740700000000000000695f1878882d70c63509840ca0150e3f3a5c0d965345d792c11347296c612872630000000000000000000000000000000d616c6963652e746573746e657400f09fb5f64ae718",
+        "nonce": "9a7068ee6434852cdaff3acb2f7d0f002fdad589c8e388b299e8a48a831ca3e4"
       },
       {
         "name": "proof-of-other-leaf",
+        "campaign": "main",
         "expect": "E102_INVALID_MERKLE_PROOF",
-        "args": {
-          "network": "testnet",
-          "contract_id": "zarf-near.testnet",
+        "call_args": {
           "campaign_id": "7",
-          "expires_at_ns": "1763150400000000000",
-          "commitment": "fed2d45ef31a86d23b4f9cdc05594b1ffdaf46f568db8ae69b03fe19679153b6",
+          "commitment": "695f1878882d70c63509840ca0150e3f3a5c0d965345d792c11347296c612872",
           "amount": "10000000",
-          "destination": "alice.testnet"
+          "proof": [
+            "b79d203b920fdfc688d119513d9eb35af95f85c1e9d250834138c1414fd18bc0",
+            "14b7775f415e71838fafacff1e62a4ddd2c82040de833225a8bcfe7109cffe4e",
+            "720ef3dbecca51ce2beb21fd8319dd3c97d6a806665ed55cc0b6f4f6f0f4377f"
+          ],
+          "destination": "alice.testnet",
+          "expires_at_ns": "1794485400000000000",
+          "signer": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+          "signature": "f3bab4581536ff0fbedd3750908e93cd8c628ff85c379adeb73d2cd4b228a6793c8d9ff2a51fe1c5bb63460119572f46f6f09edbca4ff677c83fed2ce9830d07"
         },
-        "payload": "5a4152462d4e4541522d434c41494d2d563107746573746e6574117a6172662d6e6561722e746573746e65740700000000000000fed2d45ef31a86d23b4f9cdc05594b1ffdaf46f568db8ae69b03fe19679153b6809698000000000000000000000000000d616c6963652e746573746e65740080967df2f77718",
-        "signature": "a2f15d50f31c471ab0af644e10456d567626ecf39d5bacd8f0ac7f528ef15ddef79cab7068e175b23913f41249f75111052ecaf12ac045ce331a3da3434ec905",
-        "proof": [
-          "1539e9772baaae51950190411e481c465935b9c9163783eaad0e52f39e512b80",
-          "9417f1b91b61a599306d40d0046cea7328215ffc1f82b6e771c41ad388c028c0",
-          "d2befc8eac5d2d16c411d5ca89a325b4308d0aa0a1cd25f365984820f12effb9"
-        ]
+        "payload": "5a4152462d4e4541522d434c41494d2d563107746573746e6574117a6172662d6e6561722e746573746e65740700000000000000695f1878882d70c63509840ca0150e3f3a5c0d965345d792c11347296c612872809698000000000000000000000000000d616c6963652e746573746e657400f09fb5f64ae718",
+        "nonce": "9a7068ee6434852cdaff3acb2f7d0f002fdad589c8e388b299e8a48a831ca3e4"
       }
     ]
-  }
+  },
+  "rejected_emails": [
+    "﻿alice@example.com",
+    "josé@example.com",
+    "K@example.com",
+    "a b@example.com",
+    "   "
+  ]
 }
