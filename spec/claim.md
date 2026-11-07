@@ -213,7 +213,14 @@ Storage, per campaign (create app):
 - `get_campaign` also returns `storage_reserved`.
 - `claim_entry_cost` is measured by the contract (storage bytes of one claim entry ×
   storage price) and exposed with `ft_storage_deposit` by `storage_costs({ token_id })` →
-  `{ ft_storage_deposit, claim_entry_cost, per_claim_storage }`.
+  `{ ft_storage_deposit, claim_entry_cost, per_claim_storage, campaign_bytes_cost }`.
+  `campaign_bytes_cost` is an **upper bound**: a campaign entry whose snapshot holds every
+  current owner key. The real snapshot is a subset, so creation spends at most this, and the
+  rest stays in the free pre-pay (withdrawable).
+- The create app deposits only the shortfall:
+  `campaign_bytes_cost + leaf_count × per_claim_storage − prepay_balance_of(sender)`.
+- `get_config()` → `{ network, min_lifetime_ns, agent_ttl_ns, token_ids }`, so the create form
+  can refuse a too-early deadline before sending.
 - `refresh_token_storage({ token_id })`, owner only. Reads the token's
   `storage_balance_bounds().min` into `ft_storage_deposit`. Until it has run for a token,
   `ft_on_transfer` from that token is refused with `E126_UNKNOWN_TOKEN`.
