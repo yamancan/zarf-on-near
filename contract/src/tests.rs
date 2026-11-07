@@ -3,7 +3,7 @@
 use super::*;
 use near_sdk::serde_json::Value;
 use near_sdk::test_utils::{get_logs, VMContextBuilder};
-use near_sdk::{testing_env, RuntimeFeesConfig};
+use near_sdk::{testing_env, PromiseResult, RuntimeFeesConfig};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 const VECTORS: &str = include_str!("../../spec/vectors.json");
@@ -516,7 +516,11 @@ fn storage_deposit_charges_new_entry_and_accumulates() {
 fn token_bounds_are_read_from_the_token() {
     at(owner(), now());
     let mut c = Contract::new(owner(), "testnet".into(), vec![usdc()], U64(1), U64(1));
-    at(acc("evil.testnet"), now());
+    at(sender(), now());
+    assert_err(E107, || {
+        c.refresh_token_storage(usdc());
+    });
+    at(owner(), now());
     assert_err(E126, || {
         c.refresh_token_storage(acc("evil.testnet"));
     });

@@ -12,7 +12,7 @@ use near_sdk::serde_json::{self, json};
 use near_sdk::store::{IterableMap, LookupMap};
 use near_sdk::{
     env, near, AccountId, BorshStorageKey, Gas, NearToken, PanicOnDefault, Promise,
-    PromiseOrValue, PromiseResult,
+    PromiseError, PromiseOrValue,
 };
 
 pub const E101: &str = "E101_INVALID_SIGNATURE";
@@ -204,9 +204,10 @@ impl Contract {
         }
     }
 
-    /// Reads an allowed token's `storage_balance_bounds().min` on chain (init cannot await
-    /// a cross-contract view). Anyone may call it: the value comes from the token itself.
+    /// Owner only. Reads an allowed token's `storage_balance_bounds().min` on chain
+    /// (init cannot await a cross-contract view).
     pub fn refresh_token_storage(&mut self, token_id: AccountId) -> Promise {
+        self.assert_owner();
         if !self.token_ids.contains(&token_id) {
             fail(E126);
         }
@@ -233,12 +234,8 @@ impl Contract {
         struct Bounds {
             min: U128,
         }
-        let min = match env::promise_result(0) {
-            PromiseResult::Successful(b) => {
-                serde_json::from_slice::<Bounds>(&b).unwrap_or_else(|_| fail(E108)).min
-            }
-            _ => fail(E108),
-        };
+        let bytes = env::promise_result_checked(0, 512).unwrap_or_else(|_| fail(E108));
+        let min = serde_json::from_slice::<Bounds>(&bytes).unwrap_or_else(|_| fail(E108)).min;
         self.ft_storage_deposit.insert(token_id, min.0);
         min
     }
@@ -391,7 +388,7 @@ impl Contract {
         if env::predecessor_account_id() != env::current_account_id() {
             fail(E107);
         }
-        if matches!(env::promise_result(0), PromiseResult::Successful(_)) {
+        if transfer_succeeded() {
             emit("reclaimed", json!({ "campaign_id": campaign_id, "amount": amount }));
         } else {
             let c = self.campaigns.get_mut(&campaign_id.0).unwrap_or_else(|| fail(E110));
@@ -612,6 +609,12 @@ pub fn required_claim_gas() -> Gas {
             + GAS_CALLBACK.as_gas()
             + GAS_CLAIM_MARGIN.as_gas(),
     )
+}
+
+/// The callback's only question. Reads no result bytes: an oversized result still
+/// means the transfer succeeded.
+fn transfer_succeeded() -> bool {
+    !matches!(env::promise_result_checked(0, 0), Err(PromiseError::Failed))
 }
 
 fn storage_cost(bytes: u64) -> u128 {
