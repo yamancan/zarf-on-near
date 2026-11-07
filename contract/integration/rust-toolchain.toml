@@ -1,0 +1,4 @@
+# near-workspaces 0.24.0 needs Rust >= 1.95. The contracts it loads are built by
+# ../rust-toolchain.toml (1.86.0); this crate only drives the sandbox.
+[toolchain]
+channel = "1.95.0"

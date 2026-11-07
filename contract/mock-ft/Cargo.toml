@@ -1,0 +1,15 @@
+[package]
+name = "mock-ft"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+# Test-only NEP-141 token with failure switches. Never deployed outside the sandbox.
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk = "=5.26.1"
+near-contract-standards = "=5.26.1"

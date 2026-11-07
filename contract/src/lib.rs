@@ -1,10 +1,9 @@
 //! Zarf on NEAR: NEP-141 escrow paying claims signed by a registered verifier.
 //! Byte formats, check order, errors, events and views: `spec/claim.md` (v2).
 //!
-//! T2a scope: init, verifier registry (owner path), sender storage pre-pay, campaign
-//! creation, the ordered synchronous claim checks (spec v2.1), reclaim. The public `claim` method
-//! (pending state, USDC storage_deposit, ft_transfer + callback) lands with T3, so no
-//! payout path exists without its rollback.
+//! Init, verifier registry (owner path; Mode T is T11), sender storage pre-pay, campaign
+//! creation, `claim` (ordered checks, then storage_deposit -> ft_transfer -> callback),
+//! the owner's `resolve_pending` exit, and reclaim.
 
 use near_sdk::json_types::{U128, U64};
 use near_sdk::serde::{Deserialize, Serialize};
@@ -38,6 +37,8 @@ pub const E130: &str = "E130_INSUFFICIENT_GAS";
 pub const DOMAIN_TAG: &[u8] = b"ZARF-NEAR-CLAIM-V1";
 pub const MAX_PROOF_LEN: usize = 20;
 pub const MAX_SIGNATURE_TTL_NS: u64 = 3_600 * 1_000_000_000;
+/// `resolve_pending` may act only on a claim pending at least this long.
+pub const PENDING_TIMEOUT_NS: u64 = 3_600 * 1_000_000_000;
 
 // shortcut: gas figures are estimates until T3 measures them in near-workspaces.
 pub const GAS_STORAGE_DEPOSIT: Gas = Gas::from_tgas(10);
@@ -85,7 +86,7 @@ pub struct Agent {
 #[near(serializers = [borsh])]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ClaimStatus {
-    Pending,
+    Pending { amount: u128, started_ns: u64 },
     Claimed,
 }
 
@@ -358,6 +359,136 @@ impl Contract {
         PromiseOrValue::Value(U128(0))
     }
 
+    // ---- claim ----
+
+    /// Called by the relayer. All checks run before any state changes.
+    #[allow(clippy::too_many_arguments)]
+    pub fn claim(
+        &mut self,
+        campaign_id: U64,
+        commitment: String,
+        amount: U128,
+        proof: Vec<String>,
+        destination: String,
+        expires_at_ns: U64,
+        signer: String,
+        signature: String,
+    ) -> Promise {
+        let ok = self.check_claim(&ClaimArgs {
+            campaign_id,
+            commitment: commitment.clone(),
+            amount,
+            proof,
+            destination,
+            expires_at_ns,
+            signer,
+            signature,
+        });
+        let c = self.campaigns.get_mut(&ok.campaign_id).unwrap_or_else(|| fail(E110));
+        c.balance -= ok.amount;
+        c.in_flight += ok.amount;
+        let (token, sender) = (c.token.clone(), c.sender.clone());
+        self.claims.insert(
+            (ok.campaign_id, ok.commitment),
+            ClaimStatus::Pending { amount: ok.amount, started_ns: env::block_timestamp() },
+        );
+        // check_claim already proved both exist and the pre-pay covers it (E128).
+        let ft_storage = self.ft_storage_deposit.get(&token).copied().unwrap_or_else(|| fail(E128));
+        let prepay = self.storage.get(&sender).copied().unwrap_or(0);
+        self.storage.insert(sender, prepay - ft_storage);
+
+        emit(
+            "claim_started",
+            json!({
+                "campaign_id": campaign_id,
+                "commitment": commitment,
+                "amount": amount,
+                "destination": ok.destination,
+                "signer": to_hex(&ok.signer),
+            }),
+        );
+        let register = json!({ "account_id": ok.destination, "registration_only": true });
+        Promise::new(token.clone())
+            .function_call(
+                "storage_deposit".to_string(),
+                serde_json::to_vec(&register).unwrap_or_else(|_| fail(E108)),
+                NearToken::from_yoctonear(ft_storage),
+                GAS_STORAGE_DEPOSIT,
+            )
+            // A `.then` runs even if storage_deposit failed; ft_transfer then fails too.
+            .then(ft_transfer(token, ok.destination.clone(), ok.amount))
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(GAS_CALLBACK)
+                    .on_claim(campaign_id, commitment, amount, ok.destination),
+            )
+    }
+
+    /// Private callback. Decides from the ft_transfer result only, and cannot panic
+    /// once the caller check passes; a stranded claim is what `resolve_pending` is for.
+    pub fn on_claim(
+        &mut self,
+        campaign_id: U64,
+        commitment: String,
+        amount: U128,
+        destination: AccountId,
+    ) {
+        if env::predecessor_account_id() != env::current_account_id() {
+            fail(E107);
+        }
+        #[cfg(feature = "test-callback-panic")]
+        env::panic_str("TEST_CALLBACK_PANIC");
+        let paid = transfer_succeeded();
+        let key = (campaign_id.0, hex32(&commitment));
+        // Already settled by resolve_pending: nothing left to do.
+        if !matches!(self.claims.get(&key), Some(ClaimStatus::Pending { .. })) {
+            return;
+        }
+        self.settle(key, amount.0, paid);
+        if paid {
+            emit(
+                "claim_paid",
+                json!({ "campaign_id": campaign_id, "commitment": commitment,
+                        "amount": amount, "destination": destination }),
+            );
+        } else {
+            emit(
+                "claim_reverted",
+                json!({ "campaign_id": campaign_id, "commitment": commitment,
+                        "amount": amount, "destination": destination, "code": E115 }),
+            );
+        }
+    }
+
+    /// Owner exit for a claim whose callback never completed. `evidence` is the
+    /// ft_transfer receipt id the owner read the outcome from.
+    pub fn resolve_pending(
+        &mut self,
+        campaign_id: U64,
+        commitment: String,
+        paid: bool,
+        evidence: String,
+    ) {
+        self.assert_owner();
+        if !self.campaigns.contains_key(&campaign_id.0) {
+            fail(E110);
+        }
+        let key = (campaign_id.0, hex32(&commitment));
+        let (amount, started_ns) = match self.claims.get(&key) {
+            Some(ClaimStatus::Pending { amount, started_ns }) => (*amount, *started_ns),
+            _ => fail(E108),
+        };
+        if env::block_timestamp() < started_ns.saturating_add(PENDING_TIMEOUT_NS) {
+            fail(E107);
+        }
+        self.settle(key, amount, paid);
+        emit(
+            "pending_resolved",
+            json!({ "campaign_id": campaign_id, "commitment": commitment,
+                    "amount": U128(amount), "paid": paid, "evidence": evidence }),
+        );
+    }
+
     // ---- reclaim ----
 
     pub fn reclaim(&mut self, campaign_id: U64) -> Promise {
@@ -427,7 +558,7 @@ impl Contract {
     pub fn claim_state(&self, campaign_id: U64, commitment: String) -> &'static str {
         match self.claims.get(&(campaign_id.0, hex32(&commitment))) {
             None => "unclaimed",
-            Some(ClaimStatus::Pending) => "pending",
+            Some(ClaimStatus::Pending { .. }) => "pending",
             Some(ClaimStatus::Claimed) => "claimed",
         }
     }
@@ -454,6 +585,22 @@ impl Contract {
         }
     }
 
+    /// Ends a pending claim: paid -> claimed; not paid -> unclaimed with funds back in
+    /// balance. The ft_storage_deposit debit is never credited back (spec).
+    fn settle(&mut self, key: (u64, [u8; 32]), amount: u128, paid: bool) {
+        if let Some(c) = self.campaigns.get_mut(&key.0) {
+            c.in_flight = c.in_flight.saturating_sub(amount);
+            if !paid {
+                c.balance += amount;
+            }
+        }
+        if paid {
+            self.claims.insert(key, ClaimStatus::Claimed);
+        } else {
+            self.claims.remove(&key);
+        }
+    }
+
     fn charge_storage(&mut self, account: &AccountId, bytes: u64) {
         let cost = storage_cost(bytes);
         let balance = self.storage.get(account).copied().unwrap_or(0);
@@ -461,7 +608,7 @@ impl Contract {
         self.storage.insert(account.clone(), left);
     }
 
-    /// The synchronous half of `claim`, in the spec's fixed order (1-11). T3 wraps it.
+    /// The synchronous half of `claim`, in the spec's fixed order (1-11).
     pub fn check_claim(&self, a: &ClaimArgs) -> CheckedClaim {
         // 1
         let c = self.campaigns.get(&a.campaign_id.0).unwrap_or_else(|| fail(E110));
@@ -494,7 +641,7 @@ impl Contract {
         // 6
         match self.claims.get(&(a.campaign_id.0, commitment)) {
             Some(ClaimStatus::Claimed) => fail(E105),
-            Some(ClaimStatus::Pending) => fail(E123),
+            Some(ClaimStatus::Pending { .. }) => fail(E123),
             None => {}
         }
         // 7

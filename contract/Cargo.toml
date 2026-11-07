@@ -13,8 +13,18 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 near-sdk = "=5.26.1"
 
+[features]
+# Integration tests only: makes on_claim panic to exercise resolve_pending.
+# The release wasm is built without it, and a test checks that.
+test-callback-panic = []
+
 [dev-dependencies]
 near-sdk = { version = "=5.26.1", features = ["unit-testing"] }
+
+[workspace]
+members = [".", "mock-ft"]
+# Separate toolchain (near-workspaces needs a newer Rust), see README.
+exclude = ["integration"]
 
 [profile.release]
 codegen-units = 1

@@ -300,7 +300,7 @@ fn claimed_and_pending_are_refused() {
     assert_err(E105, || {
         c.check_claim(&a);
     });
-    c.claims.insert(key, ClaimStatus::Pending);
+    c.claims.insert(key, ClaimStatus::Pending { amount: a.amount.0, started_ns: now() });
     assert_err(E123, || {
         c.check_claim(&a);
     });
@@ -591,4 +591,135 @@ fn network_is_validated_and_exposed() {
     });
     let c = Contract::new(owner(), "mainnet".into(), vec![], U64(1), U64(1));
     assert_eq!(c.get_network(), "mainnet");
+}
+
+// ---- claim (async) ----
+
+fn do_claim(c: &mut Contract, a: &ClaimArgs) {
+    c.claim(
+        a.campaign_id,
+        a.commitment.clone(),
+        a.amount,
+        a.proof.clone(),
+        a.destination.clone(),
+        a.expires_at_ns,
+        a.signer.clone(),
+        a.signature.clone(),
+    );
+}
+
+#[test]
+fn claim_moves_funds_to_in_flight_and_debits_storage() {
+    let mut c = seeded();
+    let a = valid(0);
+    let before = c.campaigns.get(&7).unwrap().clone();
+    let prepay = c.storage_balance_of(sender()).0;
+    do_claim(&mut c, &a);
+    let after = c.campaigns.get(&7).unwrap().clone();
+    assert_eq!(after.balance, before.balance - a.amount.0);
+    assert_eq!(after.in_flight, a.amount.0);
+    assert_eq!(c.storage_balance_of(sender()).0, prepay - USDC_MIN);
+    assert_eq!(c.claim_state(a.campaign_id, a.commitment.clone()), "pending");
+    assert!(get_logs()[0].contains("\"event\":\"claim_started\""));
+    // storage_deposit, ft_transfer and the callback are all scheduled.
+    assert_eq!(near_sdk::test_utils::get_created_receipts().len(), 3);
+    // A second attempt while in flight is refused.
+    assert_err(E123, || do_claim(&mut c, &a));
+}
+
+#[test]
+fn callback_success_marks_claimed() {
+    let mut c = seeded();
+    let a = valid(0);
+    do_claim(&mut c, &a);
+    with_result(acc("zarf-near.testnet"), now(), PromiseResult::Successful(vec![]));
+    c.on_claim(a.campaign_id, a.commitment.clone(), a.amount, acc(&a.destination));
+    assert_eq!(c.claim_state(a.campaign_id, a.commitment.clone()), "claimed");
+    assert_eq!(c.campaigns.get(&7).unwrap().in_flight, 0);
+    assert!(get_logs()[0].contains("\"event\":\"claim_paid\""));
+    at(acc("relayer.testnet"), now());
+    assert_err(E105, || do_claim(&mut c, &a));
+}
+
+#[test]
+fn callback_failure_restores_claim_but_not_storage_debit() {
+    let mut c = seeded();
+    let a = valid(0);
+    let balance = c.campaigns.get(&7).unwrap().balance;
+    let prepay = c.storage_balance_of(sender()).0;
+    do_claim(&mut c, &a);
+    with_result(acc("zarf-near.testnet"), now(), PromiseResult::Failed);
+    c.on_claim(a.campaign_id, a.commitment.clone(), a.amount, acc(&a.destination));
+    assert_eq!(c.claim_state(a.campaign_id, a.commitment.clone()), "unclaimed");
+    let camp = c.campaigns.get(&7).unwrap().clone();
+    assert_eq!((camp.balance, camp.in_flight), (balance, 0));
+    assert_eq!(c.storage_balance_of(sender()).0, prepay - USDC_MIN);
+    assert!(get_logs()[0].contains("\"event\":\"claim_reverted\""));
+    assert!(get_logs()[0].contains(E115));
+}
+
+#[test]
+fn callback_rejects_outside_callers() {
+    let mut c = seeded();
+    let a = valid(0);
+    do_claim(&mut c, &a);
+    with_result(acc("relayer.testnet"), now(), PromiseResult::Successful(vec![]));
+    assert_err(E107, || c.on_claim(a.campaign_id, a.commitment.clone(), a.amount, acc(&a.destination)));
+}
+
+#[test]
+fn reclaim_during_in_flight_claim_leaves_it_alone() {
+    let mut c = seeded();
+    let a = valid(0);
+    do_claim(&mut c, &a);
+    let free = c.campaigns.get(&7).unwrap().balance;
+    at(sender(), deadline() + 1);
+    c.reclaim(U64(7));
+    assert_eq!(c.campaigns.get(&7).unwrap().in_flight, a.amount.0);
+    // The late callback still settles the claim against in_flight.
+    with_result(acc("zarf-near.testnet"), deadline() + 1, PromiseResult::Failed);
+    c.on_claim(a.campaign_id, a.commitment.clone(), a.amount, acc(&a.destination));
+    let camp = c.campaigns.get(&7).unwrap().clone();
+    assert_eq!((camp.balance, camp.in_flight), (a.amount.0, 0));
+    assert!(free > 0);
+}
+
+#[test]
+fn resolve_pending_is_owner_only_and_waits_an_hour() {
+    let mut c = seeded();
+    let a = valid(0);
+    do_claim(&mut c, &a);
+    let resolve = |c: &mut Contract, paid| {
+        c.resolve_pending(a.campaign_id, a.commitment.clone(), paid, "receipt-id".into())
+    };
+    at(sender(), now() + PENDING_TIMEOUT_NS);
+    assert_err(E107, || resolve(&mut c, true));
+    at(owner(), now() + PENDING_TIMEOUT_NS - 1);
+    assert_err(E107, || resolve(&mut c, true));
+    at(owner(), now() + PENDING_TIMEOUT_NS);
+    resolve(&mut c, false);
+    assert_eq!(c.claim_state(a.campaign_id, a.commitment.clone()), "unclaimed");
+    assert!(get_logs()[0].contains("\"event\":\"pending_resolved\""));
+    assert!(get_logs()[0].contains("receipt-id"));
+    assert_eq!(c.campaigns.get(&7).unwrap().in_flight, 0);
+    // Nothing is pending any more.
+    assert_err(E108, || resolve(&mut c, true));
+    // A callback arriving after the resolution is a no-op.
+    with_result(acc("zarf-near.testnet"), now(), PromiseResult::Successful(vec![]));
+    c.on_claim(a.campaign_id, a.commitment.clone(), a.amount, acc(&a.destination));
+    assert_eq!(c.claim_state(a.campaign_id, a.commitment.clone()), "unclaimed");
+    assert!(get_logs().is_empty());
+}
+
+#[test]
+fn resolve_pending_paid_marks_claimed() {
+    let mut c = seeded();
+    let a = valid(0);
+    let balance = c.campaigns.get(&7).unwrap().balance;
+    do_claim(&mut c, &a);
+    at(owner(), now() + PENDING_TIMEOUT_NS);
+    c.resolve_pending(a.campaign_id, a.commitment.clone(), true, "receipt-id".into());
+    assert_eq!(c.claim_state(a.campaign_id, a.commitment.clone()), "claimed");
+    let camp = c.campaigns.get(&7).unwrap().clone();
+    assert_eq!((camp.balance, camp.in_flight), (balance - a.amount.0, 0));
 }
