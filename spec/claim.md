@@ -197,15 +197,20 @@ Storage, per campaign (create app):
 - `prepay_balance_of({ account_id })` returns the free pre-pay as `"<u128>"` (`"0"` if none).
 - `prepay_withdraw({ amount? })` transfers the caller's free pre-pay (all of it by default) to
   the caller.
-- At creation, `ft_on_transfer` **reserves** from the free pre-pay
-  `campaign_bytes_cost + leaf_count × per_claim_storage`, where
-  `per_claim_storage = ft_storage_deposit + claim_entry_cost`, into `campaign.storage_reserved`.
+- At creation, `ft_on_transfer` debits from the free pre-pay `campaign_bytes_cost`
+  (**spent**: the campaign entry stays stored) plus `leaf_count × per_claim_storage` (reserved
+  into `campaign.storage_reserved`), where
+  `per_claim_storage = ft_storage_deposit + claim_entry_cost`. `leaf_count == 0` → `E108`.
   Too little free pre-pay → `E128` (refunded).
 - Each claim draws `per_claim_storage` from **its own campaign's** reservation. One campaign
   never spends another's.
-- `reclaim` releases the unused reservation back to the sender's free pre-pay.
+- `reclaim` releases the unused reservation back to the sender's free pre-pay. With
+  `balance == 0` but a reservation left, it only releases the reservation (no transfer);
+  `E118` only when both are 0.
 - `fund_campaign_storage({ campaign_id })`, payable, anyone. It tops up a reservation when
-  `leaf_count` was understated.
+  `leaf_count` was understated. After the deadline → `E125`; zero deposit → `E109`.
+- `prepay_withdraw`: amount > free → `E128`; amount 0 → `E109`.
+- `get_campaign` also returns `storage_reserved`.
 - `claim_entry_cost` is measured by the contract (storage bytes of one claim entry ×
   storage price) and exposed with `ft_storage_deposit` by `storage_costs({ token_id })` →
   `{ ft_storage_deposit, claim_entry_cost, per_claim_storage }`.
@@ -214,7 +219,7 @@ Storage, per campaign (create app):
   `ft_on_transfer` from that token is refused with `E126_UNKNOWN_TOKEN`.
 - Names avoid NEP-145's `storage_*`, because the return shapes differ.
 
-`new` is `#[private]`. Deploy and `new` happen in **one batched transaction**, so nobody can
+`new` is private (`predecessor == current_account_id`, else `E107`). Deploy and `new` happen in **one batched transaction**, so nobody can
 initialise the contract first.
 
 Owner keys live in their own set, separate from attested agents, so building a campaign
@@ -268,7 +273,8 @@ exact sum; an underfunded campaign fails later claims with `E129`.
 ```
 get_network() -> "testnet" | "mainnet"
 get_campaign({ campaign_id }) -> { sender, token, amount, merkle_root, deadline_ns,
-                                   balance, in_flight, policy, snapshot: ["<hex32>"] } | null
+                                   balance, in_flight, policy, snapshot: ["<hex32>"],
+                                   storage_reserved } | null
 claim_state({ campaign_id, commitment }) -> "unclaimed" | "pending" | "claimed"
 get_agent({ account_id }) -> { kind: "owner" | "attested", measurement_id?, valid_until_ns } | null
 required_claim_gas() -> "<u64>"      // the relayer attaches at least this; the contract owns the number
