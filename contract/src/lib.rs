@@ -33,6 +33,7 @@ pub const E127: &str = "E127_NO_VERIFIER";
 pub const E128: &str = "E128_INSUFFICIENT_STORAGE";
 pub const E129: &str = "E129_INSUFFICIENT_BALANCE";
 pub const E130: &str = "E130_INSUFFICIENT_GAS";
+pub const E132: &str = "E132_DUPLICATE_CAMPAIGN";
 
 pub const DOMAIN_TAG: &[u8] = b"ZARF-NEAR-CLAIM-V1";
 pub const MAX_PROOF_LEN: usize = 20;
@@ -61,6 +62,7 @@ enum StorageKey {
     Claims,
     Prepay,
     FtStorage,
+    Roots,
 }
 
 #[near(serializers = [borsh, json])]
@@ -190,14 +192,16 @@ pub struct Contract {
     next_campaign_id: u64,
     /// Storage bytes of one (pending) claim entry, measured in `new`.
     claim_entry_bytes: u64,
-    /// Storage bytes of a campaign entry with max-length account ids and an empty snapshot,
-    /// measured in `new`; each snapshot key adds 32.
+    /// Storage bytes of a campaign entry (max-length account ids, empty snapshot) plus its
+    /// roots entry, measured in `new`; each snapshot key adds 32.
     campaign_base_bytes: u64,
     /// Mode W signer -> valid_until_ns. Kept apart from attested agents so a snapshot
     /// never scans re-registered TEE agents.
     owner_keys: IterableMap<[u8; 32], u64>,
     agents: LookupMap<[u8; 32], AttestedAgent>,
     campaigns: LookupMap<u64, Campaign>,
+    /// merkle_root -> campaign id: the root is an idempotency key (E132).
+    roots: LookupMap<[u8; 32], u64>,
     claims: LookupMap<(u64, [u8; 32]), ClaimStatus>,
     /// Sender -> free pre-pay (not reserved by any campaign).
     prepay: LookupMap<AccountId, u128>,
@@ -250,10 +254,15 @@ impl Contract {
                 storage_reserved: u128::MAX,
             },
         );
+        let mut roots = LookupMap::new(StorageKey::Roots);
+        roots.insert([0xff; 32], u64::MAX);
         campaigns.flush();
+        roots.flush();
         let campaign_base_bytes = env::storage_usage().saturating_sub(before);
         campaigns.remove(&u64::MAX);
+        roots.remove(&[0xff; 32]);
         campaigns.flush();
+        roots.flush();
         Self {
             owner_id,
             network,
@@ -266,6 +275,7 @@ impl Contract {
             owner_keys: IterableMap::new(StorageKey::OwnerKeys),
             agents: LookupMap::new(StorageKey::Agents),
             campaigns,
+            roots,
             claims,
             prepay: LookupMap::new(StorageKey::Prepay),
             ft_storage_deposit: LookupMap::new(StorageKey::FtStorage),
@@ -406,6 +416,10 @@ impl Contract {
         }
     }
 
+    pub fn campaign_by_root(&self, merkle_root: String) -> Option<U64> {
+        self.roots.get(&hex32(&merkle_root)).map(|id| U64(*id))
+    }
+
     pub fn get_config(&self) -> ConfigView {
         ConfigView {
             network: self.network.clone(),
@@ -438,6 +452,10 @@ impl Contract {
         if msg.leaf_count == 0 {
             fail(E108);
         }
+        // A resent draft can never fund a second campaign.
+        if self.roots.contains_key(&merkle_root) {
+            fail(E132);
+        }
         let now = env::block_timestamp();
         if msg.deadline_ns.0 < now.saturating_add(self.min_lifetime_ns) {
             fail(E119);
@@ -466,7 +484,9 @@ impl Contract {
                 storage_reserved: reserve,
             },
         );
+        self.roots.insert(merkle_root, campaign_id);
         self.campaigns.flush();
+        self.roots.flush();
         // Campaign bytes are spent; the per-claim part is reserved for this campaign only.
         let bytes_cost = storage_cost(env::storage_usage().saturating_sub(before));
         self.debit_prepay(&sender_id, bytes_cost + reserve);
