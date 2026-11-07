@@ -177,6 +177,19 @@ Any error panics, so NEP-141 refunds the whole amount. On success it returns `"0
 
 `reclaim({ campaign_id })`: sender only.
 
+`resolve_pending({ campaign_id, commitment, paid, evidence })`, owner only. It is the exit
+for a claim stranded in `pending` because its callback never completed (out of gas, panic).
+
+- Allowed only when the pending entry is older than 1 h (`started_ns` is stored with it); else
+  `E107_UNAUTHORIZED`.
+- `paid: true` → `claimed` and the amount leaves in-flight. `paid: false` → `unclaimed` and
+  in-flight moves back to balance.
+- `evidence` is the `ft_transfer` receipt id the owner read the outcome from.
+- Emits `pending_resolved`.
+- Trust cost, stated in the README: a wrong `paid` can double-pay or block **one** claim; it
+  can't touch any other allocation. The callback is built so this should never be needed:
+  static reserved gas, no result bytes read, no branch that can panic.
+
 Sender storage pre-pay (create app):
 
 - `storage_deposit({ account_id? })`, payable. Credits the attached NEAR to `account_id`
@@ -254,6 +267,7 @@ The contract logs `EVENT_JSON:{"standard":"zarf-near","version":"1.0.0","event":
 | `claim_paid` | `campaign_id, commitment, amount, destination` |
 | `claim_reverted` | `campaign_id, commitment, amount, destination, code: "E115_TOKEN_TRANSFER_FAILED"` |
 | `reclaimed` | `campaign_id, amount` |
+| `pending_resolved` | `campaign_id, commitment, amount, paid, evidence` |
 | `reclaim_reverted` | `campaign_id, amount, code: "E115_TOKEN_TRANSFER_FAILED"` |
 
 The create app takes `campaign_id` from `campaign_created`.
