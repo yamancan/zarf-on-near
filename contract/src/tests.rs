@@ -738,6 +738,11 @@ fn valid_vector_fails_on_another_network_or_contract() {
     assert_err(E101, || {
         c.check_claim(&valid(0));
     });
+}
+
+#[test]
+fn valid_vector_fails_under_another_contract_id() {
+    // One fixture per test: mocked storage persists within a test thread.
     let c = seeded();
     let ctx = VMContextBuilder::new()
         .current_account_id(acc("other-zarf.testnet"))
