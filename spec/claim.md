@@ -107,7 +107,9 @@ agents: signer -> { kind: Owner | Attested { measurement_id }, valid_until_ns }
 - **Mode W:** the owner calls `add_owner_key({ signer, valid_until_ns })` and `remove_agent({ account_id })`
   (`account_id` = the signer hex, matching the Shade template's argument name).
   `add_owner_key` on a signer that already exists (of either kind) is refused with
-  `E108_INVALID_INPUT`. An entry never changes kind; to extend a key, remove it and add it again.
+  `E108_INVALID_INPUT`. An entry never changes kind. To extend a key, call `remove_agent`
+  and `add_owner_key` in **one batched transaction**: a gap between them freezes that key's
+  campaigns.
 - **Mode T:** these methods keep the Shade CLI's argument shapes, so `shade deploy` drives them unchanged.
   - `approve_measurements({ measurements })` / `remove_measurements`, owner only.
   - `approve_ppids({ ppids })` / `remove_ppids`, owner only.
@@ -123,7 +125,8 @@ agents: signer -> { kind: Owner | Attested { measurement_id }, valid_until_ns }
   `measurement_id = sha256(canonical_json(measurement))`. `measurement` is a single
   `FullMeasurementsHex` object as `approve_measurements` receives it (field set from
   `shade-attestation 0.2.0`). `canonical_json` means keys sorted byte-wise at every depth,
-  no whitespace, strings as given (lowercase hex), UTF-8. `approve_measurements` stores each
+  no whitespace, UTF-8. Every hex string is lowercase: `approve_measurements` refuses any
+  uppercase hex with `E108_INVALID_INPUT` rather than normalising it. `approve_measurements` stores each
   measurement under its own id, so approving or removing one never changes another's id.
   Vector: `measurement_id` in vectors.json.
 
@@ -200,8 +203,15 @@ Only after all of them pass does the claim proceed:
    async view.
 4. It then calls `ft_transfer`, with a `#[private]` callback on reserved gas.
 
-The callback credits back to the pre-pay any NEAR refunded by NEP-145 (already registered).
-On a revert it restores the full debit.
+There is **no credit-back** of NEP-145 refunds: the callback can't observe them, because
+they arrive as a separate transfer and `storage_deposit` returns the same `StorageBalance`
+either way. The sender is charged `ft_storage_deposit` (USDC: 0.00125 NEAR) per claim, and
+any refund for an already-registered destination accrues to the contract.
+
+The callback decides success from the **`ft_transfer` result only**. On NEAR a `.then` runs
+even when an earlier receipt failed, so a failed `storage_deposit` shows up as a failed
+`ft_transfer`. On failure the callback restores the claim to `unclaimed`, moves the amount
+from in-flight back to balance, and credits `ft_storage_deposit` back to the pre-pay.
 
 The contract cannot check that a deposit equals the sum of leaves. The create app sends the
 exact sum; an underfunded campaign fails later claims with `E129`.
