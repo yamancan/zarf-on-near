@@ -1041,3 +1041,19 @@ fn campaigns_of_lists_per_sender_in_order_with_pagination() {
     assert_eq!(c.campaigns_of(other.clone(), None, Some(100)).len(), 35);
     assert!(c.campaigns_of(acc("nobody.testnet"), None, None).is_empty());
 }
+
+#[test]
+fn mainnet_refuses_the_public_test_keys() {
+    let keys = &v()["keys"];
+    assert_eq!(PUBLIC_TEST_KEYS, [keys["signer"].as_str().unwrap(), keys["rogue_signer"].as_str().unwrap()]);
+    let mut c = init("mainnet");
+    at(owner(), now());
+    for k in PUBLIC_TEST_KEYS {
+        assert_err(E108, || c.add_owner_key(k.into(), U64(u64::MAX)));
+    }
+    c.add_owner_key(other_root(3), U64(u64::MAX));
+    // Testnet keeps accepting them: the sandbox and the vector tests rely on it.
+    let mut t = init("testnet");
+    at(owner(), now());
+    t.add_owner_key(PUBLIC_TEST_KEYS[0].into(), U64(u64::MAX));
+}
