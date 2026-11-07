@@ -211,7 +211,9 @@ any refund for an already-registered destination accrues to the contract.
 The callback decides success from the **`ft_transfer` result only**. On NEAR a `.then` runs
 even when an earlier receipt failed, so a failed `storage_deposit` shows up as a failed
 `ft_transfer`. On failure the callback restores the claim to `unclaimed`, moves the amount
-from in-flight back to balance, and credits `ft_storage_deposit` back to the pre-pay.
+from in-flight back to balance. It does **not** credit `ft_storage_deposit` back: if
+`storage_deposit` succeeded, that NEAR is already gone, and the cost stays with the sender
+(consistent with no credit-back).
 
 The contract cannot check that a deposit equals the sum of leaves. The create app sends the
 exact sum; an underfunded campaign fails later claims with `E129`.
