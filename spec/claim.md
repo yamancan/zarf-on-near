@@ -104,7 +104,8 @@ agent this is also its implicit account id.
 agents: signer -> { kind: Owner | Attested { measurement_id }, valid_until_ns }
 ```
 
-- **Mode W:** the owner calls `add_owner_key({ signer, valid_until_ns })` and `remove_agent({ signer })`.
+- **Mode W:** the owner calls `add_owner_key({ signer, valid_until_ns })` and `remove_agent({ account_id })`
+  (`account_id` = the signer hex, matching the Shade template's argument name).
   `add_owner_key` on a signer that already exists (of either kind) is refused with
   `E108_INVALID_INPUT`. An entry never changes kind; to extend a key, remove it and add it again.
 - **Mode T:** these methods keep the Shade CLI's argument shapes, so `shade deploy` drives them unchanged.
@@ -114,6 +115,9 @@ agents: signer -> { kind: Owner | Attested { measurement_id }, valid_until_ns }
     `shade_attestation::verify` with `report_data` = the caller's account id, and stores
     `Attested { measurement_id }` with `valid_until_ns = now + agent_ttl_ns`
     (`agent_ttl_ns` is an init arg: 7 days, the CLI's re-registration period).
+    The first registration attaches 0.005 NEAR, so storage must cost ≤ 0.005 NEAR. A
+    refresh by an agent that is already registered attaches **0** and must not be charged.
+    Returns `true`, since the Shade client treats a falsy result as failure.
   - `get_agent({ account_id })`, a view.
 - **One id per measurement:**
   `measurement_id = sha256(canonical_json(measurement))`. `measurement` is a single
