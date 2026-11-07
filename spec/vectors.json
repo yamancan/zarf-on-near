@@ -1,0 +1,244 @@
+{
+  "spec": "spec/claim.md v1",
+  "keys": {
+    "verifier_seed": "0101010101010101010101010101010101010101010101010101010101010101",
+    "verifier_pubkey": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+    "seal_seed": "0202020202020202020202020202020202020202020202020202020202020202",
+    "seal_pubkey": "ce8d3ad1ccb633ec7b70c17814a5c76ecd029685050d344745ba05870e587d59",
+    "rogue_pubkey": "fd1724385aa0c75b64fb78cd602fa1d991fdebf76b13c58ed702eac835e9f618"
+  },
+  "campaign": {
+    "salt": "0505050505050505050505050505050505050505050505050505050505050505",
+    "merkle_root": "6bd750cf149ebae62bb10bfaebd562ffe89f8af3902bd85fbb3d5ff1fd688955",
+    "seal_eph_seed": "0303030303030303030303030303030303030303030303030303030303030303",
+    "seal_iv": "040404040404040404040404",
+    "sealed_salt": "5dfedd3b6bd47f6fa28ee15d969d5bb0ea53774d488bdaf9df1c6e0124b3ef220404040404040404040404040a197ba43cf898d92371c4cd1a48a6a9ca4b1fd9ddf13bf2b3cb700a1e2fa59587c9123bb401daa0a246cc4d9a9610d8",
+    "recipients": [
+      {
+        "email": "alice@example.com",
+        "canonical_email": "alice@example.com",
+        "amount": "10000000",
+        "commitment": "fed2d45ef31a86d23b4f9cdc05594b1ffdaf46f568db8ae69b03fe19679153b6",
+        "leaf": "5ca14b5045a7be7b6d712bf24b7d1eac5d3955524c95f9792d5526191e82a699"
+      },
+      {
+        "email": "  Bob.Smith@Gmail.com ",
+        "canonical_email": "bob.smith@gmail.com",
+        "amount": "2500000",
+        "commitment": "8626a9295c6eb106d420d63278ee0ebfbcba3496867bf54861e3fc821cf6e2f9",
+        "leaf": "9c224fe89ee3a3c22f198214739fe40299a3816a8fabef181b44a0ce4409f668"
+      },
+      {
+        "email": "carol+tag@example.org",
+        "canonical_email": "carol+tag@example.org",
+        "amount": "1",
+        "commitment": "e83eb55d0f0299ba57b4c46cda18663803cf85eaa67580648e2967c558ef5887",
+        "leaf": "0f0b49c4a2324a4655bd7f10d7df93ef4848ba2d9f14db61847af0b9ffc38aad"
+      },
+      {
+        "email": "dave@example.net",
+        "canonical_email": "dave@example.net",
+        "amount": "340282366920938463463374607431768211455",
+        "commitment": "97ac3798233a42ddaa53bb71f16323896efb90ed65366c0c8854a9e3672bdcd2",
+        "leaf": "1539e9772baaae51950190411e481c465935b9c9163783eaad0e52f39e512b80"
+      },
+      {
+        "email": "erin@example.com",
+        "canonical_email": "erin@example.com",
+        "amount": "42",
+        "commitment": "17d1d37ff781e91122833347872111a70113b341412d8862e922b56db14cf51b",
+        "leaf": "d2befc8eac5d2d16c411d5ca89a325b4308d0aa0a1cd25f365984820f12effb9"
+      }
+    ]
+  },
+  "claims": {
+    "context": {
+      "network": "testnet",
+      "contract_id": "zarf-near.testnet",
+      "campaign_id": "7",
+      "expires_at_ns": "1763150400000000000"
+    },
+    "valid": [
+      {
+        "name": "named-account",
+        "args": {
+          "network": "testnet",
+          "contract_id": "zarf-near.testnet",
+          "campaign_id": "7",
+          "expires_at_ns": "1763150400000000000",
+          "commitment": "fed2d45ef31a86d23b4f9cdc05594b1ffdaf46f568db8ae69b03fe19679153b6",
+          "amount": "10000000",
+          "destination": "alice.testnet"
+        },
+        "payload": "5a4152462d4e4541522d434c41494d2d563107746573746e6574117a6172662d6e6561722e746573746e65740700000000000000fed2d45ef31a86d23b4f9cdc05594b1ffdaf46f568db8ae69b03fe19679153b6809698000000000000000000000000000d616c6963652e746573746e65740080967df2f77718",
+        "signature": "a2f15d50f31c471ab0af644e10456d567626ecf39d5bacd8f0ac7f528ef15ddef79cab7068e175b23913f41249f75111052ecaf12ac045ce331a3da3434ec905",
+        "proof": [
+          "9c224fe89ee3a3c22f198214739fe40299a3816a8fabef181b44a0ce4409f668",
+          "191fcad83de5622baf3f3c597c3f28d5ca5c40a268526fe9d7391cc4e6b587b6",
+          "d2befc8eac5d2d16c411d5ca89a325b4308d0aa0a1cd25f365984820f12effb9"
+        ],
+        "nonce": "9a7068ee6434852cdaff3acb2f7d0f002fdad589c8e388b299e8a48a831ca3e4"
+      },
+      {
+        "name": "implicit-account",
+        "args": {
+          "network": "testnet",
+          "contract_id": "zarf-near.testnet",
+          "campaign_id": "7",
+          "expires_at_ns": "1763150400000000000",
+          "commitment": "8626a9295c6eb106d420d63278ee0ebfbcba3496867bf54861e3fc821cf6e2f9",
+          "amount": "2500000",
+          "destination": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "payload": "5a4152462d4e4541522d434c41494d2d563107746573746e6574117a6172662d6e6561722e746573746e657407000000000000008626a9295c6eb106d420d63278ee0ebfbcba3496867bf54861e3fc821cf6e2f9a025260000000000000000000000000040616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161610080967df2f77718",
+        "signature": "50f12a36d14ee7f92882ecc89da03c1af14b289782a6eb543d35e0ed70757edd1c9cb213b48c75f025e0b01a38ffbbb45f1f5f6a42a172914fffb709b3ed400d",
+        "proof": [
+          "5ca14b5045a7be7b6d712bf24b7d1eac5d3955524c95f9792d5526191e82a699",
+          "191fcad83de5622baf3f3c597c3f28d5ca5c40a268526fe9d7391cc4e6b587b6",
+          "d2befc8eac5d2d16c411d5ca89a325b4308d0aa0a1cd25f365984820f12effb9"
+        ],
+        "nonce": "ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb"
+      },
+      {
+        "name": "carried-up-tail",
+        "args": {
+          "network": "testnet",
+          "contract_id": "zarf-near.testnet",
+          "campaign_id": "7",
+          "expires_at_ns": "1763150400000000000",
+          "commitment": "17d1d37ff781e91122833347872111a70113b341412d8862e922b56db14cf51b",
+          "amount": "42",
+          "destination": "erin.testnet"
+        },
+        "payload": "5a4152462d4e4541522d434c41494d2d563107746573746e6574117a6172662d6e6561722e746573746e6574070000000000000017d1d37ff781e91122833347872111a70113b341412d8862e922b56db14cf51b2a0000000000000000000000000000000c6572696e2e746573746e65740080967df2f77718",
+        "signature": "302acb6c5f128926f4f3576ad669a04ab7cd93087def39c1822bc5c418b9b43f9e7b701d838704bc17cc9d0ce86276b7da1a2b71a04febd450927e6630a27003",
+        "proof": [
+          "8a2a5013aa1453449c87967fd034aa8d157b9814dbd19006b1a1c291e7d732f1"
+        ],
+        "nonce": "007ee489e3ea7418bb29335c9317c6abc837fe378d00f82ecdca7b22392cfad4"
+      }
+    ],
+    "invalid": [
+      {
+        "name": "amount-differs-from-signed",
+        "expect": "E101_INVALID_SIGNATURE",
+        "args": {
+          "network": "testnet",
+          "contract_id": "zarf-near.testnet",
+          "campaign_id": "7",
+          "expires_at_ns": "1763150400000000000",
+          "commitment": "fed2d45ef31a86d23b4f9cdc05594b1ffdaf46f568db8ae69b03fe19679153b6",
+          "amount": "10000000",
+          "destination": "alice.testnet"
+        },
+        "payload": "5a4152462d4e4541522d434c41494d2d563107746573746e6574117a6172662d6e6561722e746573746e65740700000000000000fed2d45ef31a86d23b4f9cdc05594b1ffdaf46f568db8ae69b03fe19679153b6809698000000000000000000000000000d616c6963652e746573746e65740080967df2f77718",
+        "signature": "498f77a81033d2c0082ee5ef886c5984e49713867de7166bd0627ed133a8aecb475c76ca106bc2b69c4608da56a6266a7589651b7815537399a9720d699d8a0c",
+        "proof": [
+          "9c224fe89ee3a3c22f198214739fe40299a3816a8fabef181b44a0ce4409f668",
+          "191fcad83de5622baf3f3c597c3f28d5ca5c40a268526fe9d7391cc4e6b587b6",
+          "d2befc8eac5d2d16c411d5ca89a325b4308d0aa0a1cd25f365984820f12effb9"
+        ]
+      },
+      {
+        "name": "signed-for-other-contract",
+        "expect": "E101_INVALID_SIGNATURE",
+        "args": {
+          "network": "testnet",
+          "contract_id": "zarf-near.testnet",
+          "campaign_id": "7",
+          "expires_at_ns": "1763150400000000000",
+          "commitment": "fed2d45ef31a86d23b4f9cdc05594b1ffdaf46f568db8ae69b03fe19679153b6",
+          "amount": "10000000",
+          "destination": "alice.testnet"
+        },
+        "payload": "5a4152462d4e4541522d434c41494d2d563107746573746e6574117a6172662d6e6561722e746573746e65740700000000000000fed2d45ef31a86d23b4f9cdc05594b1ffdaf46f568db8ae69b03fe19679153b6809698000000000000000000000000000d616c6963652e746573746e65740080967df2f77718",
+        "signature": "18b366759252d16d79fc560fe1441f12f45bc7cae20b7d40bd964ffe7bde42467b0df52da969eaac0e15b5d4c821169db713e6b72b62e30e6583ca67aa420d00",
+        "proof": [
+          "9c224fe89ee3a3c22f198214739fe40299a3816a8fabef181b44a0ce4409f668",
+          "191fcad83de5622baf3f3c597c3f28d5ca5c40a268526fe9d7391cc4e6b587b6",
+          "d2befc8eac5d2d16c411d5ca89a325b4308d0aa0a1cd25f365984820f12effb9"
+        ]
+      },
+      {
+        "name": "signed-for-mainnet",
+        "expect": "E101_INVALID_SIGNATURE",
+        "args": {
+          "network": "testnet",
+          "contract_id": "zarf-near.testnet",
+          "campaign_id": "7",
+          "expires_at_ns": "1763150400000000000",
+          "commitment": "fed2d45ef31a86d23b4f9cdc05594b1ffdaf46f568db8ae69b03fe19679153b6",
+          "amount": "10000000",
+          "destination": "alice.testnet"
+        },
+        "payload": "5a4152462d4e4541522d434c41494d2d563107746573746e6574117a6172662d6e6561722e746573746e65740700000000000000fed2d45ef31a86d23b4f9cdc05594b1ffdaf46f568db8ae69b03fe19679153b6809698000000000000000000000000000d616c6963652e746573746e65740080967df2f77718",
+        "signature": "78c8d285299b5e3b9382d52f4d051d33f626783876bfa93a0050d45137639493455ade0a0a6cf8fed3f0cb0e94c3f435cc10d375f7f6331f6821ac4878c10a03",
+        "proof": [
+          "9c224fe89ee3a3c22f198214739fe40299a3816a8fabef181b44a0ce4409f668",
+          "191fcad83de5622baf3f3c597c3f28d5ca5c40a268526fe9d7391cc4e6b587b6",
+          "d2befc8eac5d2d16c411d5ca89a325b4308d0aa0a1cd25f365984820f12effb9"
+        ]
+      },
+      {
+        "name": "rogue-verifier-key",
+        "expect": "E101_INVALID_SIGNATURE",
+        "args": {
+          "network": "testnet",
+          "contract_id": "zarf-near.testnet",
+          "campaign_id": "7",
+          "expires_at_ns": "1763150400000000000",
+          "commitment": "fed2d45ef31a86d23b4f9cdc05594b1ffdaf46f568db8ae69b03fe19679153b6",
+          "amount": "10000000",
+          "destination": "alice.testnet"
+        },
+        "payload": "5a4152462d4e4541522d434c41494d2d563107746573746e6574117a6172662d6e6561722e746573746e65740700000000000000fed2d45ef31a86d23b4f9cdc05594b1ffdaf46f568db8ae69b03fe19679153b6809698000000000000000000000000000d616c6963652e746573746e65740080967df2f77718",
+        "signature": "b8c90db6ec366267a6fb8a9acd4a63bb5203b8fecffbc2eeffd803ee41d698dff157038c32cfbdedbeeb4fd1bb5a6e43ccb8de3cf102553f43807730c2ceb70f",
+        "proof": [
+          "9c224fe89ee3a3c22f198214739fe40299a3816a8fabef181b44a0ce4409f668",
+          "191fcad83de5622baf3f3c597c3f28d5ca5c40a268526fe9d7391cc4e6b587b6",
+          "d2befc8eac5d2d16c411d5ca89a325b4308d0aa0a1cd25f365984820f12effb9"
+        ]
+      },
+      {
+        "name": "amount-not-in-tree",
+        "expect": "E102_INVALID_MERKLE_PROOF",
+        "args": {
+          "network": "testnet",
+          "contract_id": "zarf-near.testnet",
+          "campaign_id": "7",
+          "expires_at_ns": "1763150400000000000",
+          "commitment": "fed2d45ef31a86d23b4f9cdc05594b1ffdaf46f568db8ae69b03fe19679153b6",
+          "amount": "99",
+          "destination": "alice.testnet"
+        },
+        "payload": "5a4152462d4e4541522d434c41494d2d563107746573746e6574117a6172662d6e6561722e746573746e65740700000000000000fed2d45ef31a86d23b4f9cdc05594b1ffdaf46f568db8ae69b03fe19679153b6630000000000000000000000000000000d616c6963652e746573746e65740080967df2f77718",
+        "signature": "62927fb4f5838f7a5ef75b6145cb914f2f39490e11fc3a42fd03e9b45ec5ea574234f8263004ce7a10f9dc1fa896992a68aff768e40fd9f1d025aa98a293130e",
+        "proof": [
+          "9c224fe89ee3a3c22f198214739fe40299a3816a8fabef181b44a0ce4409f668",
+          "191fcad83de5622baf3f3c597c3f28d5ca5c40a268526fe9d7391cc4e6b587b6",
+          "d2befc8eac5d2d16c411d5ca89a325b4308d0aa0a1cd25f365984820f12effb9"
+        ]
+      },
+      {
+        "name": "proof-of-other-leaf",
+        "expect": "E102_INVALID_MERKLE_PROOF",
+        "args": {
+          "network": "testnet",
+          "contract_id": "zarf-near.testnet",
+          "campaign_id": "7",
+          "expires_at_ns": "1763150400000000000",
+          "commitment": "fed2d45ef31a86d23b4f9cdc05594b1ffdaf46f568db8ae69b03fe19679153b6",
+          "amount": "10000000",
+          "destination": "alice.testnet"
+        },
+        "payload": "5a4152462d4e4541522d434c41494d2d563107746573746e6574117a6172662d6e6561722e746573746e65740700000000000000fed2d45ef31a86d23b4f9cdc05594b1ffdaf46f568db8ae69b03fe19679153b6809698000000000000000000000000000d616c6963652e746573746e65740080967df2f77718",
+        "signature": "a2f15d50f31c471ab0af644e10456d567626ecf39d5bacd8f0ac7f528ef15ddef79cab7068e175b23913f41249f75111052ecaf12ac045ce331a3da3434ec905",
+        "proof": [
+          "1539e9772baaae51950190411e481c465935b9c9163783eaad0e52f39e512b80",
+          "9417f1b91b61a599306d40d0046cea7328215ffc1f82b6e771c41ad388c028c0",
+          "d2befc8eac5d2d16c411d5ca89a325b4308d0aa0a1cd25f365984820f12effb9"
+        ]
+      }
+    ]
+  }
+}
