@@ -167,6 +167,7 @@ pub struct ConfigView {
     pub min_lifetime_ns: U64,
     pub agent_ttl_ns: U64,
     pub token_ids: Vec<AccountId>,
+    pub storage_byte_cost: U128,
 }
 
 #[derive(Serialize)]
@@ -411,6 +412,7 @@ impl Contract {
             min_lifetime_ns: U64(self.min_lifetime_ns),
             agent_ttl_ns: U64(self.agent_ttl_ns),
             token_ids: self.token_ids.clone(),
+            storage_byte_cost: U128(env::storage_byte_cost().as_yoctonear()),
         }
     }
 

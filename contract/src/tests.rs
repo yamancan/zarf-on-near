@@ -956,6 +956,7 @@ fn get_config_view() {
             "min_lifetime_ns": v()["context"]["min_lifetime_ns"],
             "agent_ttl_ns": (7 * DAY_NS).to_string(),
             "token_ids": ["usdc.testnet"],
+            "storage_byte_cost": env::storage_byte_cost().as_yoctonear().to_string(),
         })
     );
 }
