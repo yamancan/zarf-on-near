@@ -924,3 +924,38 @@ fn late_callback_of_a_resolved_attempt_does_not_settle_the_next_one() {
     c.on_claim(a.campaign_id, a.commitment.clone(), a.amount, acc(&a.destination), U64(b_started));
     assert_eq!(c.claim_state(a.campaign_id, a.commitment.clone()), "unclaimed");
 }
+
+#[test]
+fn campaign_bytes_cost_bounds_the_real_creation_cost() {
+    let mut c = base();
+    at(owner(), now());
+    c.add_owner_key(v()["keys"]["rogue_signer"].as_str().unwrap().into(), U64(deadline() + DAY_NS));
+    let costs = c.storage_costs(usdc());
+    let bound = costs.campaign_bytes_cost.0;
+    let reserve = 5 * costs.per_claim_storage.0;
+    let free = c.prepay_balance_of(sender()).0;
+    at(usdc(), now());
+    c.ft_on_transfer(sender(), U128(1), create_msg(&root(), deadline(), "owner"));
+    let spent = free - c.prepay_balance_of(sender()).0 - reserve;
+    assert!(spent > 0 && spent <= bound, "spent {spent} > bound {bound}");
+    // Each owner key raises the bound by exactly 32 bytes.
+    at(owner(), now());
+    c.remove_agent(v()["keys"]["rogue_signer"].as_str().unwrap().into());
+    let smaller = c.storage_costs(usdc()).campaign_bytes_cost.0;
+    assert_eq!(bound - smaller, 32 * env::storage_byte_cost().as_yoctonear());
+}
+
+#[test]
+fn get_config_view() {
+    let c = base();
+    let cfg = serde_json::to_value(c.get_config()).unwrap();
+    assert_eq!(
+        cfg,
+        json!({
+            "network": "testnet",
+            "min_lifetime_ns": v()["context"]["min_lifetime_ns"],
+            "agent_ttl_ns": (7 * DAY_NS).to_string(),
+            "token_ids": ["usdc.testnet"],
+        })
+    );
+}

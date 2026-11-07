@@ -156,6 +156,17 @@ pub struct StorageCosts {
     pub ft_storage_deposit: U128,
     pub claim_entry_cost: U128,
     pub per_claim_storage: U128,
+    /// Upper bound: a campaign whose snapshot holds every current owner key.
+    pub campaign_bytes_cost: U128,
+}
+
+#[derive(Serialize)]
+#[serde(crate = "near_sdk::serde")]
+pub struct ConfigView {
+    pub network: String,
+    pub min_lifetime_ns: U64,
+    pub agent_ttl_ns: U64,
+    pub token_ids: Vec<AccountId>,
 }
 
 #[derive(Serialize)]
@@ -174,11 +185,13 @@ pub struct Contract {
     network: String,
     token_ids: Vec<AccountId>,
     min_lifetime_ns: u64,
-    #[allow(dead_code)] // read by register_agent (T11)
     agent_ttl_ns: u64,
     next_campaign_id: u64,
     /// Storage bytes of one (pending) claim entry, measured in `new`.
     claim_entry_bytes: u64,
+    /// Storage bytes of a campaign entry with max-length account ids and an empty snapshot,
+    /// measured in `new`; each snapshot key adds 32.
+    campaign_base_bytes: u64,
     /// Mode W signer -> valid_until_ns. Kept apart from attested agents so a snapshot
     /// never scans re-registered TEE agents.
     owner_keys: IterableMap<[u8; 32], u64>,
@@ -217,6 +230,29 @@ impl Contract {
         let claim_entry_bytes = env::storage_usage().saturating_sub(before);
         claims.remove(&probe);
         claims.flush();
+
+        let mut campaigns = LookupMap::new(StorageKey::Campaigns);
+        let longest: AccountId = "a".repeat(64).parse().unwrap_or_else(|_| fail(E108));
+        let before = env::storage_usage();
+        campaigns.insert(
+            u64::MAX,
+            Campaign {
+                sender: longest.clone(),
+                token: longest,
+                amount: u128::MAX,
+                merkle_root: [0xff; 32],
+                deadline_ns: u64::MAX,
+                balance: u128::MAX,
+                in_flight: u128::MAX,
+                policy: Policy::Attested,
+                snapshot: Vec::new(),
+                storage_reserved: u128::MAX,
+            },
+        );
+        campaigns.flush();
+        let campaign_base_bytes = env::storage_usage().saturating_sub(before);
+        campaigns.remove(&u64::MAX);
+        campaigns.flush();
         Self {
             owner_id,
             network,
@@ -225,9 +261,10 @@ impl Contract {
             agent_ttl_ns: agent_ttl_ns.0,
             next_campaign_id: 0,
             claim_entry_bytes,
+            campaign_base_bytes,
             owner_keys: IterableMap::new(StorageKey::OwnerKeys),
             agents: LookupMap::new(StorageKey::Agents),
-            campaigns: LookupMap::new(StorageKey::Campaigns),
+            campaigns,
             claims,
             prepay: LookupMap::new(StorageKey::Prepay),
             ft_storage_deposit: LookupMap::new(StorageKey::FtStorage),
@@ -362,6 +399,18 @@ impl Contract {
             ft_storage_deposit: U128(ft),
             claim_entry_cost: U128(entry),
             per_claim_storage: U128(ft + entry),
+            campaign_bytes_cost: U128(storage_cost(
+                self.campaign_base_bytes + 32 * self.owner_keys.len() as u64,
+            )),
+        }
+    }
+
+    pub fn get_config(&self) -> ConfigView {
+        ConfigView {
+            network: self.network.clone(),
+            min_lifetime_ns: U64(self.min_lifetime_ns),
+            agent_ttl_ns: U64(self.agent_ttl_ns),
+            token_ids: self.token_ids.clone(),
         }
     }
 
