@@ -163,7 +163,7 @@ the token is allow-listed, and stored (USDC: 0.00125 NEAR).
 `ft_on_transfer(sender_id, amount, msg)`, where `msg` is
 
 ```json
-{ "merkle_root": "<hex32>", "deadline_ns": "<u64>", "policy": "owner" | "attested" }
+{ "merkle_root": "<hex32>", "deadline_ns": "<u64>", "policy": "owner" | "attested", "leaf_count": <u32> }
 ```
 
 Any error panics, so NEP-141 refunds the whole amount. On success it returns `"0"`.
@@ -190,15 +190,37 @@ for a claim stranded in `pending` because its callback never completed (out of g
   can't touch any other allocation. The callback is built so this should never be needed:
   static reserved gas, no result bytes read, no branch that can panic.
 
-Sender storage pre-pay (create app):
+Storage, per campaign (create app):
 
-- `storage_deposit({ account_id? })`, payable. Credits the attached NEAR to `account_id`
-  (default: the caller) and returns the new pre-pay balance as `"<u128>"` yocto.
-- `storage_balance_of({ account_id })` returns `"<u128>"` (`"0"` if none). Campaign bytes and
-  per-claim `ft_storage_deposit` are debited from it.
+- `prepay_deposit({ account_id? })`, payable. Credits the attached NEAR to the sender's free
+  pre-pay (default: the caller) and returns the new free balance as `"<u128>"` yocto.
+- `prepay_balance_of({ account_id })` returns the free pre-pay as `"<u128>"` (`"0"` if none).
+- `prepay_withdraw({ amount? })` transfers the caller's free pre-pay (all of it by default) to
+  the caller.
+- At creation, `ft_on_transfer` **reserves** from the free pre-pay
+  `campaign_bytes_cost + leaf_count × per_claim_storage`, where
+  `per_claim_storage = ft_storage_deposit + claim_entry_cost`, into `campaign.storage_reserved`.
+  Too little free pre-pay → `E128` (refunded).
+- Each claim draws `per_claim_storage` from **its own campaign's** reservation. One campaign
+  never spends another's.
+- `reclaim` releases the unused reservation back to the sender's free pre-pay.
+- `fund_campaign_storage({ campaign_id })`, payable, anyone. It tops up a reservation when
+  `leaf_count` was understated.
+- `claim_entry_cost` is measured by the contract (storage bytes of one claim entry ×
+  storage price) and exposed with `ft_storage_deposit` by `storage_costs({ token_id })` →
+  `{ ft_storage_deposit, claim_entry_cost, per_claim_storage }`.
 - `refresh_token_storage({ token_id })`, owner only. Reads the token's
   `storage_balance_bounds().min` into `ft_storage_deposit`. Until it has run for a token,
   `ft_on_transfer` from that token is refused with `E126_UNKNOWN_TOKEN`.
+- Names avoid NEP-145's `storage_*`, because the return shapes differ.
+
+`new` is `#[private]`. Deploy and `new` happen in **one batched transaction**, so nobody can
+initialise the contract first.
+
+Owner keys live in their own set, separate from attested agents, so building a campaign
+snapshot never scans re-registered TEE agents.
+
+`resolve_pending` on an entry that is not pending → `E108_INVALID_INPUT`.
 
 **Deadline boundary:** `claim` iff `now <= deadline_ns`; `reclaim` iff `now > deadline_ns`.
 
@@ -213,13 +235,13 @@ Sender storage pre-pay (create app):
 7. `E102_INVALID_MERKLE_PROOF`
 8. `E101_INVALID_SIGNATURE` (policy, then ed25519)
 9. `E129_INSUFFICIENT_BALANCE`
-10. `E128_INSUFFICIENT_STORAGE` (the sender's pre-pay < `ft_storage_deposit`)
+10. `E128_INSUFFICIENT_STORAGE` (`campaign.storage_reserved < per_claim_storage`)
 11. `E130_INSUFFICIENT_GAS` (prepaid gas < `required_claim_gas()`)
 
 Only after all of them pass does the claim proceed:
 
 1. The claim becomes `pending` and the amount moves to in-flight.
-2. `ft_storage_deposit` is debited from the sender's pre-pay.
+2. `per_claim_storage` is debited from the campaign's reservation; the claim entry's bytes are paid from it.
 3. The contract **always** calls
    `token.storage_deposit({ account_id: destination, registration_only: true })` with exactly
    `ft_storage_deposit` attached. There is no registration check: that would need an
@@ -272,6 +294,49 @@ The contract logs `EVENT_JSON:{"standard":"zarf-near","version":"1.0.0","event":
 
 The create app takes `campaign_id` from `campaign_created`.
 
+## Off-chain interfaces
+
+**Leaf list** (published by the create app, T7). It is fetched by the claim app from
+`<PUBLIC_LEAVES_URL>/<campaign_id>.json`:
+
+```json
+{ "campaign_id": "<u64>", "merkle_root": "<hex32>",
+  "leaves": [ { "commitment": "<hex32>", "amount": "<u128>" } ] }
+```
+
+- Leaves are in tree order.
+- The claim app recomputes the root and refuses the file if it differs from `get_campaign`.
+- Emails and salts never appear in it.
+
+**Relayer** (T5). `POST /claim` takes exactly the verifier's 200 body (the contract's `claim`
+args) and returns `{ "tx_hash": "<base58>" }`. It refuses anything else.
+
+## Verifier errors (HTTP)
+
+Order: input shape → token → chain views → E110 → E125 → E105/E123 → COMMITMENT_MISMATCH →
+E102 → E101 → E129 → sign. Nothing is signed on any error.
+
+| Code | HTTP | When |
+| --- | --- | --- |
+| `NOT_FOUND` | 404 | any route except `/claim`; any method except POST/OPTIONS |
+| `E108_INVALID_INPUT` | 400 | body not a JSON object; field missing; bad u64/hex32; proof not ≤ 20 lowercase hex32 |
+| `BAD_DESTINATION` | 400 | destination is not a valid AccountId (checked before any token work) |
+| `E109_INVALID_AMOUNT` | 400 | amount 0, not decimal, or ≥ 2^128 |
+| `MALFORMED`, `BAD_ALG`, `UNKNOWN_KID`, `BAD_SIGNATURE`, `BAD_ISSUER`, `BAD_AUDIENCE`, `EXPIRED`, `EMAIL_NOT_VERIFIED`, `NO_EMAIL`, `BAD_EMAIL`, `BAD_NONCE` | 401 | Google id_token checks |
+| `E110_UNKNOWN_CAMPAIGN` | 404 | no such campaign |
+| `E125_CAMPAIGN_ENDED` | 409 | now > deadline_ns |
+| `E105_ALREADY_CLAIMED`, `E123_CLAIM_PENDING` | 409 | from `claim_state` |
+| `COMMITMENT_MISMATCH` | 403 | HMAC(salt, email) ≠ commitment (wrong account or wrong link) |
+| `E102_INVALID_MERKLE_PROOF` | 403 | (commitment, amount) not in the tree |
+| `E101_INVALID_SIGNATURE` | 403 | our signer (or measurement) is not in the campaign snapshot |
+| `E129_INSUFFICIENT_BALANCE` | 409 | balance < amount |
+| `VERIFIER_MISCONFIGURED` | 500 | SIGNER_SEED, CONTRACT_ID or GOOGLE_CLIENT_ID unset |
+| `UPSTREAM_UNAVAILABLE` | 503 | Google JWKS or a chain read failed |
+
+200 returns `{ campaign_id, commitment, amount, proof, destination, expires_at_ns, signer, signature }`.
+In Mode T the verifier must also check its own `get_agent` `valid_until_ns >= expires_at_ns`
+(Owner keys are already bounded by the deadline snapshot).
+
 ## Errors
 
 Panic messages start with a stable code. The numbers reuse Zarf's Stellar vesting codes
@@ -295,7 +360,7 @@ where the name matches; everything else is new.
 | `E125_CAMPAIGN_ENDED` | claim while `now > deadline_ns` |
 | `E126_UNKNOWN_TOKEN` | `ft_on_transfer` from a token not on the allow-list |
 | `E127_NO_VERIFIER` | the policy snapshot would be empty |
-| `E128_INSUFFICIENT_STORAGE` | sender's storage pre-pay too low |
+| `E128_INSUFFICIENT_STORAGE` | free pre-pay too low at creation, or the campaign reservation too low at claim |
 | `E129_INSUFFICIENT_BALANCE` | campaign balance < amount |
 | `E130_INSUFFICIENT_GAS` | prepaid gas below what the transfer + callback need (checked before `pending`) |
 | `E131_INVALID_ATTESTATION` | `register_agent` quote/measurement/ppid check fails |
