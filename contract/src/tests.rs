@@ -1,4 +1,5 @@
 //! Unit tests. Spec vectors: `spec/vectors.json` (shared with the TS layers).
+#![allow(unused_must_use)] // tests drop the returned promises on purpose
 
 use super::*;
 use near_sdk::serde_json::Value;
@@ -98,7 +99,14 @@ fn base_on(network: &str) -> Contract {
     let mut c = init(network);
     c.ft_storage_deposit.insert(usdc(), USDC_MIN);
     at(owner(), now());
-    c.add_owner_key(v()["keys"]["signer"].as_str().unwrap().into(), U64(deadline() + DAY_NS));
+    let vs = v();
+    let signer = vs["keys"]["signer"].as_str().unwrap();
+    if network == "mainnet" {
+        // add_owner_key refuses the public test keys on mainnet; plant it to test E101.
+        c.owner_keys.insert(hex32(signer), deadline() + DAY_NS);
+    } else {
+        c.add_owner_key(signer.into(), U64(deadline() + DAY_NS));
+    }
     set_ctx(sender(), now(), 10u128.pow(24), 300);
     c.prepay_deposit(None);
     c
@@ -760,7 +768,8 @@ fn check_order_pairs() {
     let camp = c.campaigns.get_mut(&7).unwrap();
     camp.balance = a.amount.0 - 1;
     camp.storage_reserved = need - 1;
-    set_ctx(acc("relayer.testnet"), now(), 0, 1);
+    // Enough gas to run the checks, too little for the claim (the mock enforces gas).
+    set_ctx(acc("relayer.testnet"), now(), 0, required_claim_gas().as_tgas() - 1);
     assert_err(E129, || { c.check_claim(&a); });
     c.campaigns.get_mut(&7).unwrap().balance = a.amount.0;
     assert_err(E128, || { c.check_claim(&a); });
@@ -1027,6 +1036,7 @@ fn campaigns_of_lists_per_sender_in_order_with_pagination() {
         let who = if i % 4 == 0 { other.clone() } else { sender() };
         let id = c.next_campaign_id;
         let msg = json!({ "merkle_root": other_root(i + 10), "deadline_ns": U64(deadline()), "policy": "owner", "leaf_count": 1 });
+        at(usdc(), now()); // a fresh context per call: the mock caps total log length
         c.ft_on_transfer(who.clone(), U128(1), msg.to_string());
         if who == sender() {
             mine.push(U64(id));
