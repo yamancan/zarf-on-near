@@ -1115,3 +1115,13 @@ fn testnet_may_use_a_short_resolve_delay() {
     c.resolve_pending(a.campaign_id, a.commitment.clone(), false, "r".into());
     assert_eq!(c.claim_state(a.campaign_id, a.commitment.clone()), "unclaimed");
 }
+
+#[test]
+fn unknown_token_is_e126_even_with_a_bad_msg() {
+    // The allow-list is checked before msg is parsed: an unknown token never reaches E108.
+    let mut c = base();
+    at(acc("evil.testnet"), now());
+    assert_err(E126, || {
+        c.ft_on_transfer(sender(), U128(0), "not json".into());
+    });
+}
