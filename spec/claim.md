@@ -155,7 +155,7 @@ Trust-model consequences, to be stated in the README:
 
 ## Contract calls (JSON args)
 
-`new({ owner_id, network, token_ids, min_lifetime_ns, agent_ttl_ns, resolve_delay_ns, upgrade_delay_ns })`. `network` and
+`new({ owner_id, network, token_ids, min_lifetime_ns, agent_ttl_ns, resolve_delay_ns, upgrade_delay_ns, initial_signers })`. `network` and
 `min_lifetime_ns` are immutable. `min_lifetime_ns` = 600 s on testnet and 30 days on mainnet.
 `ft_storage_deposit` is read from each allowed token's `storage_balance_bounds().min` when
 the token is allow-listed, and stored (USDC: 0.00125 NEAR).
@@ -353,19 +353,41 @@ The contract is upgradeable, but only through its own code and only after a publ
   on the only way to change the code is `apply_upgrade`.
 - `upgrade_delay_ns` is an immutable init arg, exposed by `get_config`. On `mainnet`, `new`
   refuses a value below 48 h (`E108`).
-- `propose_upgrade({ code_hash })`, owner only. Stores `{ code_hash, ready_at_ns = now +
-  upgrade_delay_ns }` and emits `upgrade_proposed`. Only one proposal may be pending (`E108`).
+- `propose_upgrade({ code_hash, source })`, owner only. `source` is a short string naming the
+  public repository and commit the wasm was built from (≤ 200 ASCII bytes). Stores
+  `{ code_hash, source, ready_at_ns = now + upgrade_delay_ns }` and emits `upgrade_proposed`.
+  Only one proposal may be pending (`E108`). Builds are not reproducible yet, so `source`
+  tells reviewers what to read; it does not prove the hash. The README says so.
 - `cancel_upgrade()`, owner only. Emits `upgrade_cancelled`. With nothing pending → `E108`.
 - A malformed or uppercase `code_hash` → `E108`.
 - `apply_upgrade()`, owner only. Its input is the raw wasm (not JSON). It requires a pending
   proposal (`E108`), `now >= ready_at_ns` (`E107`) and `sha256(input) == code_hash` (`E108`).
+  If the new wasm is larger than the current one, the call must attach at least
+  `(new_size − old_size) × storage_byte_cost` (`E128`), so the extra code storage is paid by
+  the owner and never from senders' pre-pay.
   It then deploys the code to its own account and calls `migrate()` in the **same batch**,
   so a failing migration rolls the deploy back. A private callback, `on_upgrade`, runs after
   the batch: only on success does it clear the proposal and emit `upgrade_applied`. After a
   failed migration the proposal stays pending, so it can be retried or cancelled.
 - `migrate()` is private and lives in the new code. State layout changes go there. Pending
-  claims must survive a migration.
-- `pending_upgrade()` → `{ code_hash, ready_at_ns } | null`.
+  claims must survive a migration. `migrate` must be idempotent, and every version must keep
+  `on_upgrade`, `on_claim`, `on_reclaim` and `on_token_storage` with the same names and
+  arguments: a callback scheduled by the old code runs on whatever code is live when it lands.
+- `pending_upgrade()` → `{ code_hash, source, ready_at_ns } | null`.
+- **Owner keys wait the same delay.** `add_owner_key` records
+  `active_from_ns = now + upgrade_delay_ns`, and a campaign's policy snapshot includes only
+  keys with `active_from_ns <= now` (and `valid_until_ns >= deadline_ns`). Otherwise a thief
+  with the owner key could register a signer and forge claims on every campaign created
+  from that moment, with no delay at all. `remove_agent` stays immediate: removal costs only
+  liveness. `new` takes `initial_signers: [{ signer, valid_until_ns }]`, active at once,
+  because nothing exists yet for them to attack. Measurement approvals (Mode T) follow the
+  same rule.
+- **If the owner key is compromised** (thief and team both hold it), each can cancel the
+  other's proposals, so upgrades and ownership changes freeze. Existing campaigns stay safe.
+  The response is: stop creating campaigns, let existing ones run to their deadlines, and
+  reclaim. Only an owner that is a multisig or DAO from the start avoids this.
+- There is no early reclaim while an upgrade is pending. Recipients' exit is to claim;
+  an early exit for senders would break the deadline promised to recipients.
 - **Ownership moves in two steps and waits the same delay:** `propose_owner({ new_owner })`
   (owner) → after `upgrade_delay_ns`, `accept_owner()` (the new owner). `cancel_owner()`
   (owner). A second `propose_owner` while one is pending → `E108`. `accept_owner` by the wrong
@@ -375,7 +397,7 @@ The contract is upgradeable, but only through its own code and only after a publ
 - The owner is an ordinary NEAR account, so it can be a multisig or a DAO contract without
   any change here.
 
-Events: `upgrade_proposed { code_hash, ready_at_ns }`, `upgrade_cancelled { code_hash }`,
+Events: `upgrade_proposed { code_hash, source, ready_at_ns }`, `upgrade_cancelled { code_hash }`,
 `upgrade_applied { code_hash }`, `owner_proposed { new_owner, ready_at_ns }`,
 `owner_changed { old_owner, new_owner }`.
 
