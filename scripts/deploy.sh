@@ -19,7 +19,7 @@
 #   VERIFIER_SEED_FILE   default ~/.config/zarf-near/$NETWORK-verifier.seed
 #   RELAYER_ID       relayer account; gets a claim-only function-call key whose secret goes to
 #                    RELAYER_KEY_FILE (default ~/.config/zarf-near/$NETWORK-relayer.key, mode 600)
-#   USDC_ID              default: Circle's USDC for NETWORK (testnet one verified in docs/spikes/S1.md)
+#   USDC_ID              default: Circle's USDC for NETWORK (testnet one verified in docs/deploy/testnet.md)
 #   SIGNER_VALID_DAYS    default 60; must outlive every campaign deadline (spec snapshot rule)
 #   CREATE_ACCOUNTS=1    create CONTRACT_ID / OWNER_ID with the testnet faucet if missing
 #   DRY_RUN=1            print every command instead of running it. It still creates the real

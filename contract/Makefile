@@ -3,7 +3,7 @@
 # CARGO_TARGET_DIR says; that variable only moves intermediate artifacts.
 BUILD = cargo near build non-reproducible-wasm --no-abi
 
-# On a shared host with a build lock (the deploy host: ~/.cache/zarf-near/build.lock), build steps take
+# On a shared host with a build lock (~/.cache/zarf-near/build.lock), build steps take
 # it themselves with `flock -o`, so nothing they spawn inherits the lock fd. Screeners have no
 # lock file and build unlocked. Long-running targets (demo-sandbox) lock only their builds, so
 # do not wrap them in flock yourself.

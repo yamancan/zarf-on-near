@@ -11,8 +11,10 @@ Public data only. Keys live on the deploy host in mode-600 local key stores, nev
 | Relayer (claim-only key) | `zarf-near-relayer-1111.testnet` | `3JHXRbPG4A6toUVKMBLnR1kwwsXHyTquozwnm7fvYo5d` |
 | Sender (funded with test USDC by the owner) | `zarf-near-sender-1111.testnet` | `FcjSH7apbGZ4V5zYSoFsbSFkVBtsE2WdJLzAk1xeHpy9` |
 
-Token: Circle testnet USDC `3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af`
-(verified on chain, see `docs/spikes/S1.md`).
+Token: Circle testnet USDC `3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af`, the id
+Circle publishes for NEAR testnet (developers.circle.com/stablecoins/usdc-contract-addresses).
+Verified on chain 2026-11-10: `ft_metadata` = USDC, 6 decimals; `storage_balance_bounds` min =
+max = 0.00125 NEAR per registered account (`1250000000000000000000` yocto).
 
 ## Deploy (2026-11-11)
 
