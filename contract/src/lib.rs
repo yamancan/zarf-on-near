@@ -47,12 +47,13 @@ pub const MAX_SIGNATURE_TTL_NS: u64 = 3_600 * 1_000_000_000;
 /// `resolve_pending` may act only on a claim pending at least this long.
 pub const PENDING_TIMEOUT_NS: u64 = 3_600 * 1_000_000_000;
 
-// shortcut: estimates until the first sandbox run; an integration test claims with exactly
-// required_claim_gas(), and the margin is then set from what it shows.
+// Sandbox, 2026-11-11: a full claim (claim + storage_deposit + ft_transfer + on_claim)
+// burnt 10.1 Tgas in total. The margin covers claim's own execution and receipt creation
+// with ~3x headroom; claim_succeeds_with_exactly_required_claim_gas guards it.
 pub const GAS_STORAGE_DEPOSIT: Gas = Gas::from_tgas(10);
 pub const GAS_FT_TRANSFER: Gas = Gas::from_tgas(15);
 pub const GAS_CALLBACK: Gas = Gas::from_tgas(15);
-pub const GAS_CLAIM_MARGIN: Gas = Gas::from_tgas(25);
+pub const GAS_CLAIM_MARGIN: Gas = Gas::from_tgas(15);
 pub const GAS_VIEW_BOUNDS: Gas = Gas::from_tgas(5);
 
 fn fail(code: &str) -> ! {
@@ -745,7 +746,7 @@ impl Contract {
     // ---- views ----
 
     pub fn required_claim_gas(&self) -> U64 {
-        U64(required_claim_gas().as_gas())
+        U64(claim_gas_needed().as_gas())
     }
 
     pub fn get_network(&self) -> String {
@@ -902,7 +903,7 @@ impl Contract {
             fail(E128);
         }
         // 11
-        if env::prepaid_gas().as_gas() < required_claim_gas().as_gas() {
+        if env::prepaid_gas().as_gas() < claim_gas_needed().as_gas() {
             fail(E130);
         }
         CheckedClaim {
@@ -968,7 +969,7 @@ fn push_str(b: &mut Vec<u8>, s: &str) {
 // ---- helpers ----
 
 /// Gas a relayer attaches to `claim`: storage_deposit + ft_transfer + callback + own work.
-pub fn required_claim_gas() -> Gas {
+pub fn claim_gas_needed() -> Gas {
     Gas::from_gas(
         GAS_STORAGE_DEPOSIT.as_gas()
             + GAS_FT_TRANSFER.as_gas()
