@@ -40,11 +40,12 @@ pub const MAX_SIGNATURE_TTL_NS: u64 = 3_600 * 1_000_000_000;
 /// `resolve_pending` may act only on a claim pending at least this long.
 pub const PENDING_TIMEOUT_NS: u64 = 3_600 * 1_000_000_000;
 
-// shortcut: gas figures are estimates until T3 measures them in near-workspaces.
+// shortcut: estimates until the first sandbox run; an integration test claims with exactly
+// required_claim_gas(), and the margin is then set from what it shows.
 pub const GAS_STORAGE_DEPOSIT: Gas = Gas::from_tgas(10);
 pub const GAS_FT_TRANSFER: Gas = Gas::from_tgas(15);
 pub const GAS_CALLBACK: Gas = Gas::from_tgas(15);
-pub const GAS_CLAIM_MARGIN: Gas = Gas::from_tgas(10);
+pub const GAS_CLAIM_MARGIN: Gas = Gas::from_tgas(25);
 pub const GAS_VIEW_BOUNDS: Gas = Gas::from_tgas(5);
 
 fn fail(code: &str) -> ! {
@@ -467,9 +468,10 @@ impl Contract {
         c.balance -= ok.amount;
         c.in_flight += ok.amount;
         c.storage_reserved -= per_claim;
+        let started_ns = env::block_timestamp();
         self.claims.insert(
             (ok.campaign_id, ok.commitment),
-            ClaimStatus::Pending { amount: ok.amount, started_ns: env::block_timestamp() },
+            ClaimStatus::Pending { amount: ok.amount, started_ns },
         );
 
         emit(
@@ -490,12 +492,13 @@ impl Contract {
                 NearToken::from_yoctonear(ft_storage),
                 GAS_STORAGE_DEPOSIT,
             )
-            // A `.then` runs even if storage_deposit failed; ft_transfer then fails too.
+            // A `.then` runs even if storage_deposit failed: for an unregistered destination
+            // ft_transfer then fails too; for a registered one it is a correct payout.
             .then(ft_transfer(token, ok.destination.clone(), ok.amount))
             .then(
                 Self::ext(env::current_account_id())
                     .with_static_gas(GAS_CALLBACK)
-                    .on_claim(campaign_id, commitment, amount, ok.destination),
+                    .on_claim(campaign_id, commitment, amount, ok.destination, U64(started_ns)),
             )
     }
 
@@ -507,6 +510,7 @@ impl Contract {
         commitment: String,
         amount: U128,
         destination: AccountId,
+        started_ns: U64,
     ) {
         if env::predecessor_account_id() != env::current_account_id() {
             fail(E107);
@@ -515,8 +519,11 @@ impl Contract {
         env::panic_str("TEST_CALLBACK_PANIC");
         let paid = transfer_succeeded();
         let key = (campaign_id.0, hex32(&commitment));
-        // Already settled by resolve_pending: nothing left to do.
-        if !matches!(self.claims.get(&key), Some(ClaimStatus::Pending { .. })) {
+        // Attempt identity: settle only the attempt this callback belongs to. If
+        // resolve_pending settled it and a newer attempt started, do nothing.
+        if !matches!(self.claims.get(&key),
+                     Some(ClaimStatus::Pending { started_ns: s, .. }) if *s == started_ns.0)
+        {
             return;
         }
         self.settle(key, amount.0, paid);
@@ -675,12 +682,15 @@ impl Contract {
     }
 
     /// Ends a pending claim: paid -> claimed; not paid -> unclaimed with funds back in
-    /// balance. The ft_storage_deposit debit is never credited back (spec).
+    /// balance and the removed entry's bytes back in the reservation. The
+    /// ft_storage_deposit part is never credited back (spec).
     fn settle(&mut self, key: (u64, [u8; 32]), amount: u128, paid: bool) {
+        let entry_cost = storage_cost(self.claim_entry_bytes);
         if let Some(c) = self.campaigns.get_mut(&key.0) {
             c.in_flight = c.in_flight.saturating_sub(amount);
             if !paid {
                 c.balance += amount;
+                c.storage_reserved += entry_cost;
             }
         }
         if paid {
@@ -851,7 +861,8 @@ pub fn required_claim_gas() -> Gas {
     )
 }
 
-/// The callback's only question. Reads no result bytes: an oversized result still
+/// The callback's only question. The host still copies the result into a register
+/// (charged per byte); we only skip reading it back, and an oversized result still
 /// means the transfer succeeded.
 fn transfer_succeeded() -> bool {
     !matches!(env::promise_result_checked(0, 0), Err(PromiseError::Failed))

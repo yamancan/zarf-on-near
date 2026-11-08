@@ -259,11 +259,30 @@ either way. The sender is charged `ft_storage_deposit` (USDC: 0.00125 NEAR) per 
 any refund for an already-registered destination accrues to the contract.
 
 The callback decides success from the **`ft_transfer` result only**. On NEAR a `.then` runs
-even when an earlier receipt failed, so a failed `storage_deposit` shows up as a failed
-`ft_transfer`. On failure the callback restores the claim to `unclaimed`, moves the amount
-from in-flight back to balance. It does **not** credit `ft_storage_deposit` back: if
-`storage_deposit` succeeded, that NEAR is already gone, and the cost stays with the sender
-(consistent with no credit-back).
+even when an earlier receipt failed. For an **unregistered** destination, a failed
+`storage_deposit` therefore shows up as a failed `ft_transfer`. For an already-registered
+destination, `ft_transfer` can still succeed, and that is a correct payout.
+
+**Attempt identity.** `on_claim` receives the attempt's `started_ns` and settles only if the
+entry is still `Pending { started_ns }` with that same value; otherwise it does nothing.
+This stops a late callback from an earlier attempt (one already settled by `resolve_pending`)
+from settling a newer attempt for the same commitment.
+
+On failure (callback or `resolve_pending(paid: false)`), the claim returns to `unclaimed`
+and the amount moves from in-flight back to balance. Of that attempt's `per_claim_storage`,
+`claim_entry_cost` is credited back to the campaign reservation, because the entry is removed
+and its bytes are freed. The `ft_storage_deposit` part is **not** credited back: if
+`storage_deposit` succeeded, that NEAR is gone. Repeated failures for one recipient therefore
+cost the campaign `ft_storage_deposit` each.
+
+Other notes:
+
+- `per_claim_storage` is evaluated at claim time from the current `ft_storage_deposit`. A
+  `refresh_token_storage` that raises the token minimum can leave a fully reserved campaign
+  short for its last claims (`E128` → `fund_campaign_storage`).
+- Pending → Claimed shrinks the entry; the freed bytes stay with the contract.
+- `required_claim_gas()` is set from a sandbox measurement. An integration test submits a
+  claim with exactly that gas.
 
 The contract cannot check that a deposit equals the sum of leaves. The create app sends the
 exact sum; an underfunded campaign fails later claims with `E129`.
@@ -334,14 +353,14 @@ E102 → E101 → E129 → sign. Nothing is signed on any error.
 | `E105_ALREADY_CLAIMED`, `E123_CLAIM_PENDING` | 409 | from `claim_state` |
 | `COMMITMENT_MISMATCH` | 403 | HMAC(salt, email) ≠ commitment (wrong account or wrong link) |
 | `E102_INVALID_MERKLE_PROOF` | 403 | (commitment, amount) not in the tree |
-| `E101_INVALID_SIGNATURE` | 403 | our signer (or measurement) is not in the campaign snapshot |
+| `E101_INVALID_SIGNATURE` | 403 | our signer (or measurement) is not in the campaign snapshot, or `get_agent(our signer)` is null or expires before `expires_at_ns` |
 | `E129_INSUFFICIENT_BALANCE` | 409 | balance < amount |
 | `VERIFIER_MISCONFIGURED` | 500 | SIGNER_SEED, CONTRACT_ID or GOOGLE_CLIENT_ID unset |
 | `UPSTREAM_UNAVAILABLE` | 503 | Google JWKS or a chain read failed |
 
 200 returns `{ campaign_id, commitment, amount, proof, destination, expires_at_ns, signer, signature }`.
-In Mode T the verifier must also check its own `get_agent` `valid_until_ns >= expires_at_ns`
-(Owner keys are already bounded by the deadline snapshot).
+In both modes the verifier checks its own `get_agent`: it is refused while a key is removed,
+for example in the window of a remove + add extension.
 
 ## Errors
 
