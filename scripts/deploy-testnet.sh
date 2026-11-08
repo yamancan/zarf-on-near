@@ -19,8 +19,10 @@
 #   SIGNER_VALID_DAYS    default 60; must outlive every campaign deadline (spec snapshot rule)
 #   CREATE_ACCOUNTS=1    create CONTRACT_ID / OWNER_ID with the testnet faucet if missing
 #   DRY_RUN=1            print every command instead of running it
-#   LOCK_CONTRACT=1      finally delete every full-access key on CONTRACT_ID (irreversible: the
-#                        code can never be redeployed). Meant for mainnet; the owner decides.
+#   UPGRADE_DELAY_NS     default 10 min on testnet; mainnet requires >= 48 h (the contract refuses less)
+#   LOCK_CONTRACT=1      finally delete every full-access key on CONTRACT_ID. After that the code
+#                        changes only through propose_upgrade/apply_upgrade (the timelock).
+#                        Mandatory on mainnet, opt-in on testnet.
 #
 # Testnet only. Mainnet (T9) gets its own script with a 30-day min lifetime.
 set -euo pipefail
@@ -31,6 +33,8 @@ USDC_ID=${USDC_ID:-3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb
 MIN_LIFETIME_NS=600000000000      # 10 min on testnet (spec)
 AGENT_TTL_NS=604800000000000      # 7 days, the Shade CLI re-registration period (spec)
 RESOLVE_DELAY_NS=3600000000000    # 1 h before resolve_pending may act (spec)
+# Public delay before a proposed upgrade or owner change takes effect (spec: mainnet >= 48 h).
+UPGRADE_DELAY_NS=${UPGRADE_DELAY_NS:-600000000000}   # testnet default: 10 min
 VERIFIER_SEED_FILE=${VERIFIER_SEED_FILE:-$HOME/.config/zarf-near/testnet-verifier.seed}
 RELAYER_KEY_FILE=${RELAYER_KEY_FILE:-$HOME/.config/zarf-near/testnet-relayer.key}
 SIGNER_VALID_DAYS=${SIGNER_VALID_DAYS:-60}
@@ -39,6 +43,10 @@ repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 wasm="$repo_root/contract/target/near/release/zarf_near.wasm"
 
 : "${CONTRACT_ID:?set CONTRACT_ID}" "${OWNER_ID:?set OWNER_ID}"
+# Checked before any transaction. A full-access key can sign as the escrow and call the token
+# directly, so on mainnet it must be deleted.
+[[ $NETWORK != mainnet || ${LOCK_CONTRACT:-} == 1 ]] ||
+  { echo "LOCK_CONTRACT=1 is mandatory on mainnet" >&2; exit 64; }
 umask 077
 # Secrets are written to files only, never printed. Keys are testnet-only.
 if [[ -z ${SIGNER_PUBKEY:-} ]]; then
@@ -108,8 +116,8 @@ run make -C "$repo_root/contract" wasm
 
 echo "== deploy + new (one transaction)"
 init_args=$(jq -nc --arg o "$OWNER_ID" --arg u "$USDC_ID" --arg m "$MIN_LIFETIME_NS" --arg t "$AGENT_TTL_NS" \
-  --arg r "$RESOLVE_DELAY_NS" \
-  '{owner_id:$o, network:"testnet", token_ids:[$u], min_lifetime_ns:$m, agent_ttl_ns:$t, resolve_delay_ns:$r}')
+  --arg r "$RESOLVE_DELAY_NS" --arg g "$UPGRADE_DELAY_NS" \
+  '{owner_id:$o, network:"testnet", token_ids:[$u], min_lifetime_ns:$m, agent_ttl_ns:$t, resolve_delay_ns:$r, upgrade_delay_ns:$g}')
 run near contract deploy "$CONTRACT_ID" use-file "$wasm" \
   with-init-call new json-args "$init_args" prepaid-gas '100 Tgas' attached-deposit '0 NEAR' \
   network-config "$NETWORK" sign-with-legacy-keychain send

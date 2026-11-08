@@ -14,6 +14,8 @@ const DEPOSIT: u128 = 20_000_000;
 const HOUR_NS: u64 = 3_600 * 1_000_000_000;
 /// Short `resolve_delay_ns` so the stranded-callback test needn't fast-forward an hour.
 const RESOLVE_DELAY_NS: u64 = 30 * 1_000_000_000;
+/// Short `upgrade_delay_ns` for the sandbox (mainnet floor is 48 h).
+const UPGRADE_DELAY_NS: u64 = 5 * 1_000_000_000;
 const COMMITMENT: [u8; 32] = [0x42; 32];
 /// The vector signer seed (spec/vectors.json keys.signer_seed); test-only.
 const SIGNER_SEED: [u8; 32] = [1; 32];
@@ -71,6 +73,7 @@ async fn setup(zarf_wasm: &str) -> anyhow::Result<Env> {
             "owner_id": owner.id(), "network": "testnet", "token_ids": [ft.id()],
             "min_lifetime_ns": "1000000000", "agent_ttl_ns": "604800000000000",
             "resolve_delay_ns": RESOLVE_DELAY_NS.to_string(),
+            "upgrade_delay_ns": UPGRADE_DELAY_NS.to_string(),
         }))
         .transact()
         .await?
@@ -340,4 +343,85 @@ async fn adverse_claim_fits_required_claim_gas() -> anyhow::Result<()> {
     let bal: String = e.ft.view("ft_balance_of").args_json(json!({ "account_id": dest })).await?.json()?;
     assert_eq!(bal, AMOUNT.to_string());
     Ok(())
+}
+
+fn code_hash(wasm: &[u8]) -> String {
+    hex(&sha(&[wasm]))
+}
+
+async fn propose_and_wait(e: &Env, wasm: &[u8]) -> anyhow::Result<()> {
+    e.owner.call(e.zarf.id(), "propose_upgrade")
+        .args_json(json!({ "code_hash": code_hash(wasm) }))
+        .transact().await?.into_result()?;
+    let pending: Value = e.zarf.view("pending_upgrade").await?.json()?;
+    let ready: u64 = pending["ready_at_ns"].as_str().unwrap().parse()?;
+    while now_ns(e).await? < ready {
+        e.worker.fast_forward(5).await?;
+    }
+    Ok(())
+}
+
+async fn apply(e: &Env, wasm: Vec<u8>) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
+    Ok(e.owner.call(e.zarf.id(), "apply_upgrade").args(wasm).max_gas().transact().await?)
+}
+
+#[tokio::test]
+async fn upgrade_through_the_timelock_keeps_campaigns_and_pending_claims() -> anyhow::Result<()> {
+    // v1 strands a claim in `pending` (callback-panic build), then v2 replaces it.
+    let e = setup("callback-panic/zarf_near.wasm").await?;
+    let id = create(&e, now_ns(&e).await? + HOUR_NS).await?;
+    let bob = e.worker.dev_create_account().await?;
+    assert!(!claim(&e, id, &bob).await?.is_success());
+    assert_eq!(state(&e, id).await?, "pending");
+    let before = campaign(&e, id).await?;
+
+    let v2 = wasm("upgrade-v2/zarf_near.wasm");
+    // Applying before the delay is refused.
+    e.owner.call(e.zarf.id(), "propose_upgrade")
+        .args_json(json!({ "code_hash": code_hash(&v2) })).transact().await?.into_result()?;
+    let early = apply(&e, v2.clone()).await?;
+    assert!(format!("{:?}", early.into_result().unwrap_err()).contains("E107_UNAUTHORIZED"));
+    e.owner.call(e.zarf.id(), "cancel_upgrade").transact().await?.into_result()?;
+
+    propose_and_wait(&e, &v2).await?;
+    let wrong = apply(&e, wasm("release/zarf_near.wasm")).await?;
+    assert!(format!("{:?}", wrong.into_result().unwrap_err()).contains("E108_INVALID_INPUT"));
+    let out = apply(&e, v2.clone()).await?;
+    assert!(out.is_success(), "{out:?}");
+    assert!(out.logs().iter().any(|l| l.contains("upgrade_applied")));
+
+    let marker: String = e.zarf.view("upgrade_marker").await?.json()?;
+    assert_eq!(marker, "v2");
+    assert_eq!(e.zarf.view_code().await?, v2);
+    let pending: Value = e.zarf.view("pending_upgrade").await?.json()?;
+    assert!(pending.is_null());
+    // State survived the migration, including the stranded claim.
+    assert_eq!(campaign(&e, id).await?, before);
+    assert_eq!(state(&e, id).await?, "pending");
+    Ok(())
+}
+
+#[tokio::test]
+async fn failing_migrate_rolls_the_deploy_back() -> anyhow::Result<()> {
+    let e = setup("release/zarf_near.wasm").await?;
+    let v1 = wasm("release/zarf_near.wasm");
+    let bad = wasm("migrate-panic/zarf_near.wasm");
+    propose_and_wait(&e, &bad).await?;
+    let out = apply(&e, bad.clone()).await?;
+    println!("failing migrate: success={} logs={:?}", out.is_success(), out.logs());
+    assert!(!out.logs().iter().any(|l| l.contains("upgrade_applied")));
+    assert_eq!(e.zarf.view_code().await?, v1, "the old code is still deployed");
+    let pending: Value = e.zarf.view("pending_upgrade").await?.json()?;
+    assert_eq!(pending["code_hash"], code_hash(&bad), "the proposal stays pending");
+    Ok(())
+}
+
+#[test]
+fn release_wasm_has_no_test_upgrade_features() {
+    let release = wasm("release/zarf_near.wasm");
+    for (variant, needle) in [("upgrade-v2", &b"upgrade_marker"[..]), ("migrate-panic", &b"TEST_MIGRATE_PANIC"[..])] {
+        let has = |w: &[u8]| w.windows(needle.len()).any(|x| x == needle);
+        assert!(has(&wasm(&format!("{variant}/zarf_near.wasm"))), "{variant} must carry its marker");
+        assert!(!has(&release), "release must not carry {variant}");
+    }
 }

@@ -46,6 +46,10 @@ pub const MAX_PROOF_LEN: usize = 20;
 pub const MAX_SIGNATURE_TTL_NS: u64 = 3_600 * 1_000_000_000;
 /// Floor for `resolve_delay_ns` on mainnet (spec: 1 h on testnet and mainnet; tests go shorter).
 pub const MIN_RESOLVE_DELAY_NS: u64 = 3_600 * 1_000_000_000;
+/// Floor for `upgrade_delay_ns` on mainnet (spec: 48 h).
+pub const MIN_UPGRADE_DELAY_NS: u64 = 48 * 3_600 * 1_000_000_000;
+pub const GAS_MIGRATE: Gas = Gas::from_tgas(30);
+pub const GAS_ON_UPGRADE: Gas = Gas::from_tgas(10);
 
 // Sandbox, 2026-11-11: a full claim (claim + storage_deposit + ft_transfer + on_claim)
 // burnt 10.1 Tgas in total. The margin covers claim's own execution and receipt creation
@@ -178,6 +182,7 @@ pub struct ConfigView {
     pub min_lifetime_ns: U64,
     pub agent_ttl_ns: U64,
     pub resolve_delay_ns: U64,
+    pub upgrade_delay_ns: U64,
     pub token_ids: Vec<AccountId>,
     pub storage_byte_cost: U128,
 }
@@ -191,6 +196,21 @@ pub struct AgentView {
     pub valid_until_ns: U64,
 }
 
+#[near(serializers = [borsh, json])]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingUpgrade {
+    /// Lowercase hex sha256 of the proposed wasm.
+    pub code_hash: String,
+    pub ready_at_ns: U64,
+}
+
+#[near(serializers = [borsh, json])]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingOwner {
+    pub new_owner: AccountId,
+    pub ready_at_ns: U64,
+}
+
 #[near(contract_state)]
 #[derive(PanicOnDefault)]
 pub struct Contract {
@@ -201,6 +221,10 @@ pub struct Contract {
     agent_ttl_ns: u64,
     /// `resolve_pending` may act only on a claim pending at least this long.
     resolve_delay_ns: u64,
+    /// Public delay before a proposed upgrade or owner change can take effect.
+    upgrade_delay_ns: u64,
+    pending_upgrade: Option<PendingUpgrade>,
+    pending_owner: Option<PendingOwner>,
     next_campaign_id: u64,
     /// Storage bytes of one (pending) claim entry, measured in `new`.
     claim_entry_bytes: u64,
@@ -239,6 +263,7 @@ impl Contract {
         min_lifetime_ns: U64,
         agent_ttl_ns: U64,
         resolve_delay_ns: U64,
+        upgrade_delay_ns: U64,
     ) -> Self {
         if env::predecessor_account_id() != env::current_account_id() {
             fail(E107);
@@ -247,6 +272,9 @@ impl Contract {
             fail(E108);
         }
         if network == "mainnet" && resolve_delay_ns.0 < MIN_RESOLVE_DELAY_NS {
+            fail(E108);
+        }
+        if network == "mainnet" && upgrade_delay_ns.0 < MIN_UPGRADE_DELAY_NS {
             fail(E108);
         }
         let mut claims = LookupMap::new(StorageKey::Claims);
@@ -303,6 +331,9 @@ impl Contract {
             min_lifetime_ns: min_lifetime_ns.0,
             agent_ttl_ns: agent_ttl_ns.0,
             resolve_delay_ns: resolve_delay_ns.0,
+            upgrade_delay_ns: upgrade_delay_ns.0,
+            pending_upgrade: None,
+            pending_owner: None,
             next_campaign_id: 0,
             claim_entry_bytes,
             campaign_base_bytes,
@@ -475,6 +506,7 @@ impl Contract {
             min_lifetime_ns: U64(self.min_lifetime_ns),
             agent_ttl_ns: U64(self.agent_ttl_ns),
             resolve_delay_ns: U64(self.resolve_delay_ns),
+            upgrade_delay_ns: U64(self.upgrade_delay_ns),
             token_ids: self.token_ids.clone(),
             storage_byte_cost: U128(env::storage_byte_cost().as_yoctonear()),
         }
@@ -695,6 +727,113 @@ impl Contract {
             json!({ "campaign_id": campaign_id, "commitment": commitment,
                     "amount": U128(amount), "paid": paid, "evidence": evidence }),
         );
+    }
+
+    // ---- upgrades and ownership (spec "Upgrades and ownership") ----
+
+    pub fn propose_upgrade(&mut self, code_hash: String) {
+        self.assert_owner();
+        hex32(&code_hash);
+        if self.pending_upgrade.is_some() {
+            fail(E108);
+        }
+        let ready_at_ns = U64(env::block_timestamp().saturating_add(self.upgrade_delay_ns));
+        emit("upgrade_proposed", json!({ "code_hash": code_hash, "ready_at_ns": ready_at_ns }));
+        self.pending_upgrade = Some(PendingUpgrade { code_hash, ready_at_ns });
+    }
+
+    pub fn cancel_upgrade(&mut self) {
+        self.assert_owner();
+        let p = self.pending_upgrade.take().unwrap_or_else(|| fail(E108));
+        emit("upgrade_cancelled", json!({ "code_hash": p.code_hash }));
+    }
+
+    /// Input is the raw wasm, not JSON. Deploy and `migrate` run in one batch, so a failing
+    /// migration rolls the deploy back; `on_upgrade` then reports the outcome.
+    pub fn apply_upgrade(&mut self) -> Promise {
+        self.assert_owner();
+        let p = self.pending_upgrade.clone().unwrap_or_else(|| fail(E108));
+        if env::block_timestamp() < p.ready_at_ns.0 {
+            fail(E107);
+        }
+        let code = env::input().unwrap_or_default();
+        if to_hex(&env::sha256_array(&code)) != p.code_hash {
+            fail(E108);
+        }
+        Promise::new(env::current_account_id())
+            .deploy_contract(code)
+            .function_call("migrate".to_string(), b"{}".to_vec(), NearToken::from_yoctonear(0), GAS_MIGRATE)
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(GAS_ON_UPGRADE)
+                    .on_upgrade(p.code_hash),
+            )
+    }
+
+    /// Private callback. The proposal is consumed only if deploy + migrate succeeded.
+    pub fn on_upgrade(&mut self, code_hash: String) -> bool {
+        if env::predecessor_account_id() != env::current_account_id() {
+            fail(E107);
+        }
+        let ok = transfer_succeeded();
+        if ok && self.pending_upgrade.as_ref().is_some_and(|p| p.code_hash == code_hash) {
+            self.pending_upgrade = None;
+            emit("upgrade_applied", json!({ "code_hash": code_hash }));
+        }
+        ok
+    }
+
+    /// Private. Runs right after a deploy, in the same batch; state layout changes go here.
+    /// v1: nothing to migrate.
+    pub fn migrate(&mut self) {
+        if env::predecessor_account_id() != env::current_account_id() {
+            fail(E107);
+        }
+        #[cfg(feature = "test-migrate-panic")]
+        env::panic_str("TEST_MIGRATE_PANIC");
+    }
+
+    pub fn pending_upgrade(&self) -> Option<PendingUpgrade> {
+        self.pending_upgrade.clone()
+    }
+
+    pub fn propose_owner(&mut self, new_owner: AccountId) {
+        self.assert_owner();
+        if self.pending_owner.is_some() {
+            fail(E108);
+        }
+        let ready_at_ns = U64(env::block_timestamp().saturating_add(self.upgrade_delay_ns));
+        emit("owner_proposed", json!({ "new_owner": new_owner, "ready_at_ns": ready_at_ns }));
+        self.pending_owner = Some(PendingOwner { new_owner, ready_at_ns });
+    }
+
+    /// Called by the proposed owner once the delay has passed.
+    pub fn accept_owner(&mut self) {
+        let p = self.pending_owner.clone().unwrap_or_else(|| fail(E108));
+        if env::predecessor_account_id() != p.new_owner || env::block_timestamp() < p.ready_at_ns.0 {
+            fail(E107);
+        }
+        let old_owner = std::mem::replace(&mut self.owner_id, p.new_owner.clone());
+        self.pending_owner = None;
+        emit("owner_changed", json!({ "old_owner": old_owner, "new_owner": p.new_owner }));
+    }
+
+    pub fn cancel_owner(&mut self) {
+        self.assert_owner();
+        self.pending_owner.take().unwrap_or_else(|| fail(E108));
+    }
+
+    pub fn get_owner(&self) -> AccountId {
+        self.owner_id.clone()
+    }
+
+    pub fn pending_owner(&self) -> Option<PendingOwner> {
+        self.pending_owner.clone()
+    }
+
+    #[cfg(feature = "test-upgrade-v2")]
+    pub fn upgrade_marker(&self) -> String {
+        "v2".to_string()
     }
 
     // ---- reclaim ----

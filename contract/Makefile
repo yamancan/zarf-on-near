@@ -14,6 +14,8 @@ LOCKED = $(if $(BUILD_LOCK),flock -o $(BUILD_LOCK))
 wasm:
 	$(LOCKED) $(BUILD) --out-dir target/near/release
 	$(LOCKED) $(BUILD) --features test-callback-panic --out-dir target/near/callback-panic
+	$(LOCKED) $(BUILD) --features test-upgrade-v2 --out-dir target/near/upgrade-v2
+	$(LOCKED) $(BUILD) --features test-migrate-panic --out-dir target/near/migrate-panic
 	cd mock-ft && $(LOCKED) $(BUILD) --out-dir ../target/near/mock-ft
 
 unit:

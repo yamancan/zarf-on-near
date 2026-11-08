@@ -81,6 +81,7 @@ async fn seed() -> anyhow::Result<(near_workspaces::Worker<near_workspaces::netw
             "owner_id": owner.id(), "network": "testnet", "token_ids": [ft.id()],
             "min_lifetime_ns": MIN_LIFETIME_NS.to_string(), "agent_ttl_ns": AGENT_TTL_NS.to_string(),
             "resolve_delay_ns": RESOLVE_DELAY_NS.to_string(),
+            "upgrade_delay_ns": (600u64 * 1_000_000_000).to_string(),
         })).gas(Gas::from_tgas(100)))
         .transact().await?.into_result()?;
 

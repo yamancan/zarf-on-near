@@ -10,6 +10,8 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 const VECTORS: &str = include_str!("../../spec/vectors.json");
 const USDC_MIN: u128 = 1_250_000_000_000_000_000_000; // 0.00125 NEAR, read on chain in S1
 const DAY_NS: u64 = 86_400 * 1_000_000_000;
+/// Mainnet floor, so the same fixtures serve both networks.
+const UPGRADE_DELAY: u64 = MIN_UPGRADE_DELAY_NS;
 
 fn v() -> Value {
     serde_json::from_str(VECTORS).unwrap()
@@ -41,6 +43,7 @@ fn init(network: &str) -> Contract {
         U64(n(&v()["context"]["min_lifetime_ns"])),
         U64(7 * DAY_NS),
         U64(MIN_RESOLVE_DELAY_NS),
+        U64(UPGRADE_DELAY),
     )
 }
 
@@ -725,7 +728,7 @@ fn reclaim_releases_unused_reservation_even_when_fully_claimed() {
 fn network_is_validated_and_exposed() {
     at(me(), now());
     assert_err(E108, || {
-        Contract::new(owner(), "devnet".into(), vec![], U64(1), U64(1), U64(MIN_RESOLVE_DELAY_NS));
+        Contract::new(owner(), "devnet".into(), vec![], U64(1), U64(1), U64(MIN_RESOLVE_DELAY_NS), U64(UPGRADE_DELAY));
     });
     assert_eq!(init("mainnet").get_network(), "mainnet");
 }
@@ -734,7 +737,7 @@ fn network_is_validated_and_exposed() {
 fn new_is_private() {
     at(owner(), now());
     assert_err(E107, || {
-        Contract::new(owner(), "testnet".into(), vec![], U64(1), U64(1), U64(MIN_RESOLVE_DELAY_NS));
+        Contract::new(owner(), "testnet".into(), vec![], U64(1), U64(1), U64(MIN_RESOLVE_DELAY_NS), U64(UPGRADE_DELAY));
     });
 }
 
@@ -986,6 +989,7 @@ fn get_config_view() {
             "min_lifetime_ns": v()["context"]["min_lifetime_ns"],
             "agent_ttl_ns": (7 * DAY_NS).to_string(),
             "resolve_delay_ns": MIN_RESOLVE_DELAY_NS.to_string(),
+            "upgrade_delay_ns": UPGRADE_DELAY.to_string(),
             "token_ids": ["usdc.testnet"],
             "storage_byte_cost": env::storage_byte_cost().as_yoctonear().to_string(),
         })
@@ -1088,16 +1092,16 @@ fn mainnet_refuses_the_public_test_keys() {
 fn mainnet_floors_resolve_delay_at_one_hour() {
     at(me(), now());
     assert_err(E108, || {
-        Contract::new(owner(), "mainnet".into(), vec![], U64(1), U64(1), U64(MIN_RESOLVE_DELAY_NS - 1));
+        Contract::new(owner(), "mainnet".into(), vec![], U64(1), U64(1), U64(MIN_RESOLVE_DELAY_NS - 1), U64(UPGRADE_DELAY));
     });
-    let m = Contract::new(owner(), "mainnet".into(), vec![], U64(1), U64(1), U64(MIN_RESOLVE_DELAY_NS));
+    let m = Contract::new(owner(), "mainnet".into(), vec![], U64(1), U64(1), U64(MIN_RESOLVE_DELAY_NS), U64(UPGRADE_DELAY));
     assert_eq!(m.get_config().resolve_delay_ns.0, MIN_RESOLVE_DELAY_NS);
 }
 
 #[test]
 fn testnet_may_use_a_short_resolve_delay() {
     at(me(), now());
-    let mut c = Contract::new(owner(), "testnet".into(), vec![usdc()], U64(1), U64(1), U64(5_000_000_000));
+    let mut c = Contract::new(owner(), "testnet".into(), vec![usdc()], U64(1), U64(1), U64(5_000_000_000), U64(UPGRADE_DELAY));
     c.ft_storage_deposit.insert(usdc(), USDC_MIN);
     at(owner(), now());
     c.add_owner_key(v()["keys"]["signer"].as_str().unwrap().into(), U64(deadline() + DAY_NS));
@@ -1124,4 +1128,142 @@ fn unknown_token_is_e126_even_with_a_bad_msg() {
     assert_err(E126, || {
         c.ft_on_transfer(sender(), U128(0), "not json".into());
     });
+}
+
+// ---- upgrades and ownership ----
+
+fn with_input(predecessor: AccountId, now: u64, input: &[u8]) {
+    let mut ctx = VMContextBuilder::new()
+        .current_account_id(me())
+        .predecessor_account_id(predecessor)
+        .block_timestamp(now)
+        .prepaid_gas(Gas::from_tgas(300))
+        .build();
+    ctx.input = std::rc::Rc::from(input);
+    testing_env!(ctx);
+}
+
+#[test]
+fn upgrade_guards() {
+    let mut c = base();
+    let code = b"\0asm new code".to_vec();
+    let hash = to_hex(&env::sha256_array(&code));
+
+    at(sender(), now());
+    assert_err(E107, || c.propose_upgrade(hash.clone()));
+    at(owner(), now());
+    assert_err(E108, || c.propose_upgrade(hash.to_uppercase()));
+    assert_err(E108, || c.cancel_upgrade());
+    with_input(owner(), now(), &code);
+    assert_err(E108, || {
+        c.apply_upgrade();
+    });
+
+    at(owner(), now());
+    c.propose_upgrade(hash.clone());
+    assert!(get_logs()[0].contains("\"event\":\"upgrade_proposed\""));
+    let p = c.pending_upgrade().unwrap();
+    assert_eq!((p.code_hash.as_str(), p.ready_at_ns.0), (hash.as_str(), now() + UPGRADE_DELAY));
+    assert_err(E108, || c.propose_upgrade(hash.clone()));
+
+    with_input(sender(), now() + UPGRADE_DELAY, &code);
+    assert_err(E107, || {
+        c.apply_upgrade();
+    });
+    with_input(owner(), now() + UPGRADE_DELAY - 1, &code);
+    assert_err(E107, || {
+        c.apply_upgrade();
+    });
+    with_input(owner(), now() + UPGRADE_DELAY, b"\0asm other code");
+    assert_err(E108, || {
+        c.apply_upgrade();
+    });
+    with_input(owner(), now() + UPGRADE_DELAY, &code);
+    c.apply_upgrade();
+    // deploy + migrate (one batch) and the on_upgrade callback are scheduled.
+    assert_eq!(near_sdk::test_utils::get_created_receipts().len(), 2);
+    assert!(c.pending_upgrade().is_some(), "consumed only by a successful on_upgrade");
+
+    with_result(sender(), now(), PromiseResult::Successful(vec![]));
+    assert_err(E107, || {
+        c.on_upgrade(hash.clone());
+    });
+    with_result(me(), now(), PromiseResult::Failed);
+    assert!(!c.on_upgrade(hash.clone()));
+    assert!(c.pending_upgrade().is_some(), "a failed migrate leaves the proposal pending");
+    with_result(me(), now(), PromiseResult::Successful(vec![]));
+    assert!(c.on_upgrade(hash.clone()));
+    assert!(c.pending_upgrade().is_none());
+    assert!(get_logs()[0].contains("\"event\":\"upgrade_applied\""));
+}
+
+#[test]
+fn cancel_upgrade_clears_the_proposal() {
+    let mut c = base();
+    at(owner(), now());
+    c.propose_upgrade(other_root(9));
+    at(sender(), now());
+    assert_err(E107, || c.cancel_upgrade());
+    at(owner(), now());
+    c.cancel_upgrade();
+    assert!(get_logs()[0].contains("\"event\":\"upgrade_cancelled\""));
+    assert!(c.pending_upgrade().is_none());
+    c.propose_upgrade(other_root(9)); // a new proposal is allowed again
+}
+
+#[test]
+fn migrate_is_private() {
+    let mut c = base();
+    at(owner(), now());
+    assert_err(E107, || c.migrate());
+    at(me(), now());
+    c.migrate();
+}
+
+#[test]
+fn owner_transfer_waits_the_delay_and_can_be_cancelled() {
+    let mut c = base();
+    let next = acc("next-owner.testnet");
+    at(sender(), now());
+    assert_err(E107, || c.propose_owner(next.clone()));
+    at(owner(), now());
+    assert_err(E108, || c.cancel_owner());
+    c.propose_owner(next.clone());
+    assert!(get_logs()[0].contains("\"event\":\"owner_proposed\""));
+    assert_eq!(c.pending_owner().unwrap().ready_at_ns.0, now() + UPGRADE_DELAY);
+    assert_err(E108, || c.propose_owner(acc("third.testnet")));
+
+    at(next.clone(), now() + UPGRADE_DELAY - 1);
+    assert_err(E107, || c.accept_owner());
+    at(acc("third.testnet"), now() + UPGRADE_DELAY);
+    assert_err(E107, || c.accept_owner());
+
+    at(owner(), now());
+    c.cancel_owner();
+    at(next.clone(), now() + UPGRADE_DELAY);
+    assert_err(E108, || c.accept_owner());
+
+    at(owner(), now());
+    c.propose_owner(next.clone());
+    at(next.clone(), now() + UPGRADE_DELAY);
+    c.accept_owner();
+    assert!(get_logs()[0].contains("\"event\":\"owner_changed\""));
+    assert_eq!(c.get_owner(), next);
+    assert!(c.pending_owner().is_none());
+    // The old owner has lost its rights.
+    at(owner(), now() + UPGRADE_DELAY);
+    assert_err(E107, || c.propose_upgrade(other_root(4)));
+}
+
+#[test]
+fn mainnet_floors_upgrade_delay_at_48_hours() {
+    at(me(), now());
+    assert_err(E108, || {
+        Contract::new(owner(), "mainnet".into(), vec![], U64(1), U64(1), U64(MIN_RESOLVE_DELAY_NS), U64(MIN_UPGRADE_DELAY_NS - 1));
+    });
+    let m = Contract::new(owner(), "mainnet".into(), vec![], U64(1), U64(1), U64(MIN_RESOLVE_DELAY_NS), U64(MIN_UPGRADE_DELAY_NS));
+    assert_eq!(m.get_config().upgrade_delay_ns.0, MIN_UPGRADE_DELAY_NS);
+    // Testnet may go shorter (the fresh testnet deploy uses 10 min).
+    at(me(), now());
+    Contract::new(owner(), "testnet".into(), vec![], U64(1), U64(1), U64(1), U64(600_000_000_000));
 }
