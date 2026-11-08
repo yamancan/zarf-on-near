@@ -129,53 +129,75 @@ They are unclaimed, but their commitments were made from placeholder addresses
 (`zarf-measure-N@example.com`), not Google accounts, so a real Google login cannot claim them.
 The real Google flow needs a campaign built from the claimants' real emails.
 
-## Planned (not run): fresh locked contract + one real upgrade through the timelock (T-UPG step 7)
+## zarf-near-1112.testnet: locked contract, one real upgrade through the timelock (2026-11-11)
 
-Runs after the reviewer passes the upgrade revision. `zarf-near-1111.testnet` predates the upgrade code and
-keeps its full-access key; this second contract shows the mainnet posture on testnet: **no
-full-access key**, code changes only through `propose_upgrade` → 10 min → `apply_upgrade`.
+The mainnet posture on testnet: **no full-access key**. Code changes only through
+`propose_upgrade` → `upgrade_delay_ns` (10 min here) → `apply_upgrade`. `zarf-near-1111.testnet`
+above predates the upgrade code and keeps its full-access key.
+
+Built from the reviewed revision (Rust 1.86.0, cargo-near 0.23.0, `non-reproducible-wasm --no-abi`).
 
 ```bash
-cd /tmp/zarf-work            # at the reviewed upgrade head
-export CARGO_BUILD_JOBS=4 CARGO_TARGET_DIR=$HOME/.cache/zarf-near/target-1.86-wt-contract
-
-# 1. Deploy + new (upgrade_delay_ns 10 min), token bounds, verifier key, a claim-only key for the
-#    same relayer (its own key file: one public key cannot be added twice), then lock.
 CREATE_ACCOUNTS=1 LOCK_CONTRACT=1 UPGRADE_DELAY_NS=600000000000 \
 CONTRACT_ID=zarf-near-1112.testnet OWNER_ID=zarf-near-owner-1111.testnet \
 RELAYER_ID=zarf-near-relayer-1111.testnet \
 RELAYER_KEY_FILE=<relayer-key-file> \
 scripts/deploy.sh
-#    Expect: "contract has no full-access key"; view_access_key_list(zarf-near-1112.testnet) is
-#    empty; get_config.upgrade_delay_ns = "600000000000"; contract_source_metadata.version "0.1.0".
-
-# 2. Build v2: the same reviewed source, with only the package version bumped 0.1.0 -> 0.1.1.
-#    NEP-330 contract_source_metadata reports that version, so the upgrade is observable
-#    without any test feature. Built in a throwaway worktree; nothing is committed.
-git worktree add /tmp/zarf-v2 HEAD
-sed -i 's/^version = "0.1.0"$/version = "0.1.1"/' /tmp/zarf-v2/contract/Cargo.toml
-(cd /tmp/zarf-v2/contract && flock -o $HOME/.cache/zarf-near/build.lock \
-  cargo near build non-reproducible-wasm --no-abi --out-dir target/near/v2)
-V2=/tmp/zarf-v2/contract/target/near/v2/zarf_near.wasm
-HASH=$(sha256sum "$V2" | cut -c1-64)            # lowercase hex, as propose_upgrade expects
-
-# 3. Propose (owner). Records ready_at_ns = now + 10 min; emits upgrade_proposed.
-near contract call-function as-transaction zarf-near-1112.testnet propose_upgrade \
-  json-args "{\"code_hash\":\"$HASH\"}" prepaid-gas '30 Tgas' attached-deposit '0 NEAR' \
-  sign-as zarf-near-owner-1111.testnet network-config testnet sign-with-legacy-keychain send
-
-# 4. Before ready_at_ns, apply must fail with E107 (recorded as the negative case); after it:
-near contract call-function as-transaction zarf-near-1112.testnet apply_upgrade \
-  file-args "$V2" prepaid-gas '300 Tgas' attached-deposit '0 NEAR' \
-  sign-as zarf-near-owner-1111.testnet network-config testnet sign-with-legacy-keychain send
-#    Expect: upgrade_applied; pending_upgrade() = null;
-#    contract_source_metadata.version = "0.1.1";
-#    view_account(zarf-near-1112.testnet).code_hash = base58(sha256(v2));
-#    get_config unchanged (state survived migrate).
-
-git worktree remove /tmp/zarf-v2
 ```
 
-To record here once run: account creation tx, deploy + new tx, the key-deletion tx and the
-empty `view_access_key_list`, the propose tx with `ready_at_ns`, the early E107 apply tx, the
-apply tx with per-receipt gas, and the before/after code hashes and versions.
+| Step | Transaction |
+| --- | --- |
+| create `zarf-near-1112.testnet` (faucet) | `3gmxoRk8keTzLzYJd2zoMmBxjDxQdUEWyw1XyyHBt8cv` |
+| deploy + `new` (one transaction; initial signer = testnet verifier key) | `F7qfDSVT83Jkw9RgHaY7v9MUdN2XQ7fAxytZkxqQQXeD` |
+| **lock: delete the only full-access key** | `7Qpr4hSe5PpMvaa6XhVuqMBsuhdvxhrhBaLhnURUC9Xj` |
+| register the escrow on USDC (owner pays 0.00125 NEAR) | `7vd7oAohg7mbjhPwup9ibzaAU4KhD1wPKTDB2s87rTxD` |
+| `refresh_token_storage` (owner) | `4V48Ap7QtWjyHDCMA978kvzEbwWpijtz1LmnCZDoe6co` |
+| relayer claim-only key `ed25519:69m6cJwr6KqXhLr58BAUKoTWbtX1oMPtf5daiUbgQ9mm` | `GN84N2JCuzi8XrLWupsABwKes79Ho7dUpP7JFkpN8Sgw` |
+
+After deploy: `view_access_key_list(zarf-near-1112.testnet)` = `[]`; code hash
+`J1HmKYYY1WXNH2Q4Ye3GnJYki7omF8CUZAL2iHyb4zjD` = base58 sha256 of the local release wasm (316,376 B);
+`contract_source_metadata.version` = `0.1.0`; `get_config.upgrade_delay_ns` = `600000000000`,
+`guardian_id` = `null`.
+
+### The upgrade
+
+v2 = the same source with only `version` in `contract/Cargo.toml` bumped 0.1.0 → 0.1.1, built in a
+throwaway worktree (not committed): 316,376 B, sha256 `e1438712…2a7036`, so no storage deposit.
+
+| Step | Transaction | Result |
+| --- | --- | --- |
+| `propose_upgrade` (owner), source for 0.1.0 -> 0.1.1 | `BCbYmYST3c6zhVXVGtZZrkAvBg8JymCawnR4VkV56uyi` | `upgrade_proposed`, `ready_at_ns` 1794406398030794170 |
+| `apply_upgrade` before `ready_at_ns` | `ALtDLJMMJK43P5gLJYHHxQxoyiGsvRKRa27xs8xicXy8` | refused, `E107_UNAUTHORIZED` |
+| campaign 0 created under v1 (3 × 1 USDC; prepay `CJbXmMgsEQVPnEWoR7eiVk3DMKtXsv4t8TVakGEcZgcY`) | `DhNZapacaAQqwfR7Eghpvx6XSCfjshZPMtSkHCQk6zS1` | `campaign_created` |
+| `apply_upgrade` after `ready_at_ns` (raw wasm via `file-args`, 300 Tgas) | `32iwv98Te8d6oSqECSbbGXDXYa9FNfJ3FucT49TjK5mu` | `upgrade_applied` |
+
+Apply gas: `apply_upgrade` 16.35 Tgas; deploy + `migrate` (one batch) 22.15; `on_upgrade` 1.66;
+total 56.23 Tgas.
+
+After: code hash `GALTKUjiwqfbxkrwUtY7qwyryZJHk6FwrCYdQ5yGzfC9` = base58(sha256(v2));
+`contract_source_metadata.version` = `0.1.1`; `watch().pending_upgrade` = null; campaign 0 unchanged
+(amount and balance 3000000, in_flight 0).
+
+### Evidence claim on the upgraded code (contract-level test, as above)
+
+Leaf 0 of campaign 0 → fresh, unregistered `zarf-near-dest-1112.testnet`
+(created `CF7Pa5Vgf1pamG6FPXVcNtfcuunMSdYwvf6Y5Kn8dKhJ`), signed locally with the testnet
+verifier seed, sent by the relayer's claim-only key with exactly 55 Tgas.
+
+| Transaction | Result | Gas |
+| --- | --- | --- |
+| `BLjpF12EbZp77Xz8Wh6cqL1jnriM59MBccc62yE9tQMB` | `claim_paid`; `claim_state` = claimed; destination USDC 1000000 | claim 3.91, storage_deposit 2.04, ft_transfer 2.30, on_claim 2.14; total 11.62 Tgas |
+| `FdUxYG5zYeNRPrAZPNEbpe7JxEq9AUesUkyD2zNietT2` (same commitment again) | refused, `E105_ALREADY_CLAIMED` | |
+
+Campaign 0 public leaf list (salts and placeholder emails stay on the deploy host; the
+placeholders are not Google accounts, so leaves 1 and 2 are not claimable by a real login):
+
+```json
+{ "campaign_id": "0", "merkle_root": "b16f95d49f920d41fbdffae49d1bb3929b2131f400ae7a34e48e8d428e8d3ad2",
+  "leaves": [
+    { "commitment": "2115df30cfe18401b770e0cb333989cd34e757cde099a45d71faa95c935ab37c", "amount": "1000000" },
+    { "commitment": "80a0163bfbb3da59ce667b6eda73d2f376669462f6d48bc91527489878f2d48a", "amount": "1000000" },
+    { "commitment": "f1862fa4c12d8effc8ea3dfdbfc0af344eb93ade40b3bfe8efc97a2ca2f4e8a5", "amount": "1000000" } ] }
+```
+
+Sender USDC after: 14000000 (14 USDC).
