@@ -200,8 +200,9 @@ pub struct Contract {
     owner_keys: IterableMap<[u8; 32], u64>,
     agents: LookupMap<[u8; 32], AttestedAgent>,
     campaigns: LookupMap<u64, Campaign>,
-    /// merkle_root -> campaign id: the root is an idempotency key (E132).
-    roots: LookupMap<[u8; 32], u64>,
+    /// (sender, merkle_root) -> campaign id: the root is a per-sender idempotency key
+    /// (E132). Per sender, so nobody can occupy another sender's root first.
+    roots: LookupMap<(AccountId, [u8; 32]), u64>,
     claims: LookupMap<(u64, [u8; 32]), ClaimStatus>,
     /// Sender -> free pre-pay (not reserved by any campaign).
     prepay: LookupMap<AccountId, u128>,
@@ -243,7 +244,7 @@ impl Contract {
             u64::MAX,
             Campaign {
                 sender: longest.clone(),
-                token: longest,
+                token: longest.clone(),
                 amount: u128::MAX,
                 merkle_root: [0xff; 32],
                 deadline_ns: u64::MAX,
@@ -255,12 +256,12 @@ impl Contract {
             },
         );
         let mut roots = LookupMap::new(StorageKey::Roots);
-        roots.insert([0xff; 32], u64::MAX);
+        roots.insert((longest.clone(), [0xff; 32]), u64::MAX);
         campaigns.flush();
         roots.flush();
         let campaign_base_bytes = env::storage_usage().saturating_sub(before);
         campaigns.remove(&u64::MAX);
-        roots.remove(&[0xff; 32]);
+        roots.remove(&(longest, [0xff; 32]));
         campaigns.flush();
         roots.flush();
         Self {
@@ -416,8 +417,8 @@ impl Contract {
         }
     }
 
-    pub fn campaign_by_root(&self, merkle_root: String) -> Option<U64> {
-        self.roots.get(&hex32(&merkle_root)).map(|id| U64(*id))
+    pub fn campaign_by_root(&self, sender: AccountId, merkle_root: String) -> Option<U64> {
+        self.roots.get(&(sender, hex32(&merkle_root))).map(|id| U64(*id))
     }
 
     pub fn get_config(&self) -> ConfigView {
@@ -453,7 +454,7 @@ impl Contract {
             fail(E108);
         }
         // A resent draft can never fund a second campaign.
-        if self.roots.contains_key(&merkle_root) {
+        if self.roots.contains_key(&(sender_id.clone(), merkle_root)) {
             fail(E132);
         }
         let now = env::block_timestamp();
@@ -484,7 +485,7 @@ impl Contract {
                 storage_reserved: reserve,
             },
         );
-        self.roots.insert(merkle_root, campaign_id);
+        self.roots.insert((sender_id.clone(), merkle_root), campaign_id);
         self.campaigns.flush();
         self.roots.flush();
         // Campaign bytes are spent; the per-claim part is reserved for this campaign only.

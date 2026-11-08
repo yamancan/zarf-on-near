@@ -168,13 +168,16 @@ the token is allow-listed, and stored (USDC: 0.00125 NEAR).
 
 Any error panics, so NEP-141 refunds the whole amount. On success it returns `"0"`.
 
-**`merkle_root` is an idempotency key.** A root that already belongs to a campaign is refused
-with `E132_DUPLICATE_CAMPAIGN` (refunded). Each draft has fresh random salts, so a repeated
-root can only be a resend of the same draft, and a draft can never be funded twice whatever
-the app does. The view `campaign_by_root({ merkle_root })` → `"<u64>" | null` exposes the
-mapping. The create app persists `{ draft, sender }` **before** calling the wallet. After a
-wallet error or a reload, it never says "nothing was sent": it checks `campaign_by_root`, and
-only if that is null does it allow Create again.
+**`(sender_id, merkle_root)` is an idempotency key.** A campaign from the same NEP-141
+`sender_id` with the same root is refused with `E132_DUPLICATE_CAMPAIGN` (refunded). Each
+draft has fresh random salts, so a repeat can only be a resend of the same draft, and a
+draft can never be funded twice whatever the app does. The key includes the sender, so
+nobody else can occupy a sender's root by front-running it. The view
+`campaign_by_root({ sender, merkle_root })` → `"<u64>" | null` exposes the mapping. The
+probe in `new` measures this entry, and its cost is included in `campaign_bytes_cost`. The create app persists `{ draft, sender }` **before** calling the wallet. After a
+wallet error or a reload, it never says "nothing was sent": it checks
+`campaign_by_root({ sender, merkle_root })`, and only if that is null does it allow Create
+again.
 
 `claim`:
 
@@ -359,7 +362,9 @@ NEP-297 events in the receipt logs:
 | `claim_reverted` | 409 | `{ "error": "E115_TOKEN_TRANSFER_FAILED", "tx_hash" }` |
 | neither, or a timeout | 202 | `{ "tx_hash", "status": "submitted" }` |
 
-The claim app polls `claim_state` in every case before it shows "Claimed".
+The claim app trusts 200 `paid` and 409 `E115`: both come from our contract's events in the
+executed receipt. On 202 it polls `claim_state` at `optimistic` finality, and treats
+`unclaimed` as final only after `pending` was seen or after a 20 s grace.
 
 ## Verifier errors (HTTP)
 
@@ -413,5 +418,5 @@ where the name matches; everything else is new.
 | `E128_INSUFFICIENT_STORAGE` | free pre-pay too low at creation, or the campaign reservation too low at claim |
 | `E129_INSUFFICIENT_BALANCE` | campaign balance < amount |
 | `E130_INSUFFICIENT_GAS` | prepaid gas below what the transfer + callback need (checked before `pending`) |
-| `E132_DUPLICATE_CAMPAIGN` | `ft_on_transfer` with a `merkle_root` that already has a campaign |
+| `E132_DUPLICATE_CAMPAIGN` | `ft_on_transfer` from a sender that already has a campaign with this `merkle_root` |
 | `E131_INVALID_ATTESTATION` | `register_agent` quote/measurement/ppid check fails |
