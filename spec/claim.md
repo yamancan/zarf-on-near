@@ -9,8 +9,9 @@ then regenerate.
 This file has one maintainer; other contributors propose changes rather than editing it.
 
 v2 changes from v1: per-recipient salt in the claim link (nothing is sealed); verifier
-registry inside the escrow (Mode W owner keys, Mode T attested Shade agents); `network` as
-an init arg; events, views, check order and deadline boundary defined; ASCII-only emails.
+registry inside the escrow (Mode W owner keys; Mode T TEE-attested verifier agents, roadmap);
+`network` as an init arg; events, views, check order and deadline boundary defined; ASCII-only
+emails.
 
 ## Encodings
 
@@ -109,29 +110,32 @@ signature = ed25519_sign(signer_priv, payload)        // over the raw payload by
 
 ## Verifier registry (in the escrow)
 
-The signer is identified by `signer`, the hex of its 32-byte ed25519 public key. For a Shade
-agent this is also its implicit account id.
+The signer is identified by `signer`, the hex of its 32-byte ed25519 public key. For an
+attested agent this is also its implicit account id.
 
 ```
 agents: signer -> { kind: Owner | Attested { measurement_id }, valid_until_ns }
 ```
 
 - **Mode W:** the owner calls `add_owner_key({ signer, valid_until_ns })` and `remove_agent({ account_id })`
-  (`account_id` = the signer hex, matching the Shade template's argument name).
+  (`account_id` = the signer hex, the argument name Mode T's `get_agent` uses too).
   `add_owner_key` on a signer that already exists (of either kind) is refused with
   `E108_INVALID_INPUT`. An entry never changes kind. To extend a key, call `remove_agent`
   and `add_owner_key` in **one batched transaction**: a gap between them freezes that key's
   campaigns.
-- **Mode T:** these methods keep the Shade CLI's argument shapes, so `shade deploy` drives them unchanged.
+- **Mode T (roadmap, not shipped):** a TEE-attested verifier. The deployed contract has the
+  `"attested"` policy path and `get_agent`, but no approval or registration method below, so an
+  attested campaign fails creation with `E127_NO_VERIFIER`. NEAR's docs advise against the
+  Shade Agent Framework, so Mode T will not depend on it. The planned methods:
   - `approve_measurements({ measurements })` / `remove_measurements`, owner only.
   - `approve_ppids({ ppids })` / `remove_ppids`, owner only.
   - `register_agent({ attestation })`, payable. Called by the agent; it runs
-    `shade_attestation::verify` with `report_data` = the caller's account id, and stores
+    the TEE attestation check with `report_data` = the caller's account id, and stores
     `Attested { measurement_id }` with `valid_until_ns = now + agent_ttl_ns`
-    (`agent_ttl_ns` is an init arg: 7 days, the CLI's re-registration period).
+    (`agent_ttl_ns` is an init arg: 7 days, the agent's re-registration period).
     The first registration attaches 0.005 NEAR, so storage must cost ≤ 0.005 NEAR. A
     refresh by an agent that is already registered attaches **0** and must not be charged.
-    Returns `true`, since the Shade client treats a falsy result as failure.
+    Returns `true`; an agent client treats a falsy result as failure.
   - `get_agent({ account_id })`, a view.
 - **One id per measurement:**
   `measurement_id = sha256(canonical_json(measurement))`. `measurement` is a single
