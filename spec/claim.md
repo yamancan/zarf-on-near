@@ -391,7 +391,15 @@ The contract is upgradeable, but only through its own code and only after a publ
   neither run twice nor be reported as cancelled while it still lands. On success `on_upgrade`
   clears the proposal and emits `upgrade_applied`. On failure it clears the flag, keeps the
   proposal pending and emits `upgrade_failed { code_hash }`. `on_upgrade` acts only on the
-  proposal whose `code_hash` it was scheduled for.
+  proposal whose `code_hash` it was scheduled for. The flag expires 24 hours after
+  `apply_upgrade` (a fixed constant, independent of `upgrade_delay_ns`); expiry exists only to
+  unstick a callback that failed. NEAR sets no upper bound on receipt delay, so a cancel after
+  expiry emits `upgrade_cancelled { code_hash, was_applying: true }`: watchers must treat it
+  as "the batch may still land".
+- The `E128` storage check runs in the new code's `migrate`, inside the deploy batch, so a
+  failure rolls the deploy back. Every future `migrate` must keep it as its **last** step,
+  after any state the migration writes. Attach `storage_cost(new_len − old_len)` plus a
+  margin; any surplus stays in the contract.
 - `migrate()` is private and lives in the new code. State layout changes go there. Pending
   claims must survive a migration. `migrate` must be idempotent, and every version must keep
   `on_upgrade`, `on_claim`, `on_reclaim` and `on_token_storage` with the same names and
@@ -436,7 +444,7 @@ The contract is upgradeable, but only through its own code and only after a publ
 - The owner is an ordinary NEAR account, so it can be a multisig or a DAO contract without
   any change here.
 
-Events: `upgrade_proposed { code_hash, source, ready_at_ns }`, `upgrade_cancelled { code_hash }`,
+Events: `upgrade_proposed { code_hash, source, ready_at_ns }`, `upgrade_cancelled { code_hash, was_applying? }`,
 `upgrade_applied { code_hash }`, `upgrade_failed { code_hash }`, `owner_proposed { new_owner, ready_at_ns }`,
 `owner_changed { old_owner, new_owner }`.
 
