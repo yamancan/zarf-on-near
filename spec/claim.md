@@ -355,17 +355,22 @@ The contract is upgradeable, but only through its own code and only after a publ
   refuses a value below 48 h (`E108`).
 - `propose_upgrade({ code_hash })`, owner only. Stores `{ code_hash, ready_at_ns = now +
   upgrade_delay_ns }` and emits `upgrade_proposed`. Only one proposal may be pending (`E108`).
-- `cancel_upgrade()`, owner only. Emits `upgrade_cancelled`.
+- `cancel_upgrade()`, owner only. Emits `upgrade_cancelled`. With nothing pending → `E108`.
+- A malformed or uppercase `code_hash` → `E108`.
 - `apply_upgrade()`, owner only. Its input is the raw wasm (not JSON). It requires a pending
   proposal (`E108`), `now >= ready_at_ns` (`E107`) and `sha256(input) == code_hash` (`E108`).
   It then deploys the code to its own account and calls `migrate()` in the **same batch**,
-  so a failing migration rolls the deploy back. Emits `upgrade_applied`.
+  so a failing migration rolls the deploy back. A private callback, `on_upgrade`, runs after
+  the batch: only on success does it clear the proposal and emit `upgrade_applied`. After a
+  failed migration the proposal stays pending, so it can be retried or cancelled.
 - `migrate()` is private and lives in the new code. State layout changes go there. Pending
   claims must survive a migration.
 - `pending_upgrade()` → `{ code_hash, ready_at_ns } | null`.
 - **Ownership moves in two steps and waits the same delay:** `propose_owner({ new_owner })`
   (owner) → after `upgrade_delay_ns`, `accept_owner()` (the new owner). `cancel_owner()`
-  (owner). Views: `get_owner()`, `pending_owner()`. An immediate transfer would let a thief
+  (owner). A second `propose_owner` while one is pending → `E108`. `accept_owner` by the wrong
+  account or too early → `E107`; with nothing pending → `E108`. `cancel_owner` with nothing
+  pending → `E108`. Views: `get_owner()`, `pending_owner()`. An immediate transfer would let a thief
   with the owner key lock the team out before anyone could cancel.
 - The owner is an ordinary NEAR account, so it can be a multisig or a DAO contract without
   any change here.
