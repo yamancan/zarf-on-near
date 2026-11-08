@@ -155,7 +155,7 @@ Trust-model consequences, to be stated in the README:
 
 ## Contract calls (JSON args)
 
-`new({ owner_id, network, token_ids, min_lifetime_ns, agent_ttl_ns, resolve_delay_ns, upgrade_delay_ns, initial_signers })`. `network` and
+`new({ owner_id, guardian_id, network, token_ids, min_lifetime_ns, agent_ttl_ns, resolve_delay_ns, upgrade_delay_ns, initial_signers })`. `network` and
 `min_lifetime_ns` are immutable. `min_lifetime_ns` = 600 s on testnet and 30 days on mainnet.
 `ft_storage_deposit` is read from each allowed token's `storage_balance_bounds().min` when
 the token is allow-listed, and stored (USDC: 0.00125 NEAR).
@@ -390,6 +390,17 @@ The contract is upgradeable, but only through its own code and only after a publ
   other's proposals, so upgrades and ownership changes freeze. Existing campaigns stay safe.
   The response is: stop creating campaigns, let existing ones run to their deadlines, and
   reclaim. Only an owner that is a multisig or DAO from the start avoids this.
+- **Guardian.** `guardian_id` is an optional, immutable init arg (`null` = no guardian),
+  exposed by `get_config`. It can only delay, never act:
+  - `cancel_upgrade()`, `cancel_owner()` and `remove_agent` on an owner key that is **not yet
+    active** may be called by the guardian as well as the owner;
+  - `freeze_proposals()`, guardian only, sets `frozen_until_ns = now + 7 days`. While frozen,
+    `propose_upgrade`, `propose_owner` and `add_owner_key` are refused (`E107`), and
+    `apply_upgrade` and `accept_owner` too. The owner cannot lift a freeze.
+  - It can never propose, apply, add keys, move funds or change any rule. A stolen guardian
+    key can only delay upgrades.
+  The guardian breaks the standoff described above: one cancel plus a freeze buys a week to
+  warn users, with a key that is not the owner's. It changes only through an upgrade.
 - There is no early reclaim while an upgrade is pending. Recipients' exit is to claim;
   an early exit for senders would break the deadline promised to recipients.
 - **Ownership moves in two steps and waits the same delay:** `propose_owner({ new_owner })`
@@ -405,8 +416,14 @@ Events: `upgrade_proposed { code_hash, source, ready_at_ns }`, `upgrade_cancelle
 `upgrade_applied { code_hash }`, `owner_proposed { new_owner, ready_at_ns }`,
 `owner_changed { old_owner, new_owner }`.
 
-Trust statement for the README: the owner can replace the contract's code, and with it every
-rule here, but only `upgrade_delay_ns` after announcing the new code's hash on chain.
+Trust statement for the README (accurate, not reassuring): the owner account can replace
+the contract's code, and with it move every escrowed token, one hour after announcing the new
+code's hash on chain. One hour is too short for users to react: recipients cannot be expected
+to claim within it, and senders cannot reclaim before the deadline. Protection therefore
+rests on the operator (and the guardian, if set) watching these announcements and cancelling
+a bad one within the hour. The README also states whether the owner is a single key or a
+multisig, whether a guardian is set, and that builds are not reproducible yet, so a proposed
+hash cannot be verified against source by third parties.
 
 ## Off-chain interfaces
 
