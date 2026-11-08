@@ -222,6 +222,9 @@ Storage, per campaign (create app):
   `leaf_count` was understated. After the deadline → `E125`; zero deposit → `E109`.
 - `prepay_withdraw`: amount > free → `E128`; amount 0 → `E109`.
 - `get_campaign` also returns `storage_reserved`.
+- Each sender has a per-sender list of campaign ids, appended in `ft_on_transfer` and read
+  with `campaigns_of`. Its entry is part of the measured campaign cost and of the
+  `campaign_bytes_cost` bound.
 - `claim_entry_cost` is measured by the contract (storage bytes of one claim entry ×
   storage price) and exposed with `ft_storage_deposit` by `storage_costs({ token_id })` →
   `{ ft_storage_deposit, claim_entry_cost, per_claim_storage, campaign_bytes_cost }`.
@@ -313,6 +316,7 @@ get_campaign({ campaign_id }) -> { sender, token, amount, merkle_root, deadline_
                                    balance, in_flight, policy, snapshot: ["<hex32>"],
                                    storage_reserved } | null
 claim_state({ campaign_id, commitment }) -> "unclaimed" | "pending" | "claimed"
+campaigns_of({ sender, from_index?: u32, limit?: u32 }) -> ["<u64>"]   // creation order; limit default 50, max 100
 get_agent({ account_id }) -> { kind: "owner" | "attested", measurement_id?, valid_until_ns } | null
 required_claim_gas() -> "<u64>"      // the relayer attaches at least this; the contract owns the number
 ```
