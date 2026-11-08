@@ -37,6 +37,20 @@ cargo-near 0.23.0, `cargo near build non-reproducible-wasm --no-abi`.
 - Relayer function-call key: `ed25519:28QjUwJb6imTpgR2UHM4ijYNe7F6gaczoX6qBKLTwk9k`, receiver
   `zarf-near-1111.testnet`, methods `["claim"]`, allowance unlimited.
 
+## Trust: this contract is upgradeable
+
+**This testnet contract is upgradeable by the deployer's full-access key.** Whoever holds that
+key can redeploy the code and move every escrowed token. It is kept on purpose on testnet, where
+we may still redeploy. `scripts/deploy-testnet.sh` has an opt-in `LOCK_CONTRACT=1` final step that
+deletes every full-access key and verifies none remains; it was **not** run here. Whether mainnet
+is made immutable is the owner's decision.
+
+`view_access_key_list(zarf-near-1111.testnet)`, 2026-11-11:
+
+| Public key | Permission |
+| --- | --- |
+| `ed25519:2ow2PJ1iYhtP4gqKtexdqgDpQkC7Q7VxrJXr8XDmNDZE` | FullAccess |
+
 ## Views after deploy (block ~277206411)
 
 ```text

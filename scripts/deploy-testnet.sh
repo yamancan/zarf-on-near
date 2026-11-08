@@ -19,6 +19,8 @@
 #   SIGNER_VALID_DAYS    default 60; must outlive every campaign deadline (spec snapshot rule)
 #   CREATE_ACCOUNTS=1    create CONTRACT_ID / OWNER_ID with the testnet faucet if missing
 #   DRY_RUN=1            print every command instead of running it
+#   LOCK_CONTRACT=1      finally delete every full-access key on CONTRACT_ID (irreversible: the
+#                        code can never be redeployed). Meant for mainnet; the owner decides.
 #
 # Testnet only. Mainnet (T9) gets its own script with a 30-day min lifetime.
 set -euo pipefail
@@ -147,6 +149,23 @@ if [[ -n ${RELAYER_ID:-} ]]; then
   echo "relayer public key: $relayer_pub"
 fi
 
+full_access_keys() {
+  curl -sSf "$RPC" -H 'content-type: application/json' -d "$(jq -nc --arg a "$CONTRACT_ID" \
+    '{jsonrpc:"2.0",id:1,method:"query",params:{request_type:"view_access_key_list",finality:"final",account_id:$a}}')" |
+    jq -er '[.result.keys[] | select(.access_key.permission == "FullAccess") | .public_key] | join(",")'
+}
+
+if [[ ${LOCK_CONTRACT:-} == 1 ]]; then
+  echo "== lock: delete every full-access key on $CONTRACT_ID"
+  keys=$( [[ ${DRY_RUN:-} == 1 ]] && echo "<full-access keys>" || full_access_keys )
+  [[ -n $keys ]] && run near account delete-keys "$CONTRACT_ID" public-keys "$keys" \
+    network-config "$NETWORK" sign-with-legacy-keychain send
+  if [[ ${DRY_RUN:-} != 1 && -n $(full_access_keys) ]]; then
+    echo "LOCK FAILED: full-access keys remain on $CONTRACT_ID: $(full_access_keys)" >&2
+    exit 70
+  fi
+fi
+
 [[ ${DRY_RUN:-} == 1 ]] && exit 0
 echo "== views"
 echo "network:            $(view "$CONTRACT_ID" get_network)"
@@ -154,3 +173,9 @@ echo "storage_costs:      $(view "$CONTRACT_ID" storage_costs "$(jq -nc --arg u 
 echo "agent:              $(view "$CONTRACT_ID" get_agent "$(jq -nc --arg s "$SIGNER_PUBKEY" '{account_id:$s}')")"
 echo "required_claim_gas: $(view "$CONTRACT_ID" required_claim_gas)"
 echo "deployed: https://testnet.nearblocks.io/address/$CONTRACT_ID"
+remaining=$(full_access_keys)
+if [[ -n $remaining ]]; then
+  echo "WARNING: contract is upgradeable by: $remaining" >&2
+else
+  echo "contract has no full-access key: its code can no longer be changed"
+fi
