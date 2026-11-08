@@ -9,8 +9,12 @@
 # Required env:
 #   CONTRACT_ID      account to deploy to (its full-access key in ~/.near-credentials)
 #   OWNER_ID         contract owner (key in ~/.near-credentials)
-#   SIGNER_PUBKEY    verifier ed25519 public key, 64 lowercase hex chars
 # Optional env:
+#   SIGNER_PUBKEY    verifier ed25519 public key (64 lowercase hex). Default: derived from
+#                    VERIFIER_SEED_FILE, which is created (32 random bytes, mode 600) if missing
+#   VERIFIER_SEED_FILE   default ~/.config/zarf-near/testnet-verifier.seed (testnet only)
+#   RELAYER_ID       relayer account; gets a claim-only function-call key whose secret goes to
+#                    RELAYER_KEY_FILE (default ~/.config/zarf-near/testnet-relayer.key, mode 600)
 #   USDC_ID              default: Circle's testnet USDC (verified on chain in docs/spikes/S1.md)
 #   SIGNER_VALID_DAYS    default 60; must outlive every campaign deadline (spec snapshot rule)
 #   CREATE_ACCOUNTS=1    create CONTRACT_ID / OWNER_ID with the testnet faucet if missing
@@ -24,12 +28,27 @@ RPC=https://rpc.testnet.near.org
 USDC_ID=${USDC_ID:-3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af}
 MIN_LIFETIME_NS=600000000000      # 10 min on testnet (spec)
 AGENT_TTL_NS=604800000000000      # 7 days, the Shade CLI re-registration period (spec)
+RESOLVE_DELAY_NS=3600000000000    # 1 h before resolve_pending may act (spec)
+VERIFIER_SEED_FILE=${VERIFIER_SEED_FILE:-$HOME/.config/zarf-near/testnet-verifier.seed}
+RELAYER_KEY_FILE=${RELAYER_KEY_FILE:-$HOME/.config/zarf-near/testnet-relayer.key}
 SIGNER_VALID_DAYS=${SIGNER_VALID_DAYS:-60}
 
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 wasm="$repo_root/contract/target/near/release/zarf_near.wasm"
 
-: "${CONTRACT_ID:?set CONTRACT_ID}" "${OWNER_ID:?set OWNER_ID}" "${SIGNER_PUBKEY:?set SIGNER_PUBKEY}"
+: "${CONTRACT_ID:?set CONTRACT_ID}" "${OWNER_ID:?set OWNER_ID}"
+umask 077
+# Secrets are written to files only, never printed. Keys are testnet-only.
+if [[ -z ${SIGNER_PUBKEY:-} ]]; then
+  mkdir -p "$(dirname "$VERIFIER_SEED_FILE")"
+  [[ -s $VERIFIER_SEED_FILE ]] || node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))' >"$VERIFIER_SEED_FILE"
+  chmod 600 "$VERIFIER_SEED_FILE"
+  SIGNER_PUBKEY=$(node -e '
+    const c = require("crypto"), seed = Buffer.from(require("fs").readFileSync(process.argv[1], "utf8").trim(), "hex");
+    if (seed.length !== 32) throw new Error("seed must be 32 bytes hex");
+    const k = c.createPrivateKey({ key: Buffer.concat([Buffer.from("302e020100300506032b657004220420", "hex"), seed]), format: "der", type: "pkcs8" });
+    process.stdout.write(c.createPublicKey(k).export({ format: "der", type: "spki" }).subarray(-32).toString("hex"));' "$VERIFIER_SEED_FILE")
+fi
 [[ $SIGNER_PUBKEY =~ ^[0-9a-f]{64}$ ]] || { echo "SIGNER_PUBKEY must be 64 lowercase hex" >&2; exit 64; }
 # The vector keys' seeds are public (spec/vectors.json): anyone could sign claims with them.
 # Hard-coded like the contract's PUBLIC_TEST_KEYS (a contract test pins both to the vectors).
@@ -38,7 +57,8 @@ for test_key in 8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c
   [[ $SIGNER_PUBKEY != "$test_key" ]] ||
     { echo "SIGNER_PUBKEY is a public test key from spec/vectors.json; use the verifier's real key" >&2; exit 64; }
 done
-[[ $CONTRACT_ID == *.testnet && $OWNER_ID == *.testnet ]] || { echo "testnet accounts only" >&2; exit 64; }
+[[ $CONTRACT_ID == *.testnet && $OWNER_ID == *.testnet && ${RELAYER_ID:-x.testnet} == *.testnet ]] ||
+  { echo "testnet accounts only" >&2; exit 64; }
 
 run() {
   if [[ ${DRY_RUN:-} == 1 ]]; then printf '+'; printf ' %q' "$@"; echo; else "$@"; fi
@@ -71,7 +91,7 @@ jq -e '.symbol == "USDC" and .decimals == 6' <<<"$meta" >/dev/null ||
   { echo "unexpected token metadata: $meta" >&2; exit 65; }
 
 if [[ ${CREATE_ACCOUNTS:-} == 1 ]]; then
-  for account in "$CONTRACT_ID" "$OWNER_ID"; do
+  for account in "$CONTRACT_ID" "$OWNER_ID" ${RELAYER_ID:+"$RELAYER_ID"}; do
     if [[ ${DRY_RUN:-} == 1 ]] || ! near account view-account-summary "$account" \
         network-config "$NETWORK" now >/dev/null 2>&1; then
       run near account create-account sponsor-by-faucet-service "$account" \
@@ -86,7 +106,8 @@ run make -C "$repo_root/contract" wasm
 
 echo "== deploy + new (one transaction)"
 init_args=$(jq -nc --arg o "$OWNER_ID" --arg u "$USDC_ID" --arg m "$MIN_LIFETIME_NS" --arg t "$AGENT_TTL_NS" \
-  '{owner_id:$o, network:"testnet", token_ids:[$u], min_lifetime_ns:$m, agent_ttl_ns:$t}')
+  --arg r "$RESOLVE_DELAY_NS" \
+  '{owner_id:$o, network:"testnet", token_ids:[$u], min_lifetime_ns:$m, agent_ttl_ns:$t, resolve_delay_ns:$r}')
 run near contract deploy "$CONTRACT_ID" use-file "$wasm" \
   with-init-call new json-args "$init_args" prepaid-gas '100 Tgas' attached-deposit '0 NEAR' \
   network-config "$NETWORK" sign-with-legacy-keychain send
@@ -97,6 +118,34 @@ call refresh_token_storage "$(jq -nc --arg u "$USDC_ID" '{token_id:$u}')" '50 Tg
 echo "== add_owner_key (owner)"
 valid_until=$(( ($(date +%s) + SIGNER_VALID_DAYS * 86400) * 1000000000 ))
 call add_owner_key "$(jq -nc --arg s "$SIGNER_PUBKEY" --arg v "$valid_until" '{signer:$s, valid_until_ns:$v}')"
+
+if [[ -n ${RELAYER_ID:-} ]]; then
+  echo "== relayer claim-only key ($RELAYER_ID)"
+  mkdir -p "$(dirname "$RELAYER_KEY_FILE")"
+  if [[ ! -s $RELAYER_KEY_FILE ]]; then
+    # near secret format: ed25519:<base58(seed || pub)>; written to the file only.
+    node -e '
+      const c = require("crypto"), { privateKey, publicKey } = c.generateKeyPairSync("ed25519");
+      const seed = privateKey.export({ format: "der", type: "pkcs8" }).subarray(-32);
+      const pub = publicKey.export({ format: "der", type: "spki" }).subarray(-32);
+      const A = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+      const b58 = (b) => { let n = BigInt("0x" + b.toString("hex")), o = ""; for (; n > 0n; n /= 58n) o = A[Number(n % 58n)] + o; for (const x of b) { if (x) break; o = "1" + o; } return o; };
+      process.stdout.write("ed25519:" + b58(Buffer.concat([seed, pub])));' >"$RELAYER_KEY_FILE"
+  fi
+  chmod 600 "$RELAYER_KEY_FILE"
+  relayer_pub=$(node -e '
+    const A = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    const s = require("fs").readFileSync(process.argv[1], "utf8").trim().replace(/^ed25519:/, "");
+    let n = 0n; for (const ch of s) n = n * 58n + BigInt(A.indexOf(ch));
+    const b = Buffer.from(n.toString(16).padStart(128, "0"), "hex");
+    const pub = b.subarray(32), out = []; let m = BigInt("0x" + pub.toString("hex"));
+    for (; m > 0n; m /= 58n) out.unshift(A[Number(m % 58n)]);
+    process.stdout.write("ed25519:" + out.join(""));' "$RELAYER_KEY_FILE")
+  run near account add-key "$RELAYER_ID" grant-function-call-access --allowance unlimited \
+    --contract-account-id "$CONTRACT_ID" --function-names claim \
+    use-manually-provided-public-key "$relayer_pub" network-config "$NETWORK" sign-with-legacy-keychain send
+  echo "relayer public key: $relayer_pub"
+fi
 
 [[ ${DRY_RUN:-} == 1 ]] && exit 0
 echo "== views"
