@@ -124,3 +124,54 @@ valid account id, and the sandbox already covers transfer and registration failu
 They are unclaimed, but their commitments were made from placeholder addresses
 (`zarf-measure-N@example.com`), not Google accounts, so a real Google login cannot claim them.
 The real Google flow needs a campaign built from the claimants' real emails.
+
+## Planned (not run): fresh locked contract + one real upgrade through the timelock (T-UPG step 7)
+
+Runs after the reviewer passes the upgrade revision. `zarf-near-1111.testnet` predates the upgrade code and
+keeps its full-access key; this second contract shows the mainnet posture on testnet: **no
+full-access key**, code changes only through `propose_upgrade` → 10 min → `apply_upgrade`.
+
+```bash
+cd /tmp/zarf-work            # at the reviewed upgrade head
+export CARGO_BUILD_JOBS=4 CARGO_TARGET_DIR=$HOME/.cache/zarf-near/target-1.86
+
+# 1. Deploy + new (upgrade_delay_ns 10 min), token bounds, verifier key, a claim-only key for the
+#    same relayer (its own key file: one public key cannot be added twice), then lock.
+CREATE_ACCOUNTS=1 LOCK_CONTRACT=1 UPGRADE_DELAY_NS=600000000000 \
+CONTRACT_ID=zarf-near-1112.testnet OWNER_ID=zarf-near-owner-1111.testnet \
+RELAYER_ID=zarf-near-relayer-1111.testnet \
+RELAYER_KEY_FILE=<relayer-key-file> \
+scripts/deploy-testnet.sh
+#    Expect: "contract has no full-access key"; view_access_key_list(zarf-near-1112.testnet) is
+#    empty; get_config.upgrade_delay_ns = "600000000000"; contract_source_metadata.version "0.1.0".
+
+# 2. Build v2: the same reviewed source, with only the package version bumped 0.1.0 -> 0.1.1.
+#    NEP-330 contract_source_metadata reports that version, so the upgrade is observable
+#    without any test feature. Built in a throwaway worktree; nothing is committed.
+git worktree add /tmp/zarf-v2 HEAD
+sed -i 's/^version = "0.1.0"$/version = "0.1.1"/' /tmp/zarf-v2/contract/Cargo.toml
+(cd /tmp/zarf-v2/contract && flock -o $HOME/.cache/zarf-near/build.lock \
+  cargo near build non-reproducible-wasm --no-abi --out-dir target/near/v2)
+V2=/tmp/zarf-v2/contract/target/near/v2/zarf_near.wasm
+HASH=$(sha256sum "$V2" | cut -c1-64)            # lowercase hex, as propose_upgrade expects
+
+# 3. Propose (owner). Records ready_at_ns = now + 10 min; emits upgrade_proposed.
+near contract call-function as-transaction zarf-near-1112.testnet propose_upgrade \
+  json-args "{\"code_hash\":\"$HASH\"}" prepaid-gas '30 Tgas' attached-deposit '0 NEAR' \
+  sign-as zarf-near-owner-1111.testnet network-config testnet sign-with-legacy-keychain send
+
+# 4. Before ready_at_ns, apply must fail with E107 (recorded as the negative case); after it:
+near contract call-function as-transaction zarf-near-1112.testnet apply_upgrade \
+  file-args "$V2" prepaid-gas '300 Tgas' attached-deposit '0 NEAR' \
+  sign-as zarf-near-owner-1111.testnet network-config testnet sign-with-legacy-keychain send
+#    Expect: upgrade_applied; pending_upgrade() = null;
+#    contract_source_metadata.version = "0.1.1";
+#    view_account(zarf-near-1112.testnet).code_hash = base58(sha256(v2));
+#    get_config unchanged (state survived migrate).
+
+git worktree remove /tmp/zarf-v2
+```
+
+To record here once run: account creation tx, deploy + new tx, the key-deletion tx and the
+empty `view_access_key_list`, the propose tx with `ready_at_ns`, the early E107 apply tx, the
+apply tx with per-receipt gas, and the before/after code hashes and versions.
