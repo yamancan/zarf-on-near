@@ -342,7 +342,7 @@ fn signer_added_after_creation_is_not_in_snapshot() {
     c.add_owner_key(rogue.clone(), U64(deadline() + DAY_NS));
     assert_eq!(c.get_campaign(U64(7)).unwrap().snapshot, vec![signer.clone()]);
     at(usdc(), now());
-    c.ft_on_transfer(sender(), U128(1), create_msg(&root(), deadline(), "owner"));
+    c.ft_on_transfer(sender(), U128(1), create_msg(&other_root(1), deadline(), "owner"));
     let mut fresh = c.get_campaign(U64(9)).unwrap().snapshot;
     fresh.sort();
     let mut both = vec![signer, rogue];
@@ -401,6 +401,10 @@ fn low_gas_is_e130_and_view_reports_requirement() {
 fn root() -> String {
     v()["campaigns"]["main"]["merkle_root"].as_str().unwrap().into()
 }
+/// A root no vector uses (roots are idempotency keys, E132).
+fn other_root(i: u8) -> String {
+    to_hex(&[i; 32])
+}
 
 #[test]
 fn create_assigns_counter_ids_snapshots_and_emits() {
@@ -411,7 +415,7 @@ fn create_assigns_counter_ids_snapshots_and_emits() {
     assert!(matches!(r, PromiseOrValue::Value(U128(0))));
     assert!(get_logs()[0].starts_with("EVENT_JSON:{"));
     assert!(get_logs()[0].contains("\"event\":\"campaign_created\""));
-    c.ft_on_transfer(sender(), U128(1), create_msg(&root(), deadline(), "owner"));
+    c.ft_on_transfer(sender(), U128(1), create_msg(&other_root(1), deadline(), "owner"));
     assert!(c.get_campaign(U64(2)).is_none());
 
     let view = serde_json::to_value(c.get_campaign(U64(0)).unwrap()).unwrap();
@@ -959,4 +963,28 @@ fn get_config_view() {
             "storage_byte_cost": env::storage_byte_cost().as_yoctonear().to_string(),
         })
     );
+}
+
+#[test]
+fn duplicate_root_is_e132_and_changes_nothing() {
+    let mut c = base();
+    at(usdc(), now());
+    c.ft_on_transfer(sender(), U128(500), create_msg(&root(), deadline(), "owner"));
+    assert_eq!(c.campaign_by_root(root()), Some(U64(0)));
+    assert_eq!(c.campaign_by_root(other_root(1)), None);
+    let free = c.prepay_balance_of(sender()).0;
+    let next = c.next_campaign_id;
+    assert_err(E132, || {
+        c.ft_on_transfer(sender(), U128(500), create_msg(&root(), deadline(), "owner"));
+    });
+    assert_eq!(c.next_campaign_id, next);
+    assert_eq!(c.prepay_balance_of(sender()).0, free);
+    assert!(c.get_campaign(U64(1)).is_none());
+    // Order: E108 (msg) before E132, E132 before E119.
+    assert_err(E108, || {
+        c.ft_on_transfer(sender(), U128(1), json!({ "merkle_root": root() }).to_string());
+    });
+    assert_err(E132, || {
+        c.ft_on_transfer(sender(), U128(1), create_msg(&root(), now(), "owner"));
+    });
 }
