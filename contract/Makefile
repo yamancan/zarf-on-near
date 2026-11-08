@@ -19,8 +19,10 @@ wasm:
 unit:
 	$(LOCKED) cargo test
 
-# integration/ is a 1.95 crate: CARGO_TARGET_DIR_195 wins when the shared-dir rule sets both.
-INTEGRATION_TARGET = $(or $(CARGO_TARGET_DIR_195),$(CARGO_TARGET_DIR),$(CURDIR)/integration/target)
+# integration/ is a 1.95 crate with its own cache: CARGO_TARGET_DIR_195, else integration/target
+# (never the 1.86 CARGO_TARGET_DIR, which would thrash). Absolute, because cargo build runs in
+# integration/ and the exec runs here.
+INTEGRATION_TARGET = $(abspath $(or $(CARGO_TARGET_DIR_195),$(CURDIR)/integration/target))
 
 integration: wasm
 	cd integration && CARGO_TARGET_DIR=$(INTEGRATION_TARGET) $(LOCKED) cargo test -- --test-threads=2

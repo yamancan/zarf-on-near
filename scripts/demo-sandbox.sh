@@ -10,25 +10,26 @@ log=$(mktemp)
 timeout_s=${SANDBOX_TIMEOUT_S:-900} # the first run compiles the contracts and fetches the sandbox
 
 pidfile=$(mktemp)
+pgid=
+cleanup() {
+  if [[ -n $pgid ]] && kill -0 -- "-$pgid" 2>/dev/null; then
+    kill -TERM -- "-$pgid" 2>/dev/null || true
+    for _ in 1 2 3 4 5; do kill -0 -- "-$pgid" 2>/dev/null || break; sleep 1; done
+    kill -KILL -- "-$pgid" 2>/dev/null || true
+  fi
+  rm -f "$log" "$pidfile"
+}
+# Installed before the session starts, so a Ctrl-C during the pidfile wait is still tracked.
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 # Own session and process group: make -> sh -> demo_sandbox -> neard all share one pgid.
 # setsid may fork, so the group id is read from inside the new session, not from $!.
 setsid bash -c 'echo $$ >"$1"; exec make -C "$2/contract" demo-sandbox' _ "$pidfile" "$repo_root" >"$log" 2>&1 &
 for _ in $(seq 50); do [[ -s $pidfile ]] && break; sleep 0.1; done
 pgid=$(<"$pidfile")
-rm -f "$pidfile"
-[[ $pgid =~ ^[0-9]+$ ]] || { echo "could not start the demo sandbox" >&2; exit 1; }
-
-cleanup() {
-  if kill -0 -- "-$pgid" 2>/dev/null; then
-    kill -TERM -- "-$pgid" 2>/dev/null || true
-    for _ in 1 2 3 4 5; do kill -0 -- "-$pgid" 2>/dev/null || break; sleep 1; done
-    kill -KILL -- "-$pgid" 2>/dev/null || true
-  fi
-  rm -f "$log"
-}
-trap cleanup EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
+[[ $pgid =~ ^[0-9]+$ ]] || { pgid=; echo "could not start the demo sandbox" >&2; exit 1; }
 
 ready=0
 for ((i = 0; i < timeout_s; i++)); do
