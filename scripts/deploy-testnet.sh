@@ -31,6 +31,11 @@ wasm="$repo_root/contract/target/near/release/zarf_near.wasm"
 
 : "${CONTRACT_ID:?set CONTRACT_ID}" "${OWNER_ID:?set OWNER_ID}" "${SIGNER_PUBKEY:?set SIGNER_PUBKEY}"
 [[ $SIGNER_PUBKEY =~ ^[0-9a-f]{64}$ ]] || { echo "SIGNER_PUBKEY must be 64 lowercase hex" >&2; exit 64; }
+# The vector keys' seeds are public (spec/vectors.json): anyone could sign claims with them.
+for test_key in $(jq -r '.keys.signer, .keys.rogue_signer' "$repo_root/spec/vectors.json"); do
+  [[ $SIGNER_PUBKEY != "$test_key" ]] ||
+    { echo "SIGNER_PUBKEY is a public test key from spec/vectors.json; use the verifier's real key" >&2; exit 64; }
+done
 [[ $CONTRACT_ID == *.testnet && $OWNER_ID == *.testnet ]] || { echo "testnet accounts only" >&2; exit 64; }
 
 run() {

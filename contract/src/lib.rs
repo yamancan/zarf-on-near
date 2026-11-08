@@ -36,6 +36,12 @@ pub const E130: &str = "E130_INSUFFICIENT_GAS";
 pub const E132: &str = "E132_DUPLICATE_CAMPAIGN";
 
 pub const DOMAIN_TAG: &[u8] = b"ZARF-NEAR-CLAIM-V1";
+/// spec/vectors.json keys.signer and keys.rogue_signer: their seeds are public, so mainnet
+/// refuses them as owner keys (a test checks these match the vectors).
+pub const PUBLIC_TEST_KEYS: [&str; 2] = [
+    "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+    "fd1724385aa0c75b64fb78cd602fa1d991fdebf76b13c58ed702eac835e9f618",
+];
 pub const MAX_PROOF_LEN: usize = 20;
 pub const MAX_SIGNATURE_TTL_NS: u64 = 3_600 * 1_000_000_000;
 /// `resolve_pending` may act only on a claim pending at least this long.
@@ -345,6 +351,9 @@ impl Contract {
         self.assert_owner();
         let key = hex32(&signer);
         if self.owner_keys.contains_key(&key) || self.agents.contains_key(&key) {
+            fail(E108);
+        }
+        if self.network == "mainnet" && PUBLIC_TEST_KEYS.contains(&signer.as_str()) {
             fail(E108);
         }
         self.owner_keys.insert(key, valid_until_ns.0);
