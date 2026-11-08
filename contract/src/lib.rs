@@ -44,8 +44,8 @@ pub const PUBLIC_TEST_KEYS: [&str; 2] = [
 ];
 pub const MAX_PROOF_LEN: usize = 20;
 pub const MAX_SIGNATURE_TTL_NS: u64 = 3_600 * 1_000_000_000;
-/// `resolve_pending` may act only on a claim pending at least this long.
-pub const PENDING_TIMEOUT_NS: u64 = 3_600 * 1_000_000_000;
+/// Floor for `resolve_delay_ns` on mainnet (spec: 1 h on testnet and mainnet; tests go shorter).
+pub const MIN_RESOLVE_DELAY_NS: u64 = 3_600 * 1_000_000_000;
 
 // Sandbox, 2026-11-11: a full claim (claim + storage_deposit + ft_transfer + on_claim)
 // burnt 10.1 Tgas in total. The margin covers claim's own execution and receipt creation
@@ -177,6 +177,7 @@ pub struct ConfigView {
     pub network: String,
     pub min_lifetime_ns: U64,
     pub agent_ttl_ns: U64,
+    pub resolve_delay_ns: U64,
     pub token_ids: Vec<AccountId>,
     pub storage_byte_cost: U128,
 }
@@ -198,6 +199,8 @@ pub struct Contract {
     token_ids: Vec<AccountId>,
     min_lifetime_ns: u64,
     agent_ttl_ns: u64,
+    /// `resolve_pending` may act only on a claim pending at least this long.
+    resolve_delay_ns: u64,
     next_campaign_id: u64,
     /// Storage bytes of one (pending) claim entry, measured in `new`.
     claim_entry_bytes: u64,
@@ -235,11 +238,15 @@ impl Contract {
         token_ids: Vec<AccountId>,
         min_lifetime_ns: U64,
         agent_ttl_ns: U64,
+        resolve_delay_ns: U64,
     ) -> Self {
         if env::predecessor_account_id() != env::current_account_id() {
             fail(E107);
         }
         if network != "testnet" && network != "mainnet" {
+            fail(E108);
+        }
+        if network == "mainnet" && resolve_delay_ns.0 < MIN_RESOLVE_DELAY_NS {
             fail(E108);
         }
         let mut claims = LookupMap::new(StorageKey::Claims);
@@ -295,6 +302,7 @@ impl Contract {
             token_ids,
             min_lifetime_ns: min_lifetime_ns.0,
             agent_ttl_ns: agent_ttl_ns.0,
+            resolve_delay_ns: resolve_delay_ns.0,
             next_campaign_id: 0,
             claim_entry_bytes,
             campaign_base_bytes,
@@ -466,6 +474,7 @@ impl Contract {
             network: self.network.clone(),
             min_lifetime_ns: U64(self.min_lifetime_ns),
             agent_ttl_ns: U64(self.agent_ttl_ns),
+            resolve_delay_ns: U64(self.resolve_delay_ns),
             token_ids: self.token_ids.clone(),
             storage_byte_cost: U128(env::storage_byte_cost().as_yoctonear()),
         }
@@ -677,7 +686,7 @@ impl Contract {
             Some(ClaimStatus::Pending { amount, started_ns }) => (*amount, *started_ns),
             _ => fail(E108),
         };
-        if env::block_timestamp() < started_ns.saturating_add(PENDING_TIMEOUT_NS) {
+        if env::block_timestamp() < started_ns.saturating_add(self.resolve_delay_ns) {
             fail(E107);
         }
         self.settle(key, amount, paid);

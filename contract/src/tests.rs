@@ -34,7 +34,14 @@ fn me() -> AccountId {
 }
 fn init(network: &str) -> Contract {
     at(me(), now());
-    Contract::new(owner(), network.into(), vec![usdc()], U64(n(&v()["context"]["min_lifetime_ns"])), U64(7 * DAY_NS))
+    Contract::new(
+        owner(),
+        network.into(),
+        vec![usdc()],
+        U64(n(&v()["context"]["min_lifetime_ns"])),
+        U64(7 * DAY_NS),
+        U64(MIN_RESOLVE_DELAY_NS),
+    )
 }
 
 fn set_ctx(predecessor: AccountId, now: u64, deposit: u128, gas_tgas: u64) {
@@ -718,7 +725,7 @@ fn reclaim_releases_unused_reservation_even_when_fully_claimed() {
 fn network_is_validated_and_exposed() {
     at(me(), now());
     assert_err(E108, || {
-        Contract::new(owner(), "devnet".into(), vec![], U64(1), U64(1));
+        Contract::new(owner(), "devnet".into(), vec![], U64(1), U64(1), U64(MIN_RESOLVE_DELAY_NS));
     });
     assert_eq!(init("mainnet").get_network(), "mainnet");
 }
@@ -727,7 +734,7 @@ fn network_is_validated_and_exposed() {
 fn new_is_private() {
     at(owner(), now());
     assert_err(E107, || {
-        Contract::new(owner(), "testnet".into(), vec![], U64(1), U64(1));
+        Contract::new(owner(), "testnet".into(), vec![], U64(1), U64(1), U64(MIN_RESOLVE_DELAY_NS));
     });
 }
 
@@ -885,11 +892,11 @@ fn resolve_pending_is_owner_only_and_waits_an_hour() {
     let resolve = |c: &mut Contract, paid| {
         c.resolve_pending(a.campaign_id, a.commitment.clone(), paid, "receipt-id".into())
     };
-    at(sender(), now() + PENDING_TIMEOUT_NS);
+    at(sender(), now() + MIN_RESOLVE_DELAY_NS);
     assert_err(E107, || resolve(&mut c, true));
-    at(owner(), now() + PENDING_TIMEOUT_NS - 1);
+    at(owner(), now() + MIN_RESOLVE_DELAY_NS - 1);
     assert_err(E107, || resolve(&mut c, true));
-    at(owner(), now() + PENDING_TIMEOUT_NS);
+    at(owner(), now() + MIN_RESOLVE_DELAY_NS);
     let reserved = c.campaigns.get(&7).unwrap().storage_reserved;
     resolve(&mut c, false);
     assert_eq!(c.claim_state(a.campaign_id, a.commitment.clone()), "unclaimed");
@@ -912,7 +919,7 @@ fn resolve_pending_paid_marks_claimed() {
     let a = valid(0);
     let balance = c.campaigns.get(&7).unwrap().balance;
     do_claim(&mut c, &a);
-    at(owner(), now() + PENDING_TIMEOUT_NS);
+    at(owner(), now() + MIN_RESOLVE_DELAY_NS);
     c.resolve_pending(a.campaign_id, a.commitment.clone(), true, "receipt-id".into());
     assert_eq!(c.claim_state(a.campaign_id, a.commitment.clone()), "claimed");
     let camp = c.campaigns.get(&7).unwrap().clone();
@@ -926,11 +933,11 @@ fn late_callback_of_a_resolved_attempt_does_not_settle_the_next_one() {
     let mut c = seeded();
     let a = valid(0);
     do_claim(&mut c, &a); // attempt A at now()
-    at(owner(), now() + PENDING_TIMEOUT_NS);
+    at(owner(), now() + MIN_RESOLVE_DELAY_NS);
     c.resolve_pending(a.campaign_id, a.commitment.clone(), false, "receipt-a".into());
     // B would need a fresh signature; insert its pending entry directly.
     let key = (a.campaign_id.0, hex32(&a.commitment));
-    let b_started = now() + PENDING_TIMEOUT_NS;
+    let b_started = now() + MIN_RESOLVE_DELAY_NS;
     c.claims.insert(key, ClaimStatus::Pending { amount: a.amount.0, started_ns: b_started });
     c.campaigns.get_mut(&7).unwrap().in_flight += a.amount.0;
     with_result(me(), b_started + 1, PromiseResult::Failed);
@@ -978,6 +985,7 @@ fn get_config_view() {
             "network": "testnet",
             "min_lifetime_ns": v()["context"]["min_lifetime_ns"],
             "agent_ttl_ns": (7 * DAY_NS).to_string(),
+            "resolve_delay_ns": MIN_RESOLVE_DELAY_NS.to_string(),
             "token_ids": ["usdc.testnet"],
             "storage_byte_cost": env::storage_byte_cost().as_yoctonear().to_string(),
         })
@@ -1074,4 +1082,36 @@ fn mainnet_refuses_the_public_test_keys() {
     let mut t = init("testnet");
     at(owner(), now());
     t.add_owner_key(PUBLIC_TEST_KEYS[0].into(), U64(u64::MAX));
+}
+
+#[test]
+fn mainnet_floors_resolve_delay_at_one_hour() {
+    at(me(), now());
+    assert_err(E108, || {
+        Contract::new(owner(), "mainnet".into(), vec![], U64(1), U64(1), U64(MIN_RESOLVE_DELAY_NS - 1));
+    });
+    let m = Contract::new(owner(), "mainnet".into(), vec![], U64(1), U64(1), U64(MIN_RESOLVE_DELAY_NS));
+    assert_eq!(m.get_config().resolve_delay_ns.0, MIN_RESOLVE_DELAY_NS);
+}
+
+#[test]
+fn testnet_may_use_a_short_resolve_delay() {
+    at(me(), now());
+    let mut c = Contract::new(owner(), "testnet".into(), vec![usdc()], U64(1), U64(1), U64(5_000_000_000));
+    c.ft_storage_deposit.insert(usdc(), USDC_MIN);
+    at(owner(), now());
+    c.add_owner_key(v()["keys"]["signer"].as_str().unwrap().into(), U64(deadline() + DAY_NS));
+    set_ctx(sender(), now(), 10u128.pow(24), 300);
+    c.prepay_deposit(None);
+    c.next_campaign_id = 7;
+    at(usdc(), now());
+    c.ft_on_transfer(sender(), U128(10u128.pow(13)), create_msg(&root(), deadline(), "owner"));
+    at(acc("relayer.testnet"), now());
+    let a = valid(0);
+    do_claim(&mut c, &a);
+    at(owner(), now() + 4_999_999_999);
+    assert_err(E107, || c.resolve_pending(a.campaign_id, a.commitment.clone(), false, "r".into()));
+    at(owner(), now() + 5_000_000_000);
+    c.resolve_pending(a.campaign_id, a.commitment.clone(), false, "r".into());
+    assert_eq!(c.claim_state(a.campaign_id, a.commitment.clone()), "unclaimed");
 }
