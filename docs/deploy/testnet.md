@@ -62,7 +62,65 @@ required_claim_gas: "55000000000000"
 
 `ft_storage_deposit` = 0.00125 NEAR, read from the token on chain (matches S1).
 
-## Open
+## First real claim: contract-level gas measurement (2026-11-11)
 
-- First real claim with Circle USDC (reviewer m2): record `total_gas_burnt` and per-receipt gas,
-  and confirm it passes at exactly 55 Tgas. Needs the sender funded with test USDC (owner).
+**This is a contract-level test, not the verifier flow.** The claim was signed locally with the
+testnet verifier seed and submitted through the relayer's claim-only key. No Google login was
+involved. It measures the contract against Circle's real USDC, which the sandbox can't.
+
+Setup, from `zarf-near-sender-1111.testnet` (funded with 20 test USDC by the owner):
+
+| Step | Transaction |
+| --- | --- |
+| register the escrow on USDC (`storage_deposit`, 0.00125 NEAR) | `CZJdpebFMcB6YF6wyeriyr13AxJnRLMtaVdP7EXxQ2yN` |
+| `prepay_deposit` 0.02 NEAR | `47pdCeh8iJbRHVmq9iLH1ieWf2BbdzZr4M1QRZyLNC32` |
+| `ft_transfer_call` 3 USDC → campaign 0 (3 leaves, 1 USDC each, deadline +1 day) | `E8WVuJ7dj4rUHaNQjYGAto5nRRQ1jDo6UvFSmKSWebzD` |
+| fresh destination `zarf-near-dest-1111.testnet` (not registered on USDC) | `5M9843rKWAcptXKQZtSfJauSTfsfz7wDtXBgs4f4iWyU` |
+
+The first `ft_transfer_call` attempt returned "Transaction has expired" from the RPC and had no
+effect on chain (balances, `campaigns_of`, `campaign_by_root` unchanged), so it was sent once more.
+
+Campaign 0, public leaf list (salts and the placeholder emails stay on the deploy host):
+
+```json
+{ "campaign_id": "0", "merkle_root": "cbad6057878de5892f1b6756e6860e0ca3438f7c07b9a0a38d4bc10775618417",
+  "leaves": [
+    { "commitment": "cde1b853a5295983f83b8af4fea3cb1e509c6644eef9bf6aaafc79ed3b8026fb", "amount": "1000000" },
+    { "commitment": "063dbafc9ab3003bdabbecc8df07b69ab188cf655004b692274b3f1f272f3356", "amount": "1000000" },
+    { "commitment": "a30ff9dae7a81834c7300caedc535a3f7f8edd10049ae09f692a1c7308526fe1", "amount": "1000000" } ] }
+```
+
+### The claim: leaf 0 → `zarf-near-dest-1111.testnet`, prepaid gas exactly 55 Tgas
+
+Transaction `4B9wh1uKbDqM91F1pGrAXn5RqyhLotmwLzXXQFMwfg5g`: success. Events `claim_started`,
+NEP-141 `ft_transfer` (escrow → destination, 1000000), `claim_paid`.
+
+| Receipt | Executor | Gas burnt |
+| --- | --- | --- |
+| transaction (signer `zarf-near-relayer-1111.testnet`, function-call key) | – | 0.335 Tgas |
+| `claim` | `zarf-near-1111.testnet` | 3.864 Tgas |
+| `storage_deposit` (first-time registration) | Circle USDC | 2.037 Tgas |
+| `ft_transfer` | Circle USDC | 2.289 Tgas |
+| `on_claim` | `zarf-near-1111.testnet` | 2.093 Tgas |
+| 4 gas refunds | relayer | 4 × 0.223 Tgas |
+| **total** | | **11.51 Tgas** (sandbox: 10.1 Tgas) |
+
+After: `claim_state` = `claimed`; destination USDC balance 1000000; campaign 0 balance 2000000,
+in_flight 0, storage_reserved 0.00462 NEAR (two claims left). 55 Tgas holds a 4.8× margin
+over the real total.
+
+### Double claim on the same commitment
+
+Transaction `GzLn6RuPQCn2kA7ERH1f5zWCfUHrFN4r3VmDySqJ7LEE`: refused with
+`E105_ALREADY_CLAIMED`, 2.11 Tgas burnt; the destination balance stayed 1000000.
+
+### Not observed
+
+A failed-path observation with Circle's contract was skipped: its `storage_deposit` registers any
+valid account id, and the sandbox already covers transfer and registration failures.
+
+### Leaves 1 and 2
+
+They are unclaimed, but their commitments were made from placeholder addresses
+(`zarf-measure-N@example.com`), not Google accounts, so a real Google login cannot claim them.
+The real Google flow needs a campaign built from the claimants' real emails.
