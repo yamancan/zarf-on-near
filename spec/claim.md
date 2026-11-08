@@ -417,9 +417,14 @@ The contract is upgradeable, but only through its own code and only after a publ
     `propose_upgrade`, `propose_owner` and `add_owner_key` are refused (`E107`), and
     `apply_upgrade` and `accept_owner` too. The owner cannot lift a freeze.
   - It can never propose, apply, add keys, move funds or change any rule. A stolen guardian
-    key can only delay upgrades.
-  The guardian breaks the standoff described above: one cancel plus a freeze buys a week to
-  warn users, with a key that is not the owner's. It changes only through an upgrade.
+    key can only delay, but it can delay **indefinitely**: a freeze can be renewed, and the
+    guardian changes only through an upgrade, which a freeze blocks. Then no upgrade, owner
+    transfer or new signer key is possible; once the current signer keys expire, new
+    campaigns fail with `E127`. Existing campaigns still run to their deadline and reclaim.
+    This costs liveness, never funds, and is accepted: a cooldown between freezes would
+    also give a thief holding the owner key a window.
+  The guardian breaks the standoff described above: one cancel plus a freeze buys at least a
+  week to warn users, with a key that is not the owner's. It changes only through an upgrade.
 - There is no early reclaim while an upgrade is pending. Recipients' exit is to claim;
   an early exit for senders would break the deadline promised to recipients.
 - **Ownership moves in two steps and waits the same delay:** `propose_owner({ new_owner })`
