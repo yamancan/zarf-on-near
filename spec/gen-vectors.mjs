@@ -94,6 +94,14 @@ function claim(c, i, destination, { args = {}, signed = {}, key = signerKey } = 
   return { call_args, payload: hex(rebuilt), nonce: nonce(destination) };
 }
 
+// Claim link fragment (spec "claim link"): s = salt hex, a = amount, p = base64url(concat proof).
+export const linkFor = (c, i) => {
+  const r = c.recipients[i];
+  const p = Buffer.concat(proofFor(c.levels, i)).toString('base64url');
+  return `/claim/${c.campaign_id}/${r.commitment}#s=${r.salt}&a=${r.amount}&p=${p}`;
+};
+const links = { main: main.recipients.map((_, i) => linkFor(main, i)), single: [linkFor(single, 0)] };
+
 const valid = [
   { name: 'named-account', campaign: 'main', ...claim(main, 0, 'alice.testnet') },
   { name: 'implicit-account', campaign: 'main', ...claim(main, 1, 'a'.repeat(64)) },
@@ -130,6 +138,7 @@ const out = {
   context,
   campaigns: { main: pub(main), single: pub(single) },
   claims: { valid, invalid },
+  links,
   rejected_emails: ['﻿alice@example.com', 'josé@example.com', '\u212a@example.com', 'a b@example.com', '   '],
 };
 
@@ -148,6 +157,15 @@ for (const e of out.rejected_emails) assert.throws(() => canonicalEmail(e), e);
 for (const c of valid) { assert(sigOk(c), c.name); assert(treeOk(c), c.name); assert.equal(c.nonce.length, 64); }
 for (const c of invalid) assert(c.expect === 'E101_INVALID_SIGNATURE' ? !sigOk(c) && treeOk(c) : sigOk(c) && !treeOk(c), c.name);
 assert(valid.length >= 4 && invalid.length >= 10);
+for (const [name, c] of [['main', main], ['single', single]]) links[name].forEach((l, i) => {
+  const frag = new URLSearchParams(l.split('#')[1]);
+  const proof = Buffer.from(frag.get('p'), 'base64url');
+  assert.equal(proof.length % 32, 0, l);
+  const sibs = []; for (let k = 0; k < proof.length; k += 32) sibs.push(proof.subarray(k, k + 32));
+  const commit = commitment(Buffer.from(frag.get('s'), 'hex'), c.recipients[i].email);
+  assert(verifyProof(leafHash(commit, frag.get('a')), sibs, Buffer.from(c.merkle_root, 'hex')), l);
+});
+assert.equal(links.single[0].split('&p=')[1], '');
 
 writeFileSync(new URL('./vectors.json', import.meta.url), JSON.stringify(out, null, 2) + '\n');
 console.log(`vectors.json v2: ${valid.length} valid, ${invalid.length} invalid, root ${main.merkle_root}`);

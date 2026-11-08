@@ -34,11 +34,23 @@ commitment_i    = HMAC-SHA256(key = salt_i, msg = canonical_email)      // 32 by
   the address Google returns in `email`.
 - The same email may appear twice. Different salts give different commitments, so each row
   is a separate allocation.
-- **The claim link carries the salt in the fragment:**
-  `https://<claim-host>/claim/<campaign_id>/<commitment>#s=<salt_hex>`.
-  The fragment never reaches a server. The claim app sends `salt` only in the POST to the
-  verifier, together with the id_token. The claim app removes the fragment with
+- **The claim link carries everything the recipient needs, in the fragment:**
+  `https://<claim-host>/claim/<campaign_id>/<commitment>#s=<salt_hex>&a=<amount>&p=<proof>`
+  - `s`: the 32-byte salt, 64 lowercase hex.
+  - `a`: the amount in base units, decimal (`u128`).
+  - `p`: the merkle proof, the sibling hashes concatenated in order (32 bytes each) and
+    encoded as base64url without padding. An empty proof is an empty string.
+  The fragment never reaches a server. The claim app sends `salt`, `amount` and `proof` only
+  in the POST to the verifier, together with the id_token. It removes the fragment with
   `history.replaceState` right after reading it, and the verifier never logs `salt`.
+- **The leaf list is not published.** The claim app rebuilds the root from
+  `(commitment, amount, proof)` and refuses the link (`LINK_MISMATCH`) if it differs from
+  `get_campaign().merkle_root`, before any sign-in. The sender keeps the full leaf list only
+  in the recovery file. This removes leaf hosting, keeps amounts private until claimed, and
+  means a leaked verifier key can claim only leaves whose links also leaked.
+- Before sign-in the claim app also reads `claim_state` and the deadline, and shows "already
+  claimed", "ended" or "unknown campaign" instead of the form. It shows the amount from the
+  link ("10 USDC is waiting for you") only after the root check passes.
 
 A leaked link lets its holder test one guessed email against one commitment; it does not
 let anyone claim without that Google account.
@@ -199,8 +211,11 @@ for a claim stranded in `pending` because its callback never completed (out of g
   in-flight moves back to balance.
 - `evidence` is the `ft_transfer` receipt id the owner read the outcome from.
 - Emits `pending_resolved`.
-- Trust cost, stated in the README: a wrong `paid` can double-pay or block **one** claim; it
-  can't touch any other allocation. The callback is built so this should never be needed:
+- Trust cost, stated in the README: a wrong `paid` can block one claim (`paid: true` for a
+  transfer that failed) or **pay one claim twice** (`paid: false` for a transfer that
+  succeeded). A double payment comes out of the contract's shared token balance, so it can
+  leave a later withdrawal of the same token short, in any campaign. The owner is trusted
+  for this, as for upgrades. The callback is built so this should never be needed:
   static reserved gas, no result bytes read, no branch that can panic.
 
 Storage, per campaign (create app):
@@ -431,8 +446,8 @@ hash cannot be verified against source by third parties.
 
 ## Off-chain interfaces
 
-**Leaf list** (published by the create app, T7). It is fetched by the claim app from
-`<PUBLIC_LEAVES_URL>/<campaign_id>.json`:
+**Leaf list** (kept by the sender in the recovery file; **never published**, see the claim
+link above). Its shape, inside the recovery file:
 
 ```json
 { "campaign_id": "<u64>", "merkle_root": "<hex32>",
@@ -440,8 +455,7 @@ hash cannot be verified against source by third parties.
 ```
 
 - Leaves are in tree order.
-- The claim app recomputes the root and refuses the file if it differs from `get_campaign`.
-- Emails and salts never appear in it.
+- The recovery file adds, per leaf, the email and salt so the sender can rebuild every link.
 
 **Relayer** (T5). `POST /claim` takes exactly the verifier's 200 body (the contract's `claim`
 args) and refuses anything else. The transaction's final status can't tell a payout from a
