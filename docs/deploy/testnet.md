@@ -201,3 +201,28 @@ placeholders are not Google accounts, so leaves 1 and 2 are not claimable by a r
 ```
 
 Sender USDC after: 14000000 (14 USDC).
+
+### Second upgrade: 0.1.2 from a committed tree, NEP-330 link (2026-11-11)
+
+The 0.1.1 above was built from an uncommitted tree, so no commit matched the live code, and
+`contract_source_metadata.link` was null. 0.1.2 adds `repository` to `contract/Cargo.toml` (near-sdk
+reads it as the NEP-330 `link`) and was built from a clean, pushed revision
+(Rust 1.86.0, cargo-near 0.23.0, `cargo near build non-reproducible-wasm --no-abi`; unit tests
+71/71). Wasm 316,408 B, sha256 `3f703dd7808b25b990dd8623f3603b47a5325ec139e5186344da00f308493bd5`
+(base58 `5GdxDSB4sGW9Ewod4Q4Na613C2sLQjVfFjLbbZbKt6N8`). The code grew 32 B, so `apply_upgrade`
+attached 0.0005 NEAR (0.00032 needed).
+
+| Step | Transaction | Result |
+| --- | --- | --- |
+| `propose_upgrade` (owner), source revision (contract 0.1.2) | `649HPzKsSL2vkwv6yczQafnvu1Xtvxobm38eNgy5E4EF` | `upgrade_proposed`, `ready_at_ns` 1794435752196081943 |
+| `apply_upgrade` after `ready_at_ns` (raw wasm via `file-args`, 300 Tgas, 0.0005 NEAR) | `CqM6U1reRwHUkKxhbELny2WgVvJEbz3SLT5Fy656dCfP` | `upgrade_applied` |
+
+Apply gas: `apply_upgrade` 16.35 Tgas; deploy + `migrate` 22.15; `on_upgrade` 1.66.
+
+After: code hash `5GdxDSB4sGW9Ewod4Q4Na613C2sLQjVfFjLbbZbKt6N8`; `view_access_key_list` = `[]`;
+`pending_upgrade` = null; `get_config` unchanged (testnet, `upgrade_delay_ns` 600000000000,
+`guardian_id` null, Circle testnet USDC); campaign 0 unchanged (balance 2000000, in_flight 0);
+`contract_source_metadata` =
+`{"version":"0.1.2","link":"https://github.com/yamancan/zarf-on-near","standards":[{"standard":"nep330","version":"1.3.0"}],"build_info":null}`.
+`build_info` stays null: near-sdk fills it only for reproducible builds (cargo-near
+`reproducible-wasm`, Docker), not for `non-reproducible-wasm`.
