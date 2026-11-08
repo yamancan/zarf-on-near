@@ -114,6 +114,12 @@ run near contract deploy "$CONTRACT_ID" use-file "$wasm" \
   with-init-call new json-args "$init_args" prepaid-gas '100 Tgas' attached-deposit '0 NEAR' \
   network-config "$NETWORK" sign-with-legacy-keychain send
 
+echo "== register the escrow on USDC (it must hold tokens; ft_transfer_call fails otherwise)"
+run near contract call-function as-transaction "$USDC_ID" storage_deposit \
+  json-args "$(jq -nc --arg a "$CONTRACT_ID" '{account_id:$a, registration_only:true}')" \
+  prepaid-gas '30 Tgas' attached-deposit '0.00125 NEAR' sign-as "$OWNER_ID" \
+  network-config "$NETWORK" sign-with-legacy-keychain send
+
 echo "== refresh_token_storage (owner)"
 call refresh_token_storage "$(jq -nc --arg u "$USDC_ID" '{token_id:$u}')" '50 Tgas'
 
