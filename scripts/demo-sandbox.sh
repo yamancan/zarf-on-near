@@ -31,17 +31,16 @@ for _ in $(seq 50); do [[ -s $pidfile ]] && break; sleep 0.1; done
 pgid=$(<"$pidfile")
 [[ $pgid =~ ^[0-9]+$ ]] || { pgid=; echo "could not start the demo sandbox" >&2; exit 1; }
 
-ready=0
+state=timeout
 for ((i = 0; i < timeout_s; i++)); do
-  if grep -q '^# sandbox running' "$log"; then ready=1; break; fi
-  kill -0 -- "-$pgid" 2>/dev/null || break
+  if grep -q '^# sandbox running' "$log"; then state=ready; break; fi
+  if ! kill -0 -- "-$pgid" 2>/dev/null; then state=exited; break; fi
   sleep 1
 done
-if [[ $ready != 1 ]]; then
-  cat "$log" >&2
-  echo "demo sandbox not ready (exited, or ${timeout_s}s passed)" >&2
-  exit 1
-fi
+case $state in
+  exited) tail -n 30 "$log" >&2; echo "demo sandbox exited before it was ready (last 30 lines above)" >&2; exit 1 ;;
+  timeout) tail -n 30 "$log" >&2; echo "demo sandbox not ready after ${timeout_s}s (last 30 lines above)" >&2; exit 1 ;;
+esac
 
 # Only the eight known names, with a strict value charset; nothing is sourced.
 while IFS='=' read -r k v; do
