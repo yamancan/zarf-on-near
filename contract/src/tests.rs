@@ -1019,10 +1019,12 @@ fn campaigns_of_lists_per_sender_in_order_with_pagination() {
     let other = acc("other.testnet");
     set_ctx(other.clone(), now(), 10u128.pow(25), 300);
     c.prepay_deposit(None);
+    set_ctx(sender(), now(), 10u128.pow(25), 300);
+    c.prepay_deposit(None);
     at(usdc(), now());
     let mut mine = Vec::new();
-    for i in 0..105u8 {
-        let who = if i % 3 == 0 { other.clone() } else { sender() };
+    for i in 0..140u8 {
+        let who = if i % 4 == 0 { other.clone() } else { sender() };
         let id = c.next_campaign_id;
         let msg = json!({ "merkle_root": other_root(i + 10), "deadline_ns": U64(deadline()), "policy": "owner", "leaf_count": 1 });
         c.ft_on_transfer(who.clone(), U128(1), msg.to_string());
@@ -1030,13 +1032,14 @@ fn campaigns_of_lists_per_sender_in_order_with_pagination() {
             mine.push(U64(id));
         }
     }
-    assert_eq!(mine.len(), 70);
+    assert_eq!(mine.len(), 105);
     let ids = |from, limit| c.campaigns_of(sender(), from, limit);
     assert_eq!(ids(None, None), mine[..50].to_vec());
-    assert_eq!(ids(Some(50), Some(500)), mine[50..].to_vec(), "limit is capped at 100");
-    assert_eq!(ids(Some(0), Some(200)).len(), 70);
+    // The cap: 105 exist, a limit of 500 returns exactly 100.
+    assert_eq!(ids(Some(0), Some(500)), mine[..100].to_vec());
+    assert_eq!(ids(Some(100), Some(500)), mine[100..].to_vec());
     assert_eq!(ids(Some(10), Some(5)), mine[10..15].to_vec());
-    assert!(ids(Some(70), None).is_empty());
+    assert!(ids(Some(105), None).is_empty());
     assert!(ids(Some(u32::MAX), Some(u32::MAX)).is_empty());
     assert_eq!(c.campaigns_of(other.clone(), None, Some(100)).len(), 35);
     assert!(c.campaigns_of(acc("nobody.testnet"), None, None).is_empty());
