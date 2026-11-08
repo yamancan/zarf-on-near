@@ -21,6 +21,8 @@
 #                    RELAYER_KEY_FILE (default ~/.config/zarf-near/$NETWORK-relayer.key, mode 600)
 #   USDC_ID              default: Circle's USDC for NETWORK (testnet one verified in docs/spikes/S1.md)
 #   SIGNER_VALID_DAYS    default 60; must outlive every campaign deadline (spec snapshot rule)
+#   RPC                  JSON-RPC for the script's views. Default: FastNEAR (test.rpc.fastnear.com /
+#                        free.rpc.fastnear.com); rpc.*.near.org is deprecated. `near` uses its own config.
 #   CREATE_ACCOUNTS=1    create CONTRACT_ID / OWNER_ID with the testnet faucet if missing
 #   DRY_RUN=1            print every command instead of running it. It still creates the real
 #                        verifier seed and relayer key files if missing, and the real run reuses them.
@@ -34,11 +36,11 @@ NETWORK=${NETWORK:-testnet}
 MAINNET_USDC=17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1
 case $NETWORK in
   testnet)
-    RPC=https://rpc.testnet.near.org SUFFIX=.testnet EXPLORER=https://testnet.nearblocks.io
+    RPC=${RPC:-https://test.rpc.fastnear.com} SUFFIX=.testnet EXPLORER=https://testnet.nearblocks.io
     USDC_ID=${USDC_ID:-3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af}
     MIN_LIFETIME_NS=600000000000 ;;          # 10 min (spec)
   mainnet)
-    RPC=https://rpc.mainnet.near.org SUFFIX=.near EXPLORER=https://nearblocks.io
+    RPC=${RPC:-https://free.rpc.fastnear.com} SUFFIX=.near EXPLORER=https://nearblocks.io
     USDC_ID=${USDC_ID:-$MAINNET_USDC}
     MIN_LIFETIME_NS=2592000000000000 ;;      # 30 days (spec)
   *) echo "NETWORK must be testnet or mainnet" >&2; exit 64 ;;
