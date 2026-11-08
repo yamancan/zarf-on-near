@@ -3,23 +3,33 @@
 # CARGO_TARGET_DIR says; that variable only moves intermediate artifacts.
 BUILD = cargo near build non-reproducible-wasm --no-abi
 
+# On a shared host with a build lock (the deploy host: ~/.cache/zarf-near/build.lock), build steps take
+# it themselves with `flock -o`, so nothing they spawn inherits the lock fd. Screeners have no
+# lock file and build unlocked. Long-running targets (demo-sandbox) lock only their builds, so
+# do not wrap them in flock yourself.
+BUILD_LOCK ?= $(wildcard $(HOME)/.cache/zarf-near/build.lock)
+LOCKED = $(if $(BUILD_LOCK),flock -o $(BUILD_LOCK))
+
 .PHONY: wasm test unit integration demo-sandbox
 wasm:
-	$(BUILD) --out-dir target/near/release
-	$(BUILD) --features test-callback-panic --out-dir target/near/callback-panic
-	cd mock-ft && $(BUILD) --out-dir ../target/near/mock-ft
+	$(LOCKED) $(BUILD) --out-dir target/near/release
+	$(LOCKED) $(BUILD) --features test-callback-panic --out-dir target/near/callback-panic
+	cd mock-ft && $(LOCKED) $(BUILD) --out-dir ../target/near/mock-ft
 
 unit:
-	cargo test
+	$(LOCKED) cargo test
 
-# integration/ is a 1.95 crate: when the shared-dir rule sets both, it gets its own target dir.
-INTEGRATION_ENV = $(if $(CARGO_TARGET_DIR_195),CARGO_TARGET_DIR=$(CARGO_TARGET_DIR_195))
+# integration/ is a 1.95 crate: CARGO_TARGET_DIR_195 wins when the shared-dir rule sets both.
+INTEGRATION_TARGET = $(or $(CARGO_TARGET_DIR_195),$(CARGO_TARGET_DIR),$(CURDIR)/integration/target)
 
 integration: wasm
-	cd integration && $(INTEGRATION_ENV) cargo test -- --test-threads=2
+	cd integration && CARGO_TARGET_DIR=$(INTEGRATION_TARGET) $(LOCKED) cargo test -- --test-threads=2
 
 test: unit integration
 
 # Local sandbox seeded for `make demo` (test-only keys). Prints an env block, then blocks.
+# Builds under the lock, then runs the binary outside it: a sandbox that lives for hours must
+# never hold the build lock.
 demo-sandbox: wasm
-	cd integration && cargo run --quiet --bin demo_sandbox
+	cd integration && CARGO_TARGET_DIR=$(INTEGRATION_TARGET) $(LOCKED) cargo build --quiet --bin demo_sandbox
+	exec $(INTEGRATION_TARGET)/debug/demo_sandbox
