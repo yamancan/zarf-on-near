@@ -74,6 +74,11 @@ async fn setup(zarf_wasm: &str) -> anyhow::Result<Env> {
             "min_lifetime_ns": "1000000000", "agent_ttl_ns": "604800000000000",
             "resolve_delay_ns": RESOLVE_DELAY_NS.to_string(),
             "upgrade_delay_ns": UPGRADE_DELAY_NS.to_string(),
+            "guardian_id": null,
+            "initial_signers": [{
+                "signer": hex(&SigningKey::from_bytes(&SIGNER_SEED).verifying_key().to_bytes()),
+                "valid_until_ns": u64::MAX.to_string(),
+            }],
         }))
         .transact()
         .await?
@@ -90,13 +95,6 @@ async fn setup(zarf_wasm: &str) -> anyhow::Result<Env> {
         .call(zarf.id(), "refresh_token_storage")
         .args_json(json!({ "token_id": ft.id() }))
         .max_gas()
-        .transact()
-        .await?
-        .into_result()?;
-    let signer = SigningKey::from_bytes(&SIGNER_SEED).verifying_key().to_bytes();
-    owner
-        .call(zarf.id(), "add_owner_key")
-        .args_json(json!({ "signer": hex(&signer), "valid_until_ns": u64::MAX.to_string() }))
         .transact()
         .await?
         .into_result()?;
@@ -162,6 +160,17 @@ async fn claim_raw(
     proof: &[[u8; 32]],
     gas: Gas,
 ) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
+    Ok(claim_tx(e, id, dest, proof, gas).await?.transact().await?)
+}
+
+/// The signed claim call, not yet sent (so a test can send it with transact_async).
+async fn claim_tx(
+    e: &Env,
+    id: u64,
+    dest: &str,
+    proof: &[[u8; 32]],
+    gas: Gas,
+) -> anyhow::Result<near_workspaces::operations::CallTransaction> {
     let expires = now_ns(e).await? + 10 * 60 * 1_000_000_000;
     let mut p = b"ZARF-NEAR-CLAIM-V1".to_vec();
     push_str(&mut p, "testnet");
@@ -181,9 +190,7 @@ async fn claim_raw(
             "expires_at_ns": expires.to_string(),
             "signer": hex(&key.verifying_key().to_bytes()), "signature": hex(&sig),
         }))
-        .gas(gas)
-        .transact()
-        .await?)
+        .gas(gas))
 }
 
 async fn campaign(e: &Env, id: u64) -> anyhow::Result<Value> {
@@ -345,13 +352,17 @@ async fn adverse_claim_fits_required_claim_gas() -> anyhow::Result<()> {
     Ok(())
 }
 
+const SOURCE: &str = "github.com/yamancan/zarf-on-near@test";
+/// Covers a larger wasm's extra code storage (1e19 yocto per byte) with room to spare.
+const UPGRADE_DEPOSIT: u128 = 10_000 * 10_000_000_000_000_000_000;
+
 fn code_hash(wasm: &[u8]) -> String {
     hex(&sha(&[wasm]))
 }
 
 async fn propose_and_wait(e: &Env, wasm: &[u8]) -> anyhow::Result<()> {
     e.owner.call(e.zarf.id(), "propose_upgrade")
-        .args_json(json!({ "code_hash": code_hash(wasm) }))
+        .args_json(json!({ "code_hash": code_hash(wasm), "source": SOURCE }))
         .transact().await?.into_result()?;
     let pending: Value = e.zarf.view("pending_upgrade").await?.json()?;
     let ready: u64 = pending["ready_at_ns"].as_str().unwrap().parse()?;
@@ -362,7 +373,16 @@ async fn propose_and_wait(e: &Env, wasm: &[u8]) -> anyhow::Result<()> {
 }
 
 async fn apply(e: &Env, wasm: Vec<u8>) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
-    Ok(e.owner.call(e.zarf.id(), "apply_upgrade").args(wasm).max_gas().transact().await?)
+    apply_with(e, wasm, UPGRADE_DEPOSIT).await
+}
+
+async fn apply_with(
+    e: &Env,
+    wasm: Vec<u8>,
+    deposit: u128,
+) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
+    Ok(e.owner.call(e.zarf.id(), "apply_upgrade").args(wasm)
+        .deposit(NearToken::from_yoctonear(deposit)).max_gas().transact().await?)
 }
 
 #[tokio::test]
@@ -378,7 +398,7 @@ async fn upgrade_through_the_timelock_keeps_campaigns_and_pending_claims() -> an
     let v2 = wasm("upgrade-v2/zarf_near.wasm");
     // Applying before the delay is refused.
     e.owner.call(e.zarf.id(), "propose_upgrade")
-        .args_json(json!({ "code_hash": code_hash(&v2) })).transact().await?.into_result()?;
+        .args_json(json!({ "code_hash": code_hash(&v2), "source": SOURCE })).transact().await?.into_result()?;
     let early = apply(&e, v2.clone()).await?;
     assert!(format!("{:?}", early.into_result().unwrap_err()).contains("E107_UNAUTHORIZED"));
     e.owner.call(e.zarf.id(), "cancel_upgrade").transact().await?.into_result()?;
@@ -386,6 +406,16 @@ async fn upgrade_through_the_timelock_keeps_campaigns_and_pending_claims() -> an
     propose_and_wait(&e, &v2).await?;
     let wrong = apply(&e, wasm("release/zarf_near.wasm")).await?;
     assert!(format!("{:?}", wrong.into_result().unwrap_err()).contains("E108_INVALID_INPUT"));
+    // M3: v2 is larger than v1, so applying it without a deposit fails in migrate (E128) and
+    // rolls the deploy back; the proposal stays pending.
+    let v1 = wasm("callback-panic/zarf_near.wasm");
+    assert!(v2.len() > v1.len(), "the test needs a larger v2 ({} vs {})", v2.len(), v1.len());
+    let unpaid = apply_with(&e, v2.clone(), 0).await?;
+    assert!(format!("{unpaid:?}").contains("E128_INSUFFICIENT_STORAGE"), "{unpaid:?}");
+    assert!(unpaid.logs().iter().any(|l| l.contains("upgrade_failed")));
+    assert_eq!(e.zarf.view_code().await?, v1);
+    let still: Value = e.zarf.view("pending_upgrade").await?.json()?;
+    assert_eq!(still["source"], SOURCE);
     let out = apply(&e, v2.clone()).await?;
     assert!(out.is_success(), "{out:?}");
     assert!(out.logs().iter().any(|l| l.contains("upgrade_applied")));
@@ -410,6 +440,7 @@ async fn failing_migrate_rolls_the_deploy_back() -> anyhow::Result<()> {
     let out = apply(&e, bad.clone()).await?;
     println!("failing migrate: success={} logs={:?}", out.is_success(), out.logs());
     assert!(!out.logs().iter().any(|l| l.contains("upgrade_applied")));
+    assert!(out.logs().iter().any(|l| l.contains("upgrade_failed")));
     assert_eq!(e.zarf.view_code().await?, v1, "the old code is still deployed");
     let pending: Value = e.zarf.view("pending_upgrade").await?.json()?;
     assert_eq!(pending["code_hash"], code_hash(&bad), "the proposal stays pending");
@@ -424,4 +455,62 @@ fn release_wasm_has_no_test_upgrade_features() {
         assert!(has(&wasm(&format!("{variant}/zarf_near.wasm"))), "{variant} must carry its marker");
         assert!(!has(&release), "release must not carry {variant}");
     }
+}
+
+#[tokio::test]
+async fn reapplying_the_same_code_is_harmless() -> anyhow::Result<()> {
+    // As after a lost on_upgrade: the same hash is proposed and applied again. migrate is
+    // idempotent, and state is untouched.
+    let e = setup("release/zarf_near.wasm").await?;
+    let id = create(&e, now_ns(&e).await? + HOUR_NS).await?;
+    let before = campaign(&e, id).await?;
+    let v1 = wasm("release/zarf_near.wasm");
+    for _ in 0..2 {
+        propose_and_wait(&e, &v1).await?;
+        let out = apply_with(&e, v1.clone(), 0).await?;
+        assert!(out.is_success(), "{out:?}");
+    }
+    assert_eq!(e.zarf.view_code().await?, v1);
+    assert_eq!(campaign(&e, id).await?, before);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_callback_scheduled_by_v1_settles_on_v2() -> anyhow::Result<()> {
+    // The claim runs on v1; its ft_transfer is slowed by a few blocks, so the upgrade to v2
+    // lands before on_claim. on_claim keeps its name and args, so v2 settles it.
+    let e = setup("release/zarf_near.wasm").await?;
+    let id = create(&e, now_ns(&e).await? + HOUR_NS).await?;
+    let v2 = wasm("upgrade-v2/zarf_near.wasm");
+    propose_and_wait(&e, &v2).await?;
+    e.ft.call("set_slow").args_json(json!({ "hops": 4 })).transact().await?.into_result()?;
+    let bob = e.worker.dev_create_account().await?;
+
+    let pending_claim = claim_tx(&e, id, bob.id().as_str(), &[], Gas::from_tgas(300)).await?
+        .transact_async().await?;
+    let upgrade = apply(&e, v2.clone()).await?;
+    assert!(upgrade.is_success(), "{upgrade:?}");
+    assert_eq!(e.zarf.view_code().await?, v2);
+
+    let out = pending_claim.await?;
+    assert!(out.is_success(), "{out:?}");
+    // Ordering, by block height: the claim receipt ran before the deploy, on_claim after it.
+    let claim_rx = out.receipt_outcomes().iter().find(|r| r.logs.iter().any(|l| l.contains("claim_started"))).unwrap();
+    let paid_rx = out.receipt_outcomes().iter().find(|r| r.logs.iter().any(|l| l.contains("claim_paid"))).unwrap();
+    let applied_rx = upgrade.receipt_outcomes().iter().find(|r| r.logs.iter().any(|l| l.contains("upgrade_applied"))).unwrap();
+    let (claimed_at, paid_at, applied_at) = (
+        height(&e, claim_rx.block_hash).await?,
+        height(&e, paid_rx.block_hash).await?,
+        height(&e, applied_rx.block_hash).await?,
+    );
+    println!("claim at {claimed_at}, upgrade applied at {applied_at}, on_claim at {paid_at}");
+    assert!(claimed_at < applied_at && applied_at < paid_at, "{claimed_at} < {applied_at} < {paid_at}");
+    assert_eq!(state(&e, id).await?, "claimed");
+    assert_eq!(ft_balance(&e, &bob).await?, AMOUNT);
+    assert_eq!(campaign(&e, id).await?["in_flight"], "0");
+    Ok(())
+}
+
+async fn height(e: &Env, hash: near_workspaces::CryptoHash) -> anyhow::Result<u64> {
+    Ok(e.worker.view_block().block_hash(hash).await?.height())
 }

@@ -8,7 +8,7 @@ use near_contract_standards::storage_management::{
     StorageBalance, StorageBalanceBounds, StorageManagement,
 };
 use near_sdk::json_types::U128;
-use near_sdk::{env, near, AccountId, NearToken, PanicOnDefault, PromiseOrValue};
+use near_sdk::{env, near, AccountId, Gas, NearToken, PanicOnDefault, Promise, PromiseOrValue};
 
 #[near(contract_state)]
 #[derive(PanicOnDefault)]
@@ -16,6 +16,9 @@ pub struct MockFt {
     token: FungibleToken,
     fail_transfers: bool,
     fail_storage: bool,
+    /// ft_transfer resolves only after this many extra self-calls (one block each), so a
+    /// test can land something (an upgrade) between a claim and its callback.
+    slow_hops: u8,
 }
 
 #[near]
@@ -25,12 +28,31 @@ impl MockFt {
         let mut token = FungibleToken::new(b"t".to_vec());
         token.internal_register_account(&owner_id);
         token.internal_deposit(&owner_id, total_supply.0);
-        Self { token, fail_transfers: false, fail_storage: false }
+        Self { token, fail_transfers: false, fail_storage: false, slow_hops: 0 }
     }
 
     pub fn set_fail(&mut self, transfers: bool, storage: bool) {
         self.fail_transfers = transfers;
         self.fail_storage = storage;
+    }
+
+    pub fn set_slow(&mut self, hops: u8) {
+        self.slow_hops = hops;
+    }
+
+    /// Self-call chain used to delay ft_transfer's result.
+    pub fn hop(&mut self, left: u8) -> PromiseOrValue<()> {
+        if left == 0 {
+            return PromiseOrValue::Value(());
+        }
+        PromiseOrValue::Promise(
+            Promise::new(env::current_account_id()).function_call(
+                "hop".to_string(),
+                format!("{{\"left\":{}}}", left - 1).into_bytes(),
+                NearToken::from_yoctonear(0),
+                Gas::from_tgas(3 * left as u64),
+            ),
+        )
     }
 }
 
@@ -41,7 +63,18 @@ impl FungibleTokenCore for MockFt {
         if self.fail_transfers {
             env::panic_str("MOCK_FT_TRANSFER_FAILED");
         }
-        self.token.ft_transfer(receiver_id, amount, memo)
+        self.token.ft_transfer(receiver_id, amount, memo);
+        if self.slow_hops > 0 {
+            let left = self.slow_hops;
+            Promise::new(env::current_account_id())
+                .function_call(
+                    "hop".to_string(),
+                    format!("{{\"left\":{}}}", left - 1).into_bytes(),
+                    NearToken::from_yoctonear(0),
+                    Gas::from_tgas(3 * left as u64),
+                )
+                .as_return();
+        }
     }
 
     #[payable]

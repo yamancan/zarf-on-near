@@ -82,6 +82,9 @@ async fn seed() -> anyhow::Result<(near_workspaces::Worker<near_workspaces::netw
             "min_lifetime_ns": MIN_LIFETIME_NS.to_string(), "agent_ttl_ns": AGENT_TTL_NS.to_string(),
             "resolve_delay_ns": RESOLVE_DELAY_NS.to_string(),
             "upgrade_delay_ns": (600u64 * 1_000_000_000).to_string(),
+            "guardian_id": null,
+            // Active at once (a later add_owner_key would wait the upgrade delay).
+            "initial_signers": [{ "signer": vectors["keys"]["signer"], "valid_until_ns": u64::MAX.to_string() }],
         })).gas(Gas::from_tgas(100)))
         .transact().await?.into_result()?;
 
@@ -90,9 +93,6 @@ async fn seed() -> anyhow::Result<(near_workspaces::Worker<near_workspaces::netw
         .transact().await?.into_result()?;
     let now = worker.view_block().await?.timestamp();
     let deadline = now + DAY_NS;
-    owner.call(escrow.id(), "add_owner_key")
-        .args_json(json!({ "signer": vectors["keys"]["signer"], "valid_until_ns": (deadline + 30 * DAY_NS).to_string() }))
-        .transact().await?.into_result()?;
 
     // Claim-only relayer key: it can call `claim` on the escrow and attach no deposit.
     let relayer_key = SecretKey::from_random(KeyType::ED25519);

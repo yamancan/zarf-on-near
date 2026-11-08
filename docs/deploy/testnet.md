@@ -18,7 +18,7 @@ Token: Circle testnet USDC `3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520
 
 ```bash
 CONTRACT_ID=zarf-near-1111.testnet OWNER_ID=zarf-near-owner-1111.testnet \
-RELAYER_ID=zarf-near-relayer-1111.testnet scripts/deploy-testnet.sh
+RELAYER_ID=zarf-near-relayer-1111.testnet scripts/deploy.sh
 ```
 
 Built from revision `48cda04` (contract code = revision `5342b35`), Rust 1.86.0,
@@ -41,7 +41,7 @@ cargo-near 0.23.0, `cargo near build non-reproducible-wasm --no-abi`.
 
 **This testnet contract is upgradeable by the deployer's full-access key.** Whoever holds that
 key can redeploy the code and move every escrowed token. It is kept on purpose on testnet, where
-we may still redeploy. `scripts/deploy-testnet.sh` has an opt-in `LOCK_CONTRACT=1` final step that
+we may still redeploy. `scripts/deploy.sh` has an opt-in `LOCK_CONTRACT=1` final step that
 deletes every full-access key and verifies none remains; it was **not** run here. Whether mainnet
 is made immutable is the owner's decision.
 
@@ -106,8 +106,12 @@ NEP-141 `ft_transfer` (escrow → destination, 1000000), `claim_paid`.
 | **total** | | **11.51 Tgas** (sandbox: 10.1 Tgas) |
 
 After: `claim_state` = `claimed`; destination USDC balance 1000000; campaign 0 balance 2000000,
-in_flight 0, storage_reserved 0.00462 NEAR (two claims left). 55 Tgas holds a 4.8× margin
-over the real total.
+in_flight 0, storage_reserved 0.00462 NEAR (two claims left).
+
+Gas margin per receipt (static gas reserved by the contract vs burnt on chain): `claim` gets
+the prepaid remainder after the three static reservations (55 − 40 = 15 Tgas) and burnt 3.864,
+so **3.9×, the tightest**; `storage_deposit` 10 / 2.037 = 4.9×; `ft_transfer` 15 / 2.289 = 6.6×;
+`on_claim` 15 / 2.093 = 7.2×. Over the whole claim, 55 / 11.51 = 4.8×.
 
 ### Double claim on the same commitment
 
@@ -133,7 +137,7 @@ full-access key**, code changes only through `propose_upgrade` → 10 min → `a
 
 ```bash
 cd /tmp/zarf-work            # at the reviewed upgrade head
-export CARGO_BUILD_JOBS=4 CARGO_TARGET_DIR=$HOME/.cache/zarf-near/target-1.86
+export CARGO_BUILD_JOBS=4 CARGO_TARGET_DIR=$HOME/.cache/zarf-near/target-1.86-wt-contract
 
 # 1. Deploy + new (upgrade_delay_ns 10 min), token bounds, verifier key, a claim-only key for the
 #    same relayer (its own key file: one public key cannot be added twice), then lock.
@@ -141,7 +145,7 @@ CREATE_ACCOUNTS=1 LOCK_CONTRACT=1 UPGRADE_DELAY_NS=600000000000 \
 CONTRACT_ID=zarf-near-1112.testnet OWNER_ID=zarf-near-owner-1111.testnet \
 RELAYER_ID=zarf-near-relayer-1111.testnet \
 RELAYER_KEY_FILE=<relayer-key-file> \
-scripts/deploy-testnet.sh
+scripts/deploy.sh
 #    Expect: "contract has no full-access key"; view_access_key_list(zarf-near-1112.testnet) is
 #    empty; get_config.upgrade_delay_ns = "600000000000"; contract_source_metadata.version "0.1.0".
 

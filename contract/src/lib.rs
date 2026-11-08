@@ -46,8 +46,11 @@ pub const MAX_PROOF_LEN: usize = 20;
 pub const MAX_SIGNATURE_TTL_NS: u64 = 3_600 * 1_000_000_000;
 /// Floor for `resolve_delay_ns` on mainnet (spec: 1 h on testnet and mainnet; tests go shorter).
 pub const MIN_RESOLVE_DELAY_NS: u64 = 3_600 * 1_000_000_000;
-/// Floor for `upgrade_delay_ns` on mainnet (spec: 48 h).
-pub const MIN_UPGRADE_DELAY_NS: u64 = 48 * 3_600 * 1_000_000_000;
+/// Bounds for `upgrade_delay_ns` on mainnet (spec 481a8f4: 10 min .. 1 h).
+pub const MIN_UPGRADE_DELAY_NS: u64 = 600 * 1_000_000_000;
+pub const MAX_UPGRADE_DELAY_NS: u64 = 3_600 * 1_000_000_000;
+/// How long a guardian's freeze_proposals lasts (spec 7688c7b).
+pub const FREEZE_NS: u64 = 7 * 86_400 * 1_000_000_000;
 pub const GAS_MIGRATE: Gas = Gas::from_tgas(30);
 pub const GAS_ON_UPGRADE: Gas = Gas::from_tgas(10);
 
@@ -183,6 +186,7 @@ pub struct ConfigView {
     pub agent_ttl_ns: U64,
     pub resolve_delay_ns: U64,
     pub upgrade_delay_ns: U64,
+    pub guardian_id: Option<AccountId>,
     pub token_ids: Vec<AccountId>,
     pub storage_byte_cost: U128,
 }
@@ -194,6 +198,8 @@ pub struct AgentView {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub measurement_id: Option<String>,
     pub valid_until_ns: U64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_from_ns: Option<U64>,
 }
 
 #[near(serializers = [borsh, json])]
@@ -201,7 +207,29 @@ pub struct AgentView {
 pub struct PendingUpgrade {
     /// Lowercase hex sha256 of the proposed wasm.
     pub code_hash: String,
+    /// Repository + commit the wasm was built from (<= 200 ASCII bytes). Not a proof.
+    pub source: String,
     pub ready_at_ns: U64,
+    /// Set by apply_upgrade until on_upgrade lands: no second apply and no cancel meanwhile,
+    /// so the chain can't show "cancelled" for code that is being deployed.
+    pub applying: bool,
+    pub applying_since_ns: U64,
+}
+
+/// A Mode W signer. It signs nothing that counts until `active_from_ns` (spec: owner keys
+/// wait the upgrade delay), and no campaign snapshots it once `valid_until_ns` < deadline.
+#[near(serializers = [borsh])]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OwnerKey {
+    pub valid_until_ns: u64,
+    pub active_from_ns: u64,
+}
+
+#[near(serializers = [json])]
+#[derive(Clone, Debug)]
+pub struct InitialSigner {
+    pub signer: String,
+    pub valid_until_ns: U64,
 }
 
 #[near(serializers = [borsh, json])]
@@ -211,10 +239,32 @@ pub struct PendingOwner {
     pub ready_at_ns: U64,
 }
 
+#[derive(Serialize)]
+#[serde(crate = "near_sdk::serde")]
+pub struct WatchKey {
+    pub signer: String,
+    pub active_from_ns: U64,
+    pub valid_until_ns: U64,
+}
+
+/// Everything an operator must notice within `upgrade_delay_ns`, in one cheap view.
+#[derive(Serialize)]
+#[serde(crate = "near_sdk::serde")]
+pub struct WatchView {
+    pub pending_upgrade: Option<PendingUpgrade>,
+    pub pending_owner: Option<PendingOwner>,
+    pub frozen_until_ns: U64,
+    pub owner_keys: Vec<WatchKey>,
+}
+
 #[near(contract_state)]
 #[derive(PanicOnDefault)]
 pub struct Contract {
     owner_id: AccountId,
+    /// Can only delay (cancel, freeze, drop a not-yet-active key); immutable.
+    guardian_id: Option<AccountId>,
+    /// While now < this, proposals, key additions, applies and accepts are refused.
+    frozen_until_ns: u64,
     network: String,
     token_ids: Vec<AccountId>,
     min_lifetime_ns: u64,
@@ -234,7 +284,7 @@ pub struct Contract {
     campaign_base_bytes: u64,
     /// Mode W signer -> valid_until_ns. Kept apart from attested agents so a snapshot
     /// never scans re-registered TEE agents.
-    owner_keys: IterableMap<[u8; 32], u64>,
+    owner_keys: IterableMap<[u8; 32], OwnerKey>,
     agents: LookupMap<[u8; 32], AttestedAgent>,
     campaigns: LookupMap<u64, Campaign>,
     /// (sender, merkle_root) -> campaign id: the root is a per-sender idempotency key
@@ -258,12 +308,14 @@ impl Contract {
     #[init]
     pub fn new(
         owner_id: AccountId,
+        guardian_id: Option<AccountId>,
         network: String,
         token_ids: Vec<AccountId>,
         min_lifetime_ns: U64,
         agent_ttl_ns: U64,
         resolve_delay_ns: U64,
         upgrade_delay_ns: U64,
+        initial_signers: Vec<InitialSigner>,
     ) -> Self {
         if env::predecessor_account_id() != env::current_account_id() {
             fail(E107);
@@ -274,7 +326,9 @@ impl Contract {
         if network == "mainnet" && resolve_delay_ns.0 < MIN_RESOLVE_DELAY_NS {
             fail(E108);
         }
-        if network == "mainnet" && upgrade_delay_ns.0 < MIN_UPGRADE_DELAY_NS {
+        if network == "mainnet"
+            && !(MIN_UPGRADE_DELAY_NS..=MAX_UPGRADE_DELAY_NS).contains(&upgrade_delay_ns.0)
+        {
             fail(E108);
         }
         let mut claims = LookupMap::new(StorageKey::Claims);
@@ -324,8 +378,11 @@ impl Contract {
         roots.flush();
         sender_count.flush();
         sender_campaigns.flush();
+        let network_for_keys = network.clone();
         Self {
             owner_id,
+            guardian_id,
+            frozen_until_ns: 0,
             network,
             token_ids,
             min_lifetime_ns: min_lifetime_ns.0,
@@ -337,7 +394,7 @@ impl Contract {
             next_campaign_id: 0,
             claim_entry_bytes,
             campaign_base_bytes,
-            owner_keys: IterableMap::new(StorageKey::OwnerKeys),
+            owner_keys: Self::initial_owner_keys(&network_for_keys, initial_signers),
             agents: LookupMap::new(StorageKey::Agents),
             campaigns,
             roots,
@@ -389,6 +446,7 @@ impl Contract {
 
     pub fn add_owner_key(&mut self, signer: String, valid_until_ns: U64) {
         self.assert_owner();
+        self.assert_not_frozen();
         let key = hex32(&signer);
         if self.owner_keys.contains_key(&key) || self.agents.contains_key(&key) {
             fail(E108);
@@ -396,12 +454,20 @@ impl Contract {
         if self.network == "mainnet" && PUBLIC_TEST_KEYS.contains(&signer.as_str()) {
             fail(E108);
         }
-        self.owner_keys.insert(key, valid_until_ns.0);
+        // Waits the public delay: a stolen owner key can't forge claims on new campaigns at once.
+        let active_from_ns = env::block_timestamp().saturating_add(self.upgrade_delay_ns);
+        self.owner_keys.insert(key, OwnerKey { valid_until_ns: valid_until_ns.0, active_from_ns });
     }
 
+    /// Owner: any key, at once. Guardian: only an owner key that is not active yet.
     pub fn remove_agent(&mut self, account_id: String) {
-        self.assert_owner();
         let key = hex32(&account_id);
+        if env::predecessor_account_id() != self.owner_id {
+            let pending = self.owner_keys.get(&key).is_some_and(|k| k.active_from_ns > env::block_timestamp());
+            if !(self.is_guardian() && pending) {
+                fail(E107);
+            }
+        }
         self.owner_keys.remove(&key);
         self.agents.remove(&key);
     }
@@ -409,13 +475,19 @@ impl Contract {
     /// `account_id` is the signer hex (a Shade agent's implicit account id).
     pub fn get_agent(&self, account_id: String) -> Option<AgentView> {
         let key = hex32(&account_id);
-        if let Some(until) = self.owner_keys.get(&key) {
-            return Some(AgentView { kind: "owner", measurement_id: None, valid_until_ns: U64(*until) });
+        if let Some(k) = self.owner_keys.get(&key) {
+            return Some(AgentView {
+                kind: "owner",
+                measurement_id: None,
+                valid_until_ns: U64(k.valid_until_ns),
+                active_from_ns: Some(U64(k.active_from_ns)),
+            });
         }
         self.agents.get(&key).map(|a| AgentView {
             kind: "attested",
             measurement_id: Some(to_hex(&a.measurement_id)),
             valid_until_ns: U64(a.valid_until_ns),
+            active_from_ns: None,
         })
     }
 
@@ -507,6 +579,7 @@ impl Contract {
             agent_ttl_ns: U64(self.agent_ttl_ns),
             resolve_delay_ns: U64(self.resolve_delay_ns),
             upgrade_delay_ns: U64(self.upgrade_delay_ns),
+            guardian_id: self.guardian_id.clone(),
             token_ids: self.token_ids.clone(),
             storage_byte_cost: U128(env::storage_byte_cost().as_yoctonear()),
         }
@@ -731,28 +804,48 @@ impl Contract {
 
     // ---- upgrades and ownership (spec "Upgrades and ownership") ----
 
-    pub fn propose_upgrade(&mut self, code_hash: String) {
+    pub fn propose_upgrade(&mut self, code_hash: String, source: String) {
         self.assert_owner();
+        self.assert_not_frozen();
         hex32(&code_hash);
+        if source.is_empty() || source.len() > 200 || !source.bytes().all(|b| (0x20..0x7f).contains(&b)) {
+            fail(E108);
+        }
         if self.pending_upgrade.is_some() {
             fail(E108);
         }
         let ready_at_ns = U64(env::block_timestamp().saturating_add(self.upgrade_delay_ns));
-        emit("upgrade_proposed", json!({ "code_hash": code_hash, "ready_at_ns": ready_at_ns }));
-        self.pending_upgrade = Some(PendingUpgrade { code_hash, ready_at_ns });
+        emit(
+            "upgrade_proposed",
+            json!({ "code_hash": code_hash, "source": source, "ready_at_ns": ready_at_ns }),
+        );
+        self.pending_upgrade =
+            Some(PendingUpgrade { code_hash, source, ready_at_ns, applying: false, applying_since_ns: U64(0) });
     }
 
     pub fn cancel_upgrade(&mut self) {
-        self.assert_owner();
+        self.assert_owner_or_guardian();
+        let p = self.pending_upgrade.as_ref().unwrap_or_else(|| fail(E108));
+        if self.apply_in_flight(p) {
+            fail(E108);
+        }
         let p = self.pending_upgrade.take().unwrap_or_else(|| fail(E108));
         emit("upgrade_cancelled", json!({ "code_hash": p.code_hash }));
     }
 
     /// Input is the raw wasm, not JSON. Deploy and `migrate` run in one batch, so a failing
-    /// migration rolls the deploy back; `on_upgrade` then reports the outcome.
+    /// migration rolls the deploy back; `on_upgrade` then reports the outcome. The attached
+    /// deposit pays for any growth of the code: `migrate` measures the real growth right after
+    /// the deploy and fails (E128, rolling it back) if the deposit doesn't cover it, so code
+    /// storage never comes out of senders' pre-pay. On failure the deposit is refunded.
+    #[payable]
     pub fn apply_upgrade(&mut self) -> Promise {
         self.assert_owner();
+        self.assert_not_frozen();
         let p = self.pending_upgrade.clone().unwrap_or_else(|| fail(E108));
+        if self.apply_in_flight(&p) {
+            fail(E108);
+        }
         if env::block_timestamp() < p.ready_at_ns.0 {
             fail(E107);
         }
@@ -760,37 +853,70 @@ impl Contract {
         if to_hex(&env::sha256_array(&code)) != p.code_hash {
             fail(E108);
         }
+        if let Some(pending) = self.pending_upgrade.as_mut() {
+            pending.applying = true;
+            pending.applying_since_ns = U64(env::block_timestamp());
+        }
+        let deposit = U128(env::attached_deposit().as_yoctonear());
+        let args = json!({ "storage_before": U64(env::storage_usage()), "deposit": deposit });
         Promise::new(env::current_account_id())
             .deploy_contract(code)
-            .function_call("migrate".to_string(), b"{}".to_vec(), NearToken::from_yoctonear(0), GAS_MIGRATE)
+            .function_call(
+                "migrate".to_string(),
+                serde_json::to_vec(&args).unwrap_or_else(|_| fail(E108)),
+                NearToken::from_yoctonear(0),
+                GAS_MIGRATE,
+            )
             .then(
                 Self::ext(env::current_account_id())
                     .with_static_gas(GAS_ON_UPGRADE)
-                    .on_upgrade(p.code_hash),
+                    .on_upgrade(p.code_hash, deposit, env::predecessor_account_id()),
             )
     }
 
-    /// Private callback. The proposal is consumed only if deploy + migrate succeeded.
-    pub fn on_upgrade(&mut self, code_hash: String) -> bool {
+    /// Private callback; every version keeps this name and these arguments (a callback
+    /// scheduled by the old code lands on the new one). The proposal is consumed only if
+    /// deploy + migrate succeeded; otherwise the deposit goes back to the owner.
+    pub fn on_upgrade(&mut self, code_hash: String, deposit: U128, refund_to: AccountId) -> bool {
         if env::predecessor_account_id() != env::current_account_id() {
             fail(E107);
         }
         let ok = transfer_succeeded();
-        if ok && self.pending_upgrade.as_ref().is_some_and(|p| p.code_hash == code_hash) {
-            self.pending_upgrade = None;
-            emit("upgrade_applied", json!({ "code_hash": code_hash }));
+        // Acts only on its own proposal: a different (newer) proposal is left alone.
+        let mine = self.pending_upgrade.as_ref().is_some_and(|p| p.code_hash == code_hash && p.applying);
+        if ok {
+            if mine {
+                self.pending_upgrade = None;
+                emit("upgrade_applied", json!({ "code_hash": code_hash }));
+            }
+        } else {
+            if mine {
+                if let Some(p) = self.pending_upgrade.as_mut() {
+                    p.applying = false;
+                    p.applying_since_ns = U64(0);
+                }
+                emit("upgrade_failed", json!({ "code_hash": code_hash }));
+            }
+            if deposit.0 > 0 {
+                Promise::new(refund_to).transfer(NearToken::from_yoctonear(deposit.0)).detach();
+            }
         }
         ok
     }
 
-    /// Private. Runs right after a deploy, in the same batch; state layout changes go here.
-    /// v1: nothing to migrate.
-    pub fn migrate(&mut self) {
+    /// Private. Runs in the new code right after the deploy, in the same batch. Must be
+    /// idempotent: re-applying the same code (e.g. after a lost on_upgrade) runs it again.
+    /// v1 changes no state; it only checks the code-growth deposit.
+    pub fn migrate(&mut self, storage_before: U64, deposit: U128) {
         if env::predecessor_account_id() != env::current_account_id() {
             fail(E107);
         }
         #[cfg(feature = "test-migrate-panic")]
         env::panic_str("TEST_MIGRATE_PANIC");
+        let grown = env::storage_usage().saturating_sub(storage_before.0);
+        if storage_cost(grown) > deposit.0 {
+            fail(E128);
+        }
     }
 
     pub fn pending_upgrade(&self) -> Option<PendingUpgrade> {
@@ -799,6 +925,7 @@ impl Contract {
 
     pub fn propose_owner(&mut self, new_owner: AccountId) {
         self.assert_owner();
+        self.assert_not_frozen();
         if self.pending_owner.is_some() {
             fail(E108);
         }
@@ -809,6 +936,7 @@ impl Contract {
 
     /// Called by the proposed owner once the delay has passed.
     pub fn accept_owner(&mut self) {
+        self.assert_not_frozen();
         let p = self.pending_owner.clone().unwrap_or_else(|| fail(E108));
         if env::predecessor_account_id() != p.new_owner || env::block_timestamp() < p.ready_at_ns.0 {
             fail(E107);
@@ -819,8 +947,34 @@ impl Contract {
     }
 
     pub fn cancel_owner(&mut self) {
-        self.assert_owner();
+        self.assert_owner_or_guardian();
         self.pending_owner.take().unwrap_or_else(|| fail(E108));
+    }
+
+    /// Guardian only: a week with no proposals, key additions, applies or accepts. The owner
+    /// cannot lift it; calling again extends it from now.
+    pub fn freeze_proposals(&mut self) {
+        if !self.is_guardian() {
+            fail(E107);
+        }
+        self.frozen_until_ns = env::block_timestamp().saturating_add(FREEZE_NS);
+    }
+
+    pub fn watch(&self) -> WatchView {
+        WatchView {
+            pending_upgrade: self.pending_upgrade.clone(),
+            pending_owner: self.pending_owner.clone(),
+            frozen_until_ns: U64(self.frozen_until_ns),
+            owner_keys: self
+                .owner_keys
+                .iter()
+                .map(|(k, v)| WatchKey {
+                    signer: to_hex(k),
+                    active_from_ns: U64(v.active_from_ns),
+                    valid_until_ns: U64(v.valid_until_ns),
+                })
+                .collect(),
+        }
     }
 
     pub fn get_owner(&self) -> AccountId {
@@ -926,18 +1080,57 @@ impl Contract {
 }
 
 impl Contract {
+    fn initial_owner_keys(network: &str, signers: Vec<InitialSigner>) -> IterableMap<[u8; 32], OwnerKey> {
+        let mut keys = IterableMap::new(StorageKey::OwnerKeys);
+        for s in signers {
+            if network == "mainnet" && PUBLIC_TEST_KEYS.contains(&s.signer.as_str()) {
+                fail(E108);
+            }
+            // Active at once: nothing exists yet for them to attack.
+            let key = OwnerKey { valid_until_ns: s.valid_until_ns.0, active_from_ns: env::block_timestamp() };
+            if keys.insert(hex32(&s.signer), key).is_some() {
+                fail(E108);
+            }
+        }
+        keys
+    }
+
     fn assert_owner(&self) {
         if env::predecessor_account_id() != self.owner_id {
             fail(E107);
         }
     }
 
+    fn is_guardian(&self) -> bool {
+        self.guardian_id.as_ref() == Some(&env::predecessor_account_id())
+    }
+
+    fn assert_owner_or_guardian(&self) {
+        if env::predecessor_account_id() != self.owner_id && !self.is_guardian() {
+            fail(E107);
+        }
+    }
+
+    /// An apply is in flight until its on_upgrade lands. on_upgrade is built not to fail, but
+    /// if it is ever lost the flag expires after upgrade_delay_ns, so the proposal can be
+    /// cancelled or re-applied (migrate is idempotent) instead of blocking upgrades forever.
+    fn apply_in_flight(&self, p: &PendingUpgrade) -> bool {
+        p.applying && env::block_timestamp() < p.applying_since_ns.0.saturating_add(self.upgrade_delay_ns)
+    }
+
+    fn assert_not_frozen(&self) {
+        if env::block_timestamp() < self.frozen_until_ns {
+            fail(E107);
+        }
+    }
+
     fn policy_snapshot(&self, policy: Policy, deadline_ns: u64) -> Vec<[u8; 32]> {
+        let now = env::block_timestamp();
         match policy {
             Policy::Owner => self
                 .owner_keys
                 .iter()
-                .filter(|(_, until)| **until >= deadline_ns)
+                .filter(|(_, k)| k.active_from_ns <= now && k.valid_until_ns >= deadline_ns)
                 .map(|(k, _)| *k)
                 .collect(),
             // shortcut: no approved measurements exist until T11 adds approve_measurements,
@@ -1022,7 +1215,7 @@ impl Contract {
             Policy::Owner => self
                 .owner_keys
                 .get(&signer)
-                .is_some_and(|until| *until >= now && c.snapshot.contains(&signer)),
+                .is_some_and(|k| k.valid_until_ns >= now && c.snapshot.contains(&signer)),
             Policy::Attested => self.agents.get(&signer).is_some_and(|a| {
                 a.valid_until_ns >= now && c.snapshot.contains(&a.measurement_id)
             }),

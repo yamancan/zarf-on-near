@@ -25,7 +25,8 @@ release wasm does not contain the test panic.
 
 ## Owner exit for a stranded claim
 
-If a claim's callback never completes, the claim stays `pending`. After one hour the
-owner may call `resolve_pending` with the outcome read from the `ft_transfer` receipt.
-A wrong answer can double-pay or block that **one** claim; it cannot touch any other
-allocation. The callback is built so this should never be needed.
+If a claim's callback never completes, the claim stays `pending`. After `resolve_delay_ns`
+(1 h on testnet and mainnet) the owner may call `resolve_pending` with the outcome read from
+the `ft_transfer` receipt. A wrong `paid: false` on a claim that was in fact paid reopens it,
+so the recipient can be paid **twice, out of the token balance every campaign shares**; a
+wrong `paid: true` blocks that claim. The callback is built so this should never be needed.

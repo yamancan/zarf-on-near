@@ -1,42 +1,55 @@
 #!/usr/bin/env bash
-# Deploys the Zarf escrow to NEAR testnet and makes it ready for campaigns.
+# Deploys the Zarf escrow to NEAR testnet (default) or mainnet and makes it ready for campaigns.
 #
 #   1. deploy + `new` in ONE batched transaction (spec: nobody can initialise it first)
-#   2. owner: refresh_token_storage for testnet USDC (read on chain, not hard-coded)
-#   3. owner: add_owner_key for the Mode W verifier signer
+#   2. owner: refresh_token_storage for USDC (read on chain, not hard-coded)
+#   3. the Mode W verifier signer is an initial signer of `new` (active at once; a later
+#      add_owner_key would wait the upgrade delay)
 #   4. print the views the apps read
 #
 # Required env:
 #   CONTRACT_ID      account to deploy to (its full-access key in ~/.near-credentials)
 #   OWNER_ID         contract owner (key in ~/.near-credentials)
 # Optional env:
+#   NETWORK          testnet (default) or mainnet. Mainnet requires LOCK_CONTRACT=1, Circle's
+#                    mainnet USDC exactly, .near accounts, and no faucet; it warns without a guardian.
+#   GUARDIAN_ID      account that can only delay (cancel, freeze, drop a not-yet-active key)
 #   SIGNER_PUBKEY    verifier ed25519 public key (64 lowercase hex). Default: derived from
 #                    VERIFIER_SEED_FILE, which is created (32 random bytes, mode 600) if missing
-#   VERIFIER_SEED_FILE   default ~/.config/zarf-near/testnet-verifier.seed (testnet only)
+#   VERIFIER_SEED_FILE   default ~/.config/zarf-near/$NETWORK-verifier.seed
 #   RELAYER_ID       relayer account; gets a claim-only function-call key whose secret goes to
-#                    RELAYER_KEY_FILE (default ~/.config/zarf-near/testnet-relayer.key, mode 600)
-#   USDC_ID              default: Circle's testnet USDC (verified on chain in docs/spikes/S1.md)
+#                    RELAYER_KEY_FILE (default ~/.config/zarf-near/$NETWORK-relayer.key, mode 600)
+#   USDC_ID              default: Circle's USDC for NETWORK (testnet one verified in docs/spikes/S1.md)
 #   SIGNER_VALID_DAYS    default 60; must outlive every campaign deadline (spec snapshot rule)
 #   CREATE_ACCOUNTS=1    create CONTRACT_ID / OWNER_ID with the testnet faucet if missing
 #   DRY_RUN=1            print every command instead of running it
-#   UPGRADE_DELAY_NS     default 10 min on testnet; mainnet requires >= 48 h (the contract refuses less)
+#   UPGRADE_DELAY_NS     default 10 min on testnet, 1 h on mainnet (the contract allows 10 min .. 1 h there)
 #   LOCK_CONTRACT=1      finally delete every full-access key on CONTRACT_ID. After that the code
 #                        changes only through propose_upgrade/apply_upgrade (the timelock).
 #                        Mandatory on mainnet, opt-in on testnet.
-#
-# Testnet only. Mainnet (T9) gets its own script with a 30-day min lifetime.
 set -euo pipefail
 
-NETWORK=testnet
-RPC=https://rpc.testnet.near.org
-USDC_ID=${USDC_ID:-3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af}
-MIN_LIFETIME_NS=600000000000      # 10 min on testnet (spec)
+NETWORK=${NETWORK:-testnet}
+MAINNET_USDC=17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1
+case $NETWORK in
+  testnet)
+    RPC=https://rpc.testnet.near.org SUFFIX=.testnet EXPLORER=https://testnet.nearblocks.io
+    USDC_ID=${USDC_ID:-3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af}
+    MIN_LIFETIME_NS=600000000000 ;;          # 10 min (spec)
+  mainnet)
+    RPC=https://rpc.mainnet.near.org SUFFIX=.near EXPLORER=https://nearblocks.io
+    USDC_ID=${USDC_ID:-$MAINNET_USDC}
+    MIN_LIFETIME_NS=2592000000000000 ;;      # 30 days (spec)
+  *) echo "NETWORK must be testnet or mainnet" >&2; exit 64 ;;
+esac
 AGENT_TTL_NS=604800000000000      # 7 days, the Shade CLI re-registration period (spec)
 RESOLVE_DELAY_NS=3600000000000    # 1 h before resolve_pending may act (spec)
-# Public delay before a proposed upgrade or owner change takes effect (spec: mainnet >= 48 h).
-UPGRADE_DELAY_NS=${UPGRADE_DELAY_NS:-600000000000}   # testnet default: 10 min
-VERIFIER_SEED_FILE=${VERIFIER_SEED_FILE:-$HOME/.config/zarf-near/testnet-verifier.seed}
-RELAYER_KEY_FILE=${RELAYER_KEY_FILE:-$HOME/.config/zarf-near/testnet-relayer.key}
+# Public delay before a proposed upgrade or owner change takes effect.
+# testnet default 10 min; mainnet default 1 h (the contract allows 10 min .. 1 h there)
+if [[ $NETWORK == mainnet ]]; then UPGRADE_DELAY_NS=${UPGRADE_DELAY_NS:-3600000000000}; fi
+UPGRADE_DELAY_NS=${UPGRADE_DELAY_NS:-600000000000}
+VERIFIER_SEED_FILE=${VERIFIER_SEED_FILE:-$HOME/.config/zarf-near/$NETWORK-verifier.seed}
+RELAYER_KEY_FILE=${RELAYER_KEY_FILE:-$HOME/.config/zarf-near/$NETWORK-relayer.key}
 SIGNER_VALID_DAYS=${SIGNER_VALID_DAYS:-60}
 
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
@@ -45,8 +58,12 @@ wasm="$repo_root/contract/target/near/release/zarf_near.wasm"
 : "${CONTRACT_ID:?set CONTRACT_ID}" "${OWNER_ID:?set OWNER_ID}"
 # Checked before any transaction. A full-access key can sign as the escrow and call the token
 # directly, so on mainnet it must be deleted.
-[[ $NETWORK != mainnet || ${LOCK_CONTRACT:-} == 1 ]] ||
-  { echo "LOCK_CONTRACT=1 is mandatory on mainnet" >&2; exit 64; }
+if [[ $NETWORK == mainnet ]]; then
+  [[ ${LOCK_CONTRACT:-} == 1 ]] || { echo "LOCK_CONTRACT=1 is mandatory on mainnet" >&2; exit 64; }
+  [[ $USDC_ID == "$MAINNET_USDC" ]] || { echo "mainnet USDC_ID must be Circle's $MAINNET_USDC" >&2; exit 64; }
+  [[ ${CREATE_ACCOUNTS:-} != 1 ]] || { echo "CREATE_ACCOUNTS uses the testnet faucet only" >&2; exit 64; }
+  [[ -n ${GUARDIAN_ID:-} ]] || echo "WARNING: no GUARDIAN_ID on mainnet: a stolen owner key can't be slowed down" >&2
+fi
 umask 077
 # Secrets are written to files only, never printed. Keys are testnet-only.
 if [[ -z ${SIGNER_PUBKEY:-} ]]; then
@@ -67,8 +84,9 @@ for test_key in 8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c
   [[ $SIGNER_PUBKEY != "$test_key" ]] ||
     { echo "SIGNER_PUBKEY is a public test key from spec/vectors.json; use the verifier's real key" >&2; exit 64; }
 done
-[[ $CONTRACT_ID == *.testnet && $OWNER_ID == *.testnet && ${RELAYER_ID:-x.testnet} == *.testnet ]] ||
-  { echo "testnet accounts only" >&2; exit 64; }
+for account in "$CONTRACT_ID" "$OWNER_ID" ${RELAYER_ID:+"$RELAYER_ID"} ${GUARDIAN_ID:+"$GUARDIAN_ID"}; do
+  [[ $account == *"$SUFFIX" ]] || { echo "$account is not a $NETWORK account (*$SUFFIX)" >&2; exit 64; }
+done
 
 run() {
   if [[ ${DRY_RUN:-} == 1 ]]; then printf '+'; printf ' %q' "$@"; echo; else "$@"; fi
@@ -115,9 +133,11 @@ run make -C "$repo_root/contract" wasm
 [[ ${DRY_RUN:-} == 1 || -s $wasm ]] || { echo "missing $wasm" >&2; exit 66; }
 
 echo "== deploy + new (one transaction)"
+signer_valid_until=$(( ($(date +%s) + SIGNER_VALID_DAYS * 86400) * 1000000000 ))
 init_args=$(jq -nc --arg o "$OWNER_ID" --arg u "$USDC_ID" --arg m "$MIN_LIFETIME_NS" --arg t "$AGENT_TTL_NS" \
-  --arg r "$RESOLVE_DELAY_NS" --arg g "$UPGRADE_DELAY_NS" \
-  '{owner_id:$o, network:"testnet", token_ids:[$u], min_lifetime_ns:$m, agent_ttl_ns:$t, resolve_delay_ns:$r, upgrade_delay_ns:$g}')
+  --arg r "$RESOLVE_DELAY_NS" --arg g "$UPGRADE_DELAY_NS" --arg s "$SIGNER_PUBKEY" --arg v "$signer_valid_until" \
+  --arg n "$NETWORK" --arg gd "${GUARDIAN_ID:-}" \
+  '{owner_id:$o, guardian_id:(if $gd == "" then null else $gd end), network:$n, token_ids:[$u], min_lifetime_ns:$m, agent_ttl_ns:$t, resolve_delay_ns:$r, upgrade_delay_ns:$g, initial_signers:[{signer:$s, valid_until_ns:$v}]}')
 run near contract deploy "$CONTRACT_ID" use-file "$wasm" \
   with-init-call new json-args "$init_args" prepaid-gas '100 Tgas' attached-deposit '0 NEAR' \
   network-config "$NETWORK" sign-with-legacy-keychain send
@@ -131,9 +151,6 @@ run near contract call-function as-transaction "$USDC_ID" storage_deposit \
 echo "== refresh_token_storage (owner)"
 call refresh_token_storage "$(jq -nc --arg u "$USDC_ID" '{token_id:$u}')" '50 Tgas'
 
-echo "== add_owner_key (owner)"
-valid_until=$(( ($(date +%s) + SIGNER_VALID_DAYS * 86400) * 1000000000 ))
-call add_owner_key "$(jq -nc --arg s "$SIGNER_PUBKEY" --arg v "$valid_until" '{signer:$s, valid_until_ns:$v}')"
 
 if [[ -n ${RELAYER_ID:-} ]]; then
   echo "== relayer claim-only key ($RELAYER_ID)"
@@ -186,7 +203,7 @@ echo "network:            $(view "$CONTRACT_ID" get_network)"
 echo "storage_costs:      $(view "$CONTRACT_ID" storage_costs "$(jq -nc --arg u "$USDC_ID" '{token_id:$u}')")"
 echo "agent:              $(view "$CONTRACT_ID" get_agent "$(jq -nc --arg s "$SIGNER_PUBKEY" '{account_id:$s}')")"
 echo "required_claim_gas: $(view "$CONTRACT_ID" required_claim_gas)"
-echo "deployed: https://testnet.nearblocks.io/address/$CONTRACT_ID"
+echo "deployed: $EXPLORER/address/$CONTRACT_ID"
 remaining=$(full_access_keys)
 if [[ -n $remaining ]]; then
   echo "WARNING: contract is upgradeable by: $remaining" >&2

@@ -35,15 +35,20 @@ fn me() -> AccountId {
     acc("zarf-near.testnet")
 }
 fn init(network: &str) -> Contract {
+    init_with(network, vec![])
+}
+fn init_with(network: &str, signers: Vec<InitialSigner>) -> Contract {
     at(me(), now());
     Contract::new(
         owner(),
+        None,
         network.into(),
         vec![usdc()],
         U64(n(&v()["context"]["min_lifetime_ns"])),
         U64(7 * DAY_NS),
         U64(MIN_RESOLVE_DELAY_NS),
         U64(UPGRADE_DELAY),
+        signers,
     )
 }
 
@@ -105,18 +110,20 @@ fn create_msg(root: &str, deadline_ns: u64, policy: &str) -> String {
 fn base() -> Contract {
     base_on("testnet")
 }
+fn vector_signer() -> InitialSigner {
+    InitialSigner { signer: v()["keys"]["signer"].as_str().unwrap().into(), valid_until_ns: U64(deadline() + DAY_NS) }
+}
 fn base_on(network: &str) -> Contract {
-    let mut c = init(network);
-    c.ft_storage_deposit.insert(usdc(), USDC_MIN);
-    at(owner(), now());
-    let vs = v();
-    let signer = vs["keys"]["signer"].as_str().unwrap();
-    if network == "mainnet" {
-        // add_owner_key refuses the public test keys on mainnet; plant it to test E101.
-        c.owner_keys.insert(hex32(signer), deadline() + DAY_NS);
+    let mut c = if network == "mainnet" {
+        // Mainnet refuses the public test keys; plant it to test E101.
+        let mut c = init(network);
+        let key = OwnerKey { valid_until_ns: deadline() + DAY_NS, active_from_ns: now() };
+        c.owner_keys.insert(hex32(&vector_signer().signer), key);
+        c
     } else {
-        c.add_owner_key(signer.into(), U64(deadline() + DAY_NS));
-    }
+        init_with(network, vec![vector_signer()])
+    };
+    c.ft_storage_deposit.insert(usdc(), USDC_MIN);
     set_ctx(sender(), now(), 10u128.pow(24), 300);
     c.prepay_deposit(None);
     c
@@ -340,7 +347,7 @@ fn removed_or_expired_signer_is_e101() {
     let mut c = seeded();
     let a = valid(0);
     at(acc("relayer.testnet"), now());
-    *c.owner_keys.get_mut(&hex32(&a.signer)).unwrap() = now() - 1;
+    c.owner_keys.get_mut(&hex32(&a.signer)).unwrap().valid_until_ns = now() - 1;
     assert_err(E101, || {
         c.check_claim(&a);
     });
@@ -357,15 +364,20 @@ fn signer_added_after_creation_is_not_in_snapshot() {
     let signer = v()["keys"]["signer"].as_str().unwrap().to_string();
     let rogue = v()["keys"]["rogue_signer"].as_str().unwrap().to_string();
     at(owner(), now());
-    c.add_owner_key(rogue.clone(), U64(deadline() + DAY_NS));
+    c.add_owner_key(rogue.clone(), U64(u64::MAX));
     assert_eq!(c.get_campaign(U64(7)).unwrap().snapshot, vec![signer.clone()]);
-    at(usdc(), now());
-    c.ft_on_transfer(sender(), U128(1), create_msg(&other_root(1), deadline(), "owner"));
-    let mut fresh = c.get_campaign(U64(9)).unwrap().snapshot;
-    fresh.sort();
-    let mut both = vec![signer, rogue];
-    both.sort();
-    assert_eq!(fresh, both);
+    // M1 (spec a45fb38): a key added now is not active until upgrade_delay_ns has passed,
+    // so a campaign created before that does not snapshot it.
+    // (The vector signer expires before this deadline, so only the rogue key could qualify.)
+    at(usdc(), now() + UPGRADE_DELAY - 1);
+    assert_err(E127, || {
+        c.ft_on_transfer(sender(), U128(1), create_msg(&other_root(1), now() + UPGRADE_DELAY + 2 * DAY_NS, "owner"));
+    });
+    // Once the delay has passed, a new campaign snapshots it.
+    at(usdc(), now() + UPGRADE_DELAY);
+    c.ft_on_transfer(sender(), U128(1), create_msg(&other_root(2), now() + UPGRADE_DELAY + 2 * DAY_NS, "owner"));
+    let id = c.campaign_by_root(sender(), other_root(2)).unwrap();
+    assert_eq!(c.get_campaign(id).unwrap().snapshot, vec![rogue.clone()]);
     // M2: the rogue key is registered and valid, but campaign 7's snapshot predates it.
     let rogue_vec = v()["claims"]["invalid"]
         .as_array()
@@ -554,12 +566,19 @@ fn registry_owner_path() {
     assert_err(E108, || c.add_owner_key(signer.to_uppercase(), U64(1)));
 
     let view = serde_json::to_value(c.get_agent(signer.clone()).unwrap()).unwrap();
-    assert_eq!(view, json!({ "kind": "owner", "valid_until_ns": (deadline() + DAY_NS).to_string() }));
+    // An initial signer is active at once.
+    assert_eq!(
+        view,
+        json!({ "kind": "owner", "valid_until_ns": (deadline() + DAY_NS).to_string(), "active_from_ns": now().to_string() })
+    );
 
     c.remove_agent(signer.clone());
     assert!(c.get_agent(signer.clone()).is_none());
     c.add_owner_key(signer.clone(), U64(5)); // remove + add = key extension
-    assert_eq!(c.get_agent(signer).unwrap().valid_until_ns.0, 5);
+    let added = c.get_agent(signer).unwrap();
+    assert_eq!(added.valid_until_ns.0, 5);
+    // A key added later waits the upgrade delay.
+    assert_eq!(added.active_from_ns.unwrap().0, now() + UPGRADE_DELAY);
 }
 
 // ---- storage pre-pay ----
@@ -728,7 +747,7 @@ fn reclaim_releases_unused_reservation_even_when_fully_claimed() {
 fn network_is_validated_and_exposed() {
     at(me(), now());
     assert_err(E108, || {
-        Contract::new(owner(), "devnet".into(), vec![], U64(1), U64(1), U64(MIN_RESOLVE_DELAY_NS), U64(UPGRADE_DELAY));
+        Contract::new(owner(), None, "devnet".into(), vec![], U64(1), U64(1), U64(MIN_RESOLVE_DELAY_NS), U64(UPGRADE_DELAY), vec![]);
     });
     assert_eq!(init("mainnet").get_network(), "mainnet");
 }
@@ -737,7 +756,7 @@ fn network_is_validated_and_exposed() {
 fn new_is_private() {
     at(owner(), now());
     assert_err(E107, || {
-        Contract::new(owner(), "testnet".into(), vec![], U64(1), U64(1), U64(MIN_RESOLVE_DELAY_NS), U64(UPGRADE_DELAY));
+        Contract::new(owner(), None, "testnet".into(), vec![], U64(1), U64(1), U64(MIN_RESOLVE_DELAY_NS), U64(UPGRADE_DELAY), vec![]);
     });
 }
 
@@ -990,6 +1009,7 @@ fn get_config_view() {
             "agent_ttl_ns": (7 * DAY_NS).to_string(),
             "resolve_delay_ns": MIN_RESOLVE_DELAY_NS.to_string(),
             "upgrade_delay_ns": UPGRADE_DELAY.to_string(),
+            "guardian_id": null,
             "token_ids": ["usdc.testnet"],
             "storage_byte_cost": env::storage_byte_cost().as_yoctonear().to_string(),
         })
@@ -1082,6 +1102,13 @@ fn mainnet_refuses_the_public_test_keys() {
         assert_err(E108, || c.add_owner_key(k.into(), U64(u64::MAX)));
     }
     c.add_owner_key(other_root(3), U64(u64::MAX));
+    // The same refusal applies to initial_signers.
+    for k in PUBLIC_TEST_KEYS {
+        at(me(), now());
+        assert_err(E108, || {
+            init_with("mainnet", vec![InitialSigner { signer: k.into(), valid_until_ns: U64(u64::MAX) }]);
+        });
+    }
     // Testnet keeps accepting them: the sandbox and the vector tests rely on it.
     let mut t = init("testnet");
     at(owner(), now());
@@ -1092,19 +1119,17 @@ fn mainnet_refuses_the_public_test_keys() {
 fn mainnet_floors_resolve_delay_at_one_hour() {
     at(me(), now());
     assert_err(E108, || {
-        Contract::new(owner(), "mainnet".into(), vec![], U64(1), U64(1), U64(MIN_RESOLVE_DELAY_NS - 1), U64(UPGRADE_DELAY));
+        Contract::new(owner(), None, "mainnet".into(), vec![], U64(1), U64(1), U64(MIN_RESOLVE_DELAY_NS - 1), U64(UPGRADE_DELAY), vec![]);
     });
-    let m = Contract::new(owner(), "mainnet".into(), vec![], U64(1), U64(1), U64(MIN_RESOLVE_DELAY_NS), U64(UPGRADE_DELAY));
+    let m = Contract::new(owner(), None, "mainnet".into(), vec![], U64(1), U64(1), U64(MIN_RESOLVE_DELAY_NS), U64(UPGRADE_DELAY), vec![]);
     assert_eq!(m.get_config().resolve_delay_ns.0, MIN_RESOLVE_DELAY_NS);
 }
 
 #[test]
 fn testnet_may_use_a_short_resolve_delay() {
     at(me(), now());
-    let mut c = Contract::new(owner(), "testnet".into(), vec![usdc()], U64(1), U64(1), U64(5_000_000_000), U64(UPGRADE_DELAY));
+    let mut c = Contract::new(owner(), None, "testnet".into(), vec![usdc()], U64(1), U64(1), U64(5_000_000_000), U64(UPGRADE_DELAY), vec![vector_signer()]);
     c.ft_storage_deposit.insert(usdc(), USDC_MIN);
-    at(owner(), now());
-    c.add_owner_key(v()["keys"]["signer"].as_str().unwrap().into(), U64(deadline() + DAY_NS));
     set_ctx(sender(), now(), 10u128.pow(24), 300);
     c.prepay_deposit(None);
     c.next_campaign_id = 7;
@@ -1150,9 +1175,14 @@ fn upgrade_guards() {
     let hash = to_hex(&env::sha256_array(&code));
 
     at(sender(), now());
-    assert_err(E107, || c.propose_upgrade(hash.clone()));
+    let src = || "github.com/yamancan/zarf-on-near@0123abc".to_string();
+    assert_err(E107, || c.propose_upgrade(hash.clone(), src()));
     at(owner(), now());
-    assert_err(E108, || c.propose_upgrade(hash.to_uppercase()));
+    assert_err(E108, || c.propose_upgrade(hash.to_uppercase(), src()));
+    // M2: source is required, ASCII, at most 200 bytes.
+    assert_err(E108, || c.propose_upgrade(hash.clone(), String::new()));
+    assert_err(E108, || c.propose_upgrade(hash.clone(), "x".repeat(201)));
+    assert_err(E108, || c.propose_upgrade(hash.clone(), "repo@ç".into()));
     assert_err(E108, || c.cancel_upgrade());
     with_input(owner(), now(), &code);
     assert_err(E108, || {
@@ -1160,11 +1190,13 @@ fn upgrade_guards() {
     });
 
     at(owner(), now());
-    c.propose_upgrade(hash.clone());
+    c.propose_upgrade(hash.clone(), src());
     assert!(get_logs()[0].contains("\"event\":\"upgrade_proposed\""));
+    assert!(get_logs()[0].contains("zarf-near@0123abc"));
     let p = c.pending_upgrade().unwrap();
     assert_eq!((p.code_hash.as_str(), p.ready_at_ns.0), (hash.as_str(), now() + UPGRADE_DELAY));
-    assert_err(E108, || c.propose_upgrade(hash.clone()));
+    assert_eq!(p.source, src());
+    assert_err(E108, || c.propose_upgrade(hash.clone(), src()));
 
     with_input(sender(), now() + UPGRADE_DELAY, &code);
     assert_err(E107, || {
@@ -1186,13 +1218,20 @@ fn upgrade_guards() {
 
     with_result(sender(), now(), PromiseResult::Successful(vec![]));
     assert_err(E107, || {
-        c.on_upgrade(hash.clone());
+        c.on_upgrade(hash.clone(), U128(0), owner());
     });
     with_result(me(), now(), PromiseResult::Failed);
-    assert!(!c.on_upgrade(hash.clone()));
+    assert!(!c.on_upgrade(hash.clone(), U128(0), owner()));
     assert!(c.pending_upgrade().is_some(), "a failed migrate leaves the proposal pending");
+    // A stray success for an attempt that is no longer in flight changes nothing...
     with_result(me(), now(), PromiseResult::Successful(vec![]));
-    assert!(c.on_upgrade(hash.clone()));
+    c.on_upgrade(hash.clone(), U128(0), owner());
+    assert!(c.pending_upgrade().is_some());
+    // ...a new apply and its own success do.
+    with_input(owner(), now() + UPGRADE_DELAY, &code);
+    c.apply_upgrade().detach();
+    with_result(me(), now(), PromiseResult::Successful(vec![]));
+    assert!(c.on_upgrade(hash.clone(), U128(0), owner()));
     assert!(c.pending_upgrade().is_none());
     assert!(get_logs()[0].contains("\"event\":\"upgrade_applied\""));
 }
@@ -1201,23 +1240,31 @@ fn upgrade_guards() {
 fn cancel_upgrade_clears_the_proposal() {
     let mut c = base();
     at(owner(), now());
-    c.propose_upgrade(other_root(9));
+    c.propose_upgrade(other_root(9), "src".into());
     at(sender(), now());
     assert_err(E107, || c.cancel_upgrade());
     at(owner(), now());
     c.cancel_upgrade();
     assert!(get_logs()[0].contains("\"event\":\"upgrade_cancelled\""));
     assert!(c.pending_upgrade().is_none());
-    c.propose_upgrade(other_root(9)); // a new proposal is allowed again
+    c.propose_upgrade(other_root(9), "src".into()); // a new proposal is allowed again
 }
 
 #[test]
 fn migrate_is_private() {
     let mut c = base();
     at(owner(), now());
-    assert_err(E107, || c.migrate());
+    assert_err(E107, || c.migrate(U64(env::storage_usage()), U128(0)));
     at(me(), now());
-    c.migrate();
+    c.migrate(U64(env::storage_usage()), U128(0));
+    // M3: growth since the deploy must be covered by the deposit, else E128 (rolls back).
+    let usage = env::storage_usage();
+    let cost = 100 * env::storage_byte_cost().as_yoctonear();
+    assert_err(E128, || c.migrate(U64(usage - 100), U128(cost - 1)));
+    c.migrate(U64(usage - 100), U128(cost));
+    // Idempotent: running it twice changes nothing.
+    c.migrate(U64(env::storage_usage()), U128(0));
+    assert_eq!(env::storage_usage(), usage);
 }
 
 #[test]
@@ -1252,18 +1299,228 @@ fn owner_transfer_waits_the_delay_and_can_be_cancelled() {
     assert!(c.pending_owner().is_none());
     // The old owner has lost its rights.
     at(owner(), now() + UPGRADE_DELAY);
-    assert_err(E107, || c.propose_upgrade(other_root(4)));
+    assert_err(E107, || c.propose_upgrade(other_root(4), "src".into()));
 }
 
 #[test]
-fn mainnet_floors_upgrade_delay_at_48_hours() {
-    at(me(), now());
+fn mainnet_bounds_upgrade_delay_between_10_minutes_and_1_hour() {
+    let new = |delay: u64| {
+        at(me(), now());
+        Contract::new(owner(), None, "mainnet".into(), vec![], U64(1), U64(1), U64(MIN_RESOLVE_DELAY_NS), U64(delay), vec![])
+    };
     assert_err(E108, || {
-        Contract::new(owner(), "mainnet".into(), vec![], U64(1), U64(1), U64(MIN_RESOLVE_DELAY_NS), U64(MIN_UPGRADE_DELAY_NS - 1));
+        new(MIN_UPGRADE_DELAY_NS - 1);
     });
-    let m = Contract::new(owner(), "mainnet".into(), vec![], U64(1), U64(1), U64(MIN_RESOLVE_DELAY_NS), U64(MIN_UPGRADE_DELAY_NS));
-    assert_eq!(m.get_config().upgrade_delay_ns.0, MIN_UPGRADE_DELAY_NS);
-    // Testnet may go shorter (the fresh testnet deploy uses 10 min).
+    assert_eq!(new(MIN_UPGRADE_DELAY_NS).get_config().upgrade_delay_ns.0, 600_000_000_000);
+    assert_eq!(new(MAX_UPGRADE_DELAY_NS).get_config().upgrade_delay_ns.0, 3_600_000_000_000);
+    assert_err(E108, || {
+        new(MAX_UPGRADE_DELAY_NS + 1);
+    });
+    // Testnet is not bounded (the sandbox uses seconds).
     at(me(), now());
-    Contract::new(owner(), "testnet".into(), vec![], U64(1), U64(1), U64(1), U64(600_000_000_000));
+    Contract::new(owner(), None, "testnet".into(), vec![], U64(1), U64(1), U64(1), U64(5_000_000_000), vec![]);
+}
+
+// ---- guardian (spec 7688c7b) ----
+
+fn guardian() -> AccountId {
+    acc("guardian.testnet")
+}
+fn guarded() -> Contract {
+    let mut c = base();
+    c.guardian_id = Some(guardian()); // the init arg, set on the fixture
+    c
+}
+
+#[test]
+fn guardian_can_cancel_and_drop_a_pending_key() {
+    let mut c = guarded();
+    at(owner(), now());
+    c.propose_upgrade(other_root(1), "src".into());
+    c.propose_owner(acc("next.testnet"));
+    c.add_owner_key(other_root(2), U64(u64::MAX));
+    at(guardian(), now());
+    c.cancel_upgrade();
+    c.cancel_owner();
+    c.remove_agent(other_root(2)); // not active yet
+    assert!(c.pending_upgrade().is_none() && c.pending_owner().is_none());
+    assert!(c.get_agent(other_root(2)).is_none());
+}
+
+#[test]
+fn guardian_cannot_remove_an_active_key_or_do_anything_else() {
+    let mut c = guarded();
+    let signer = v()["keys"]["signer"].as_str().unwrap().to_string(); // initial signer: active
+    at(guardian(), now());
+    assert_err(E107, || c.remove_agent(signer.clone()));
+    assert!(c.get_agent(signer.clone()).is_some());
+    assert_err(E107, || c.propose_upgrade(other_root(1), "src".into()));
+    assert_err(E107, || c.propose_owner(guardian()));
+    assert_err(E107, || c.add_owner_key(other_root(2), U64(u64::MAX)));
+    assert_err(E107, || c.refresh_token_storage(usdc()).detach());
+    with_input(guardian(), now(), b"code");
+    assert_err(E107, || c.apply_upgrade().detach());
+    at(guardian(), now());
+    assert_err(E108, || c.cancel_upgrade()); // allowed caller, nothing pending
+    // Once a key is active, only the owner can remove it.
+    at(owner(), now());
+    c.add_owner_key(other_root(3), U64(u64::MAX));
+    at(guardian(), now() + UPGRADE_DELAY);
+    assert_err(E107, || c.remove_agent(other_root(3)));
+}
+
+#[test]
+fn freeze_blocks_proposals_for_a_week_and_the_owner_cannot_lift_it() {
+    let mut c = guarded();
+    at(owner(), now());
+    assert_err(E107, || c.freeze_proposals());
+    c.propose_owner(acc("next.testnet"));
+    c.propose_upgrade(other_root(1), "src".into());
+    at(guardian(), now());
+    c.freeze_proposals();
+    assert_eq!(c.watch().frozen_until_ns.0, now() + FREEZE_NS);
+
+    // Everything that could move the contract forward is refused until the week is over...
+    at(owner(), now() + UPGRADE_DELAY);
+    assert_err(E107, || c.add_owner_key(other_root(2), U64(u64::MAX)));
+    assert_err(E107, || c.propose_owner(acc("other.testnet")));
+    with_input(owner(), now() + UPGRADE_DELAY, b"code");
+    assert_err(E107, || c.apply_upgrade().detach());
+    at(acc("next.testnet"), now() + UPGRADE_DELAY);
+    assert_err(E107, || c.accept_owner());
+    // ...while cancelling still works, for the owner too.
+    at(owner(), now() + FREEZE_NS - 1);
+    c.cancel_upgrade();
+    assert_err(E107, || c.propose_upgrade(other_root(1), "src".into()));
+    // The freeze expires on its own.
+    at(owner(), now() + FREEZE_NS);
+    c.propose_upgrade(other_root(1), "src".into());
+    at(acc("next.testnet"), now() + FREEZE_NS);
+    c.accept_owner();
+    assert_eq!(c.get_owner(), acc("next.testnet"));
+}
+
+#[test]
+fn no_guardian_disables_all_guardian_powers() {
+    let mut c = base();
+    assert_eq!(c.get_config().guardian_id, None);
+    at(owner(), now());
+    c.propose_upgrade(other_root(1), "src".into());
+    c.add_owner_key(other_root(2), U64(u64::MAX));
+    at(guardian(), now());
+    assert_err(E107, || c.freeze_proposals());
+    assert_err(E107, || c.cancel_upgrade());
+    assert_err(E107, || c.remove_agent(other_root(2)));
+}
+
+#[test]
+fn watch_view_shows_everything_pending() {
+    let mut c = guarded();
+    at(owner(), now());
+    c.propose_upgrade(other_root(1), "repo@abc".into());
+    c.add_owner_key(other_root(2), U64(u64::MAX));
+    let w = serde_json::to_value(c.watch()).unwrap();
+    assert_eq!(w["pending_upgrade"]["source"], "repo@abc");
+    assert!(w["pending_owner"].is_null());
+    assert_eq!(w["frozen_until_ns"], "0");
+    let keys = w["owner_keys"].as_array().unwrap();
+    assert_eq!(keys.len(), 2);
+    let added = keys.iter().find(|k| k["signer"] == other_root(2)).unwrap();
+    assert_eq!(added["active_from_ns"], (now() + UPGRADE_DELAY).to_string());
+}
+
+// ---- apply in flight (reviewer T-UPG M1, m1, m2) ----
+
+fn proposed_and_applied(c: &mut Contract, code: &[u8]) -> String {
+    let hash = to_hex(&env::sha256_array(code));
+    at(owner(), now());
+    c.propose_upgrade(hash.clone(), "src".into());
+    with_input(owner(), now() + UPGRADE_DELAY, code);
+    c.apply_upgrade().detach();
+    hash
+}
+
+#[test]
+fn no_second_apply_and_no_cancel_while_an_apply_is_in_flight() {
+    let mut c = guarded();
+    let code = b"\0asm v2".to_vec();
+    let hash = proposed_and_applied(&mut c, &code);
+    let p = c.pending_upgrade().unwrap();
+    assert!(p.applying);
+    assert!(serde_json::to_value(c.watch()).unwrap()["pending_upgrade"]["applying"].as_bool().unwrap());
+    with_input(owner(), now() + UPGRADE_DELAY, &code);
+    assert_err(E108, || c.apply_upgrade().detach());
+    at(owner(), now() + UPGRADE_DELAY);
+    assert_err(E108, || c.cancel_upgrade());
+    at(guardian(), now() + UPGRADE_DELAY);
+    assert_err(E108, || c.cancel_upgrade());
+    // Success clears it and announces it.
+    with_result(me(), now() + UPGRADE_DELAY, PromiseResult::Successful(vec![]));
+    assert!(c.on_upgrade(hash, U128(0), owner()));
+    assert!(c.pending_upgrade().is_none());
+    assert!(get_logs()[0].contains("\"event\":\"upgrade_applied\""));
+}
+
+#[test]
+fn failed_apply_clears_the_flag_keeps_the_proposal_and_says_so() {
+    let mut c = base();
+    let code = b"\0asm v2".to_vec();
+    let hash = proposed_and_applied(&mut c, &code);
+    with_result(me(), now() + UPGRADE_DELAY, PromiseResult::Failed);
+    assert!(!c.on_upgrade(hash.clone(), U128(0), owner()));
+    assert!(get_logs()[0].contains("\"event\":\"upgrade_failed\""));
+    let p = c.pending_upgrade().unwrap();
+    assert!(!p.applying && p.code_hash == hash);
+    // It can be applied again, or cancelled.
+    with_input(owner(), now() + UPGRADE_DELAY, &code);
+    c.apply_upgrade().detach();
+    with_result(me(), now() + UPGRADE_DELAY, PromiseResult::Failed);
+    c.on_upgrade(hash, U128(0), owner());
+    at(owner(), now() + UPGRADE_DELAY);
+    c.cancel_upgrade();
+}
+
+#[test]
+fn a_lost_on_upgrade_does_not_block_upgrades_forever() {
+    let mut c = base();
+    proposed_and_applied(&mut c, b"\0asm v2");
+    at(owner(), now() + 2 * UPGRADE_DELAY - 1);
+    assert_err(E108, || c.cancel_upgrade());
+    at(owner(), now() + 2 * UPGRADE_DELAY);
+    c.cancel_upgrade();
+}
+
+#[test]
+fn on_upgrade_only_touches_its_own_proposal() {
+    let mut c = base();
+    let a = proposed_and_applied(&mut c, b"\0asm A");
+    // Construct the race directly: A's on_upgrade still to come while B is pending.
+    let b = to_hex(&env::sha256_array(b"\0asm B"));
+    c.pending_upgrade = Some(PendingUpgrade {
+        code_hash: b.clone(),
+        source: "src".into(),
+        ready_at_ns: U64(now()),
+        applying: false,
+        applying_since_ns: U64(0),
+    });
+    for result in [PromiseResult::Successful(vec![]), PromiseResult::Failed] {
+        with_result(me(), now() + UPGRADE_DELAY, result);
+        c.on_upgrade(a.clone(), U128(0), owner());
+        let p = c.pending_upgrade().unwrap();
+        assert_eq!((p.code_hash.as_str(), p.applying), (b.as_str(), false));
+        assert!(!get_logs().iter().any(|l| l.contains("upgrade_applied") || l.contains("upgrade_failed")));
+    }
+}
+
+#[test]
+fn cancel_owner_by_anyone_else_is_e107() {
+    for mut c in [base(), guarded()] {
+        at(owner(), now());
+        c.propose_owner(acc("next.testnet"));
+        at(acc("stranger.testnet"), now());
+        assert_err(E107, || c.cancel_owner());
+        at(acc("next.testnet"), now());
+        assert_err(E107, || c.cancel_owner());
+        assert!(c.pending_owner().is_some());
+    }
 }
