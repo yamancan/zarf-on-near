@@ -155,7 +155,7 @@ Trust-model consequences, to be stated in the README:
 
 ## Contract calls (JSON args)
 
-`new({ owner_id, network, token_ids, min_lifetime_ns, agent_ttl_ns, resolve_delay_ns })`. `network` and
+`new({ owner_id, network, token_ids, min_lifetime_ns, agent_ttl_ns, resolve_delay_ns, upgrade_delay_ns })`. `network` and
 `min_lifetime_ns` are immutable. `min_lifetime_ns` = 600 s on testnet and 30 days on mainnet.
 `ft_storage_deposit` is read from each allowed token's `storage_balance_bounds().min` when
 the token is allow-listed, and stored (USDC: 0.00125 NEAR).
@@ -235,7 +235,7 @@ Storage, per campaign (create app):
   rest stays in the free pre-pay (withdrawable).
 - The create app deposits only the shortfall:
   `campaign_bytes_cost + leaf_count × per_claim_storage − prepay_balance_of(sender)`.
-- `get_config()` → `{ network, min_lifetime_ns, agent_ttl_ns, resolve_delay_ns, token_ids, storage_byte_cost }` (`storage_byte_cost` = `env::storage_byte_cost()`, yocto per byte; the create app adds one owner key's slack, 32 × this, to its shortfall), so the create form
+- `get_config()` → `{ network, min_lifetime_ns, agent_ttl_ns, resolve_delay_ns, upgrade_delay_ns, token_ids, storage_byte_cost }` (`storage_byte_cost` = `env::storage_byte_cost()`, yocto per byte; the create app adds one owner key's slack, 32 × this, to its shortfall), so the create form
   can refuse a too-early deadline before sending.
 - `refresh_token_storage({ token_id })`, owner only. Reads the token's
   `storage_balance_bounds().min` into `ft_storage_deposit`. Until it has run for a token,
@@ -342,6 +342,40 @@ The contract logs `EVENT_JSON:{"standard":"zarf-near","version":"1.0.0","event":
 | `reclaim_reverted` | `campaign_id, amount, code: "E115_TOKEN_TRANSFER_FAILED"` |
 
 The create app takes `campaign_id` from `campaign_created`.
+
+## Upgrades and ownership
+
+The contract is upgradeable, but only through its own code and only after a public delay.
+
+- **The escrow account holds no full-access key.** A full-access key could sign as the
+  escrow and call the token's `ft_transfer` directly, so it is custody. The deploy script
+  deletes every full-access key after deploy + `new`, and fails unless none remain. From then
+  on the only way to change the code is `apply_upgrade`.
+- `upgrade_delay_ns` is an immutable init arg, exposed by `get_config`. On `mainnet`, `new`
+  refuses a value below 48 h (`E108`).
+- `propose_upgrade({ code_hash })`, owner only. Stores `{ code_hash, ready_at_ns = now +
+  upgrade_delay_ns }` and emits `upgrade_proposed`. Only one proposal may be pending (`E108`).
+- `cancel_upgrade()`, owner only. Emits `upgrade_cancelled`.
+- `apply_upgrade()`, owner only. Its input is the raw wasm (not JSON). It requires a pending
+  proposal (`E108`), `now >= ready_at_ns` (`E107`) and `sha256(input) == code_hash` (`E108`).
+  It then deploys the code to its own account and calls `migrate()` in the **same batch**,
+  so a failing migration rolls the deploy back. Emits `upgrade_applied`.
+- `migrate()` is private and lives in the new code. State layout changes go there. Pending
+  claims must survive a migration.
+- `pending_upgrade()` → `{ code_hash, ready_at_ns } | null`.
+- **Ownership moves in two steps and waits the same delay:** `propose_owner({ new_owner })`
+  (owner) → after `upgrade_delay_ns`, `accept_owner()` (the new owner). `cancel_owner()`
+  (owner). Views: `get_owner()`, `pending_owner()`. An immediate transfer would let a thief
+  with the owner key lock the team out before anyone could cancel.
+- The owner is an ordinary NEAR account, so it can be a multisig or a DAO contract without
+  any change here.
+
+Events: `upgrade_proposed { code_hash, ready_at_ns }`, `upgrade_cancelled { code_hash }`,
+`upgrade_applied { code_hash }`, `owner_proposed { new_owner, ready_at_ns }`,
+`owner_changed { old_owner, new_owner }`.
+
+Trust statement for the README: the owner can replace the contract's code, and with it every
+rule here, but only `upgrade_delay_ns` after announcing the new code's hash on chain.
 
 ## Off-chain interfaces
 
