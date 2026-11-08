@@ -1,9 +1,10 @@
 [package]
 name = "zarf-near"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2021"
 rust-version = "1.86"
 license = "MIT"
+repository = "https://github.com/yamancan/zarf-on-near"
 publish = false
 
 # Build: cargo near build non-reproducible-wasm --no-abi
