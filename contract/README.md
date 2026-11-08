@@ -1,5 +1,7 @@
 # contract/
 
+**Not yet compiled; its tests have not run.** (The toolchain wasn't available while it was written; see the root README.)
+
 NEAR escrow for email-addressed claims. Byte formats, check order, errors, events and
 views are defined in [`../spec/claim.md`](../spec/claim.md); the tests load
 `../spec/vectors.json`.
