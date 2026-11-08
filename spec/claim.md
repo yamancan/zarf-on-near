@@ -371,8 +371,12 @@ The contract is upgradeable, but only through its own code and only after a publ
   the owner and never from senders' pre-pay.
   It then deploys the code to its own account and calls `migrate()` in the **same batch**,
   so a failing migration rolls the deploy back. A private callback, `on_upgrade`, runs after
-  the batch: only on success does it clear the proposal and emit `upgrade_applied`. After a
-  failed migration the proposal stays pending, so it can be retried or cancelled.
+  the batch. `apply_upgrade` first marks the proposal **applying**; while that flag is set,
+  `apply_upgrade` and `cancel_upgrade` are refused (`E108`), so an upgrade in flight can
+  neither run twice nor be reported as cancelled while it still lands. On success `on_upgrade`
+  clears the proposal and emits `upgrade_applied`. On failure it clears the flag, keeps the
+  proposal pending and emits `upgrade_failed { code_hash }`. `on_upgrade` acts only on the
+  proposal whose `code_hash` it was scheduled for.
 - `migrate()` is private and lives in the new code. State layout changes go there. Pending
   claims must survive a migration. `migrate` must be idempotent, and every version must keep
   `on_upgrade`, `on_claim`, `on_reclaim` and `on_token_storage` with the same names and
@@ -413,7 +417,7 @@ The contract is upgradeable, but only through its own code and only after a publ
   any change here.
 
 Events: `upgrade_proposed { code_hash, source, ready_at_ns }`, `upgrade_cancelled { code_hash }`,
-`upgrade_applied { code_hash }`, `owner_proposed { new_owner, ready_at_ns }`,
+`upgrade_applied { code_hash }`, `upgrade_failed { code_hash }`, `owner_proposed { new_owner, ready_at_ns }`,
 `owner_changed { old_owner, new_owner }`.
 
 Trust statement for the README (accurate, not reassuring): the owner account can replace
