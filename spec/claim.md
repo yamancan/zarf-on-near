@@ -155,7 +155,7 @@ Trust-model consequences, to be stated in the README:
 
 ## Contract calls (JSON args)
 
-`new({ owner_id, network, token_ids, min_lifetime_ns, agent_ttl_ns })`. `network` and
+`new({ owner_id, network, token_ids, min_lifetime_ns, agent_ttl_ns, resolve_delay_ns })`. `network` and
 `min_lifetime_ns` are immutable. `min_lifetime_ns` = 600 s on testnet and 30 days on mainnet.
 `ft_storage_deposit` is read from each allowed token's `storage_balance_bounds().min` when
 the token is allow-listed, and stored (USDC: 0.00125 NEAR).
@@ -191,8 +191,10 @@ again.
 `resolve_pending({ campaign_id, commitment, paid, evidence })`, owner only. It is the exit
 for a claim stranded in `pending` because its callback never completed (out of gas, panic).
 
-- Allowed only when the pending entry is older than 1 h (`started_ns` is stored with it); else
-  `E107_UNAUTHORIZED`.
+- Allowed only when the pending entry is older than `resolve_delay_ns` (`started_ns` is stored
+  with it); else `E107_UNAUTHORIZED`. `resolve_delay_ns` is an immutable init arg: 1 h on
+  testnet and mainnet. On `mainnet`, `new` refuses a value below 1 h (`E108`). Tests use a
+  short value so the suite doesn't fast-forward an hour of blocks.
 - `paid: true` → `claimed` and the amount leaves in-flight. `paid: false` → `unclaimed` and
   in-flight moves back to balance.
 - `evidence` is the `ft_transfer` receipt id the owner read the outcome from.
@@ -233,7 +235,7 @@ Storage, per campaign (create app):
   rest stays in the free pre-pay (withdrawable).
 - The create app deposits only the shortfall:
   `campaign_bytes_cost + leaf_count × per_claim_storage − prepay_balance_of(sender)`.
-- `get_config()` → `{ network, min_lifetime_ns, agent_ttl_ns, token_ids, storage_byte_cost }` (`storage_byte_cost` = `env::storage_byte_cost()`, yocto per byte; the create app adds one owner key's slack, 32 × this, to its shortfall), so the create form
+- `get_config()` → `{ network, min_lifetime_ns, agent_ttl_ns, resolve_delay_ns, token_ids, storage_byte_cost }` (`storage_byte_cost` = `env::storage_byte_cost()`, yocto per byte; the create app adds one owner key's slack, 32 × this, to its shortfall), so the create form
   can refuse a too-early deadline before sending.
 - `refresh_token_storage({ token_id })`, owner only. Reads the token's
   `storage_balance_bounds().min` into `ft_storage_deposit`. Until it has run for a token,
