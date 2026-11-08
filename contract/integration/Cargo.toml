@@ -7,16 +7,19 @@ publish = false
 
 # Run from contract/: `make test` builds the wasm first.
 
-[dev-dependencies]
+# The demo_sandbox binary needs these as normal dependencies.
+[dependencies]
 near-workspaces = "=0.24.0"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
 serde_json = "1"
 anyhow = "1"
-sha2 = "0.10"
-ed25519-dalek = "2"
 # near-workspaces pulls native-tls via near-jsonrpc-client; build OpenSSL from source so
 # no system libssl-dev is needed (screeners' machines included).
 openssl = { version = "0.10", features = ["vendored"] }
+
+[dev-dependencies]
+sha2 = "0.10"
+ed25519-dalek = "2"
 
 # Its own workspace: a different toolchain from ../ (see README).
 [workspace]
