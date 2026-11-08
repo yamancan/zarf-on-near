@@ -351,8 +351,12 @@ The contract is upgradeable, but only through its own code and only after a publ
   escrow and call the token's `ft_transfer` directly, so it is custody. The deploy script
   deletes every full-access key after deploy + `new`, and fails unless none remain. From then
   on the only way to change the code is `apply_upgrade`.
-- `upgrade_delay_ns` is an immutable init arg, exposed by `get_config`. On `mainnet`, `new`
-  refuses a value below 48 h (`E108`).
+- `upgrade_delay_ns` is an immutable init arg, exposed by `get_config`. The owner's decision
+  (2026-11-11) is a delay of **at most 1 h**. Mainnet deploys use 1 h. On `mainnet`, `new`
+  refuses a value below 10 min or above 1 h (`E108`), so a typo can't deploy with no delay.
+- One hour is a short notice period. It only protects if someone is watching, so the
+  operator must alert on `pending_upgrade()`, `pending_owner()` and newly added owner keys
+  (the relayer's `/health` reports all three), and cancel within the hour.
 - `propose_upgrade({ code_hash, source })`, owner only. `source` is a short string naming the
   public repository and commit the wasm was built from (≤ 200 ASCII bytes). Stores
   `{ code_hash, source, ready_at_ns = now + upgrade_delay_ns }` and emits `upgrade_proposed`.
