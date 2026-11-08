@@ -63,6 +63,8 @@ enum StorageKey {
     Prepay,
     FtStorage,
     Roots,
+    SenderCount,
+    SenderCampaigns,
 }
 
 #[near(serializers = [borsh, json])]
@@ -193,7 +195,8 @@ pub struct Contract {
     /// Storage bytes of one (pending) claim entry, measured in `new`.
     claim_entry_bytes: u64,
     /// Storage bytes of a campaign entry (max-length account ids, empty snapshot) plus its
-    /// roots entry, measured in `new`; each snapshot key adds 32.
+    /// roots entry and a sender's first list entries, measured in `new`; each snapshot key
+    /// adds 32.
     campaign_base_bytes: u64,
     /// Mode W signer -> valid_until_ns. Kept apart from attested agents so a snapshot
     /// never scans re-registered TEE agents.
@@ -203,6 +206,10 @@ pub struct Contract {
     /// (sender, merkle_root) -> campaign id: the root is a per-sender idempotency key
     /// (E132). Per sender, so nobody can occupy another sender's root first.
     roots: LookupMap<(AccountId, [u8; 32]), u64>,
+    /// Per-sender campaign list in creation order: a length plus (sender, index) -> id,
+    /// so an append writes two small entries instead of rewriting a growing vector.
+    sender_count: LookupMap<AccountId, u32>,
+    sender_campaigns: LookupMap<(AccountId, u32), u64>,
     claims: LookupMap<(u64, [u8; 32]), ClaimStatus>,
     /// Sender -> free pre-pay (not reserved by any campaign).
     prepay: LookupMap<AccountId, u128>,
@@ -257,13 +264,24 @@ impl Contract {
         );
         let mut roots = LookupMap::new(StorageKey::Roots);
         roots.insert((longest.clone(), [0xff; 32]), u64::MAX);
+        // A sender's first campaign writes both list entries: the worst case.
+        let mut sender_count = LookupMap::new(StorageKey::SenderCount);
+        let mut sender_campaigns = LookupMap::new(StorageKey::SenderCampaigns);
+        sender_count.insert(longest.clone(), u32::MAX);
+        sender_campaigns.insert((longest.clone(), u32::MAX), u64::MAX);
         campaigns.flush();
         roots.flush();
+        sender_count.flush();
+        sender_campaigns.flush();
         let campaign_base_bytes = env::storage_usage().saturating_sub(before);
         campaigns.remove(&u64::MAX);
-        roots.remove(&(longest, [0xff; 32]));
+        roots.remove(&(longest.clone(), [0xff; 32]));
+        sender_count.remove(&longest);
+        sender_campaigns.remove(&(longest, u32::MAX));
         campaigns.flush();
         roots.flush();
+        sender_count.flush();
+        sender_campaigns.flush();
         Self {
             owner_id,
             network,
@@ -277,6 +295,8 @@ impl Contract {
             agents: LookupMap::new(StorageKey::Agents),
             campaigns,
             roots,
+            sender_count,
+            sender_campaigns,
             claims,
             prepay: LookupMap::new(StorageKey::Prepay),
             ft_storage_deposit: LookupMap::new(StorageKey::FtStorage),
@@ -421,6 +441,16 @@ impl Contract {
         self.roots.get(&(sender, hex32(&merkle_root))).map(|id| U64(*id))
     }
 
+    /// A sender's campaign ids in creation order. `limit` defaults to 50, capped at 100.
+    pub fn campaigns_of(&self, sender: AccountId, from_index: Option<u32>, limit: Option<u32>) -> Vec<U64> {
+        let count = self.sender_count.get(&sender).copied().unwrap_or(0);
+        let from = from_index.unwrap_or(0).min(count);
+        let to = from.saturating_add(limit.unwrap_or(50).min(100)).min(count);
+        (from..to)
+            .filter_map(|i| self.sender_campaigns.get(&(sender.clone(), i)).map(|id| U64(*id)))
+            .collect()
+    }
+
     pub fn get_config(&self) -> ConfigView {
         ConfigView {
             network: self.network.clone(),
@@ -486,8 +516,13 @@ impl Contract {
             },
         );
         self.roots.insert((sender_id.clone(), merkle_root), campaign_id);
+        let index = self.sender_count.get(&sender_id).copied().unwrap_or(0);
+        self.sender_campaigns.insert((sender_id.clone(), index), campaign_id);
+        self.sender_count.insert(sender_id.clone(), index + 1);
         self.campaigns.flush();
         self.roots.flush();
+        self.sender_count.flush();
+        self.sender_campaigns.flush();
         // Campaign bytes are spent; the per-claim part is reserved for this campaign only.
         let bytes_cost = storage_cost(env::storage_usage().saturating_sub(before));
         self.debit_prepay(&sender_id, bytes_cost + reserve);
