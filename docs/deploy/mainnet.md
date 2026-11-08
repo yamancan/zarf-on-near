@@ -20,9 +20,8 @@ Public data only. Nothing here has been executed. The owner provides the mainnet
 ## Command block
 
 ```bash
-cd /tmp/zarf-work            # at the reviewed head
-export CARGO_BUILD_JOBS=4 CARGO_TARGET_DIR=$HOME/.cache/zarf-near/target-1.86-wt-contract
-make -C contract wasm                          # locks itself; release wasm in contract/target/near/release
+cd <repo>                                      # a clone at the reviewed commit
+make -C contract wasm                          # release wasm in contract/target/near/release
 
 NETWORK=mainnet LOCK_CONTRACT=1 \
 UPGRADE_DELAY_NS=3600000000000 \
@@ -36,15 +35,20 @@ scripts/deploy.sh
   (legacy keychain) before the run. `CREATE_ACCOUNTS` is refused on mainnet.
 - The verifier seed is created at `~/.config/zarf-near/mainnet-verifier.seed` (mode 600) unless
   `SIGNER_PUBKEY` is given; the relayer's claim-only key at `~/.config/zarf-near/mainnet-relayer.key`.
+  Both end up as secrets of their Cloudflare Workers (`wrangler secret put`); after that, the
+  plaintext copies on the build host are deleted (`shred -u`), so the only live copy of the
+  verifier seed is the Worker secret.
 - The script refuses: no `LOCK_CONTRACT=1`; a `USDC_ID` other than Circle's mainnet contract;
   accounts not ending in `.near`; the public test keys from `spec/vectors.json`.
-- Expect at the end: "contract has no full-access key", `get_config.network` = `mainnet`,
-  `upgrade_delay_ns` = `3600000000000`, `guardian_id` = the guardian.
+- The script prints `view get_config` at the end. Expect `network` = `mainnet`,
+  `upgrade_delay_ns` = `3600000000000`, `guardian_id` = the guardian, and the line "contract has
+  no full-access key" (it exits 70 if one remains).
 
 ## Before running
 
-- [ ] Owner: the four mainnet accounts, funded (deploy ≈ 3 NEAR of code storage + gas).
-- [ ] Owner: decide the guardian account (a different key holder than the owner).
+- [ ] Owner: the four mainnet accounts, funded. The escrow needs ≈ 3.2 NEAR (code + state + gas).
+- [ ] Owner: decide the guardian account (a different key holder than the owner; the script
+      refuses `GUARDIAN_ID` = `OWNER_ID`).
 - [ ] The README trust statement matches this posture (owner single key or multisig; guardian set
       or not; builds not reproducible yet).
 - [ ] Dry run first: the same command with `DRY_RUN=1`.

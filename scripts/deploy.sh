@@ -22,7 +22,8 @@
 #   USDC_ID              default: Circle's USDC for NETWORK (testnet one verified in docs/spikes/S1.md)
 #   SIGNER_VALID_DAYS    default 60; must outlive every campaign deadline (spec snapshot rule)
 #   CREATE_ACCOUNTS=1    create CONTRACT_ID / OWNER_ID with the testnet faucet if missing
-#   DRY_RUN=1            print every command instead of running it
+#   DRY_RUN=1            print every command instead of running it. It still creates the real
+#                        verifier seed and relayer key files if missing, and the real run reuses them.
 #   UPGRADE_DELAY_NS     default 10 min on testnet, 1 h on mainnet (the contract allows 10 min .. 1 h there)
 #   LOCK_CONTRACT=1      finally delete every full-access key on CONTRACT_ID. After that the code
 #                        changes only through propose_upgrade/apply_upgrade (the timelock).
@@ -63,9 +64,10 @@ if [[ $NETWORK == mainnet ]]; then
   [[ $USDC_ID == "$MAINNET_USDC" ]] || { echo "mainnet USDC_ID must be Circle's $MAINNET_USDC" >&2; exit 64; }
   [[ ${CREATE_ACCOUNTS:-} != 1 ]] || { echo "CREATE_ACCOUNTS uses the testnet faucet only" >&2; exit 64; }
   [[ -n ${GUARDIAN_ID:-} ]] || echo "WARNING: no GUARDIAN_ID on mainnet: a stolen owner key can't be slowed down" >&2
+  [[ ${GUARDIAN_ID:-} != "$OWNER_ID" ]] || { echo "GUARDIAN_ID must not be OWNER_ID: one stolen key would hold both" >&2; exit 64; }
 fi
 umask 077
-# Secrets are written to files only, never printed. Keys are testnet-only.
+# Secrets are written to files only, never printed (per network: ~/.config/zarf-near/$NETWORK-*).
 if [[ -z ${SIGNER_PUBKEY:-} ]]; then
   mkdir -p "$(dirname "$VERIFIER_SEED_FILE")"
   [[ -s $VERIFIER_SEED_FILE ]] || node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))' >"$VERIFIER_SEED_FILE"
@@ -142,6 +144,24 @@ run near contract deploy "$CONTRACT_ID" use-file "$wasm" \
   with-init-call new json-args "$init_args" prepaid-gas '100 Tgas' attached-deposit '0 NEAR' \
   network-config "$NETWORK" sign-with-legacy-keychain send
 
+# Locked right after deploy + new: nothing below needs the escrow's full-access key
+# (storage_deposit and refresh are signed by OWNER_ID, the add-key by RELAYER_ID).
+full_access_keys() {
+  curl -sSf "$RPC" -H 'content-type: application/json' -d "$(jq -nc --arg a "$CONTRACT_ID" \
+    '{jsonrpc:"2.0",id:1,method:"query",params:{request_type:"view_access_key_list",finality:"final",account_id:$a}}')" |
+    jq -er '[.result.keys[] | select(.access_key.permission == "FullAccess") | .public_key] | join(",")'
+}
+
+if [[ ${LOCK_CONTRACT:-} == 1 ]]; then
+  echo "== lock: delete every full-access key on $CONTRACT_ID"
+  keys=$( [[ ${DRY_RUN:-} == 1 ]] && echo "<full-access keys>" || full_access_keys )
+  [[ -n $keys ]] && run near account delete-keys "$CONTRACT_ID" public-keys "$keys" \
+    network-config "$NETWORK" sign-with-legacy-keychain send
+  if [[ ${DRY_RUN:-} != 1 && -n $(full_access_keys) ]]; then
+    echo "LOCK FAILED: full-access keys remain on $CONTRACT_ID: $(full_access_keys)" >&2
+    exit 70
+  fi
+
 echo "== register the escrow on USDC (it must hold tokens; ft_transfer_call fails otherwise)"
 run near contract call-function as-transaction "$USDC_ID" storage_deposit \
   json-args "$(jq -nc --arg a "$CONTRACT_ID" '{account_id:$a, registration_only:true}')" \
@@ -180,26 +200,11 @@ if [[ -n ${RELAYER_ID:-} ]]; then
   echo "relayer public key: $relayer_pub"
 fi
 
-full_access_keys() {
-  curl -sSf "$RPC" -H 'content-type: application/json' -d "$(jq -nc --arg a "$CONTRACT_ID" \
-    '{jsonrpc:"2.0",id:1,method:"query",params:{request_type:"view_access_key_list",finality:"final",account_id:$a}}')" |
-    jq -er '[.result.keys[] | select(.access_key.permission == "FullAccess") | .public_key] | join(",")'
-}
-
-if [[ ${LOCK_CONTRACT:-} == 1 ]]; then
-  echo "== lock: delete every full-access key on $CONTRACT_ID"
-  keys=$( [[ ${DRY_RUN:-} == 1 ]] && echo "<full-access keys>" || full_access_keys )
-  [[ -n $keys ]] && run near account delete-keys "$CONTRACT_ID" public-keys "$keys" \
-    network-config "$NETWORK" sign-with-legacy-keychain send
-  if [[ ${DRY_RUN:-} != 1 && -n $(full_access_keys) ]]; then
-    echo "LOCK FAILED: full-access keys remain on $CONTRACT_ID: $(full_access_keys)" >&2
-    exit 70
-  fi
 fi
 
 [[ ${DRY_RUN:-} == 1 ]] && exit 0
 echo "== views"
-echo "network:            $(view "$CONTRACT_ID" get_network)"
+echo "get_config:         $(view "$CONTRACT_ID" get_config)"
 echo "storage_costs:      $(view "$CONTRACT_ID" storage_costs "$(jq -nc --arg u "$USDC_ID" '{token_id:$u}')")"
 echo "agent:              $(view "$CONTRACT_ID" get_agent "$(jq -nc --arg s "$SIGNER_PUBKEY" '{account_id:$s}')")"
 echo "required_claim_gas: $(view "$CONTRACT_ID" required_claim_gas)"
@@ -208,5 +213,5 @@ remaining=$(full_access_keys)
 if [[ -n $remaining ]]; then
   echo "WARNING: contract is upgradeable by: $remaining" >&2
 else
-  echo "contract has no full-access key: its code can no longer be changed"
+  echo "contract has no full-access key: its code changes only through the upgrade timelock"
 fi

@@ -51,6 +51,9 @@ pub const MIN_UPGRADE_DELAY_NS: u64 = 600 * 1_000_000_000;
 pub const MAX_UPGRADE_DELAY_NS: u64 = 3_600 * 1_000_000_000;
 /// How long a guardian's freeze_proposals lasts (spec 7688c7b).
 pub const FREEZE_NS: u64 = 7 * 86_400 * 1_000_000_000;
+/// An `applying` flag whose on_upgrade never landed expires after this (reviewer m1: fixed,
+/// not upgrade_delay_ns, so it can't be shortened by a short delay).
+pub const APPLYING_EXPIRY_NS: u64 = 24 * 3_600 * 1_000_000_000;
 pub const GAS_MIGRATE: Gas = Gas::from_tgas(30);
 pub const GAS_ON_UPGRADE: Gas = Gas::from_tgas(10);
 
@@ -830,7 +833,12 @@ impl Contract {
             fail(E108);
         }
         let p = self.pending_upgrade.take().unwrap_or_else(|| fail(E108));
-        emit("upgrade_cancelled", json!({ "code_hash": p.code_hash }));
+        if p.applying {
+            // An expired flag: the apply's on_upgrade never landed. Say so on chain.
+            emit("upgrade_cancelled", json!({ "code_hash": p.code_hash, "was_applying": true }));
+        } else {
+            emit("upgrade_cancelled", json!({ "code_hash": p.code_hash }));
+        }
     }
 
     /// Input is the raw wasm, not JSON. Deploy and `migrate` run in one batch, so a failing
@@ -913,6 +921,8 @@ impl Contract {
         }
         #[cfg(feature = "test-migrate-panic")]
         env::panic_str("TEST_MIGRATE_PANIC");
+        // Keep this check the LAST step of every future migrate: state written above it is
+        // counted as growth too, and anything after it would escape the deposit check.
         let grown = env::storage_usage().saturating_sub(storage_before.0);
         if storage_cost(grown) > deposit.0 {
             fail(E128);
@@ -1112,10 +1122,10 @@ impl Contract {
     }
 
     /// An apply is in flight until its on_upgrade lands. on_upgrade is built not to fail, but
-    /// if it is ever lost the flag expires after upgrade_delay_ns, so the proposal can be
+    /// if it is ever lost the flag expires after APPLYING_EXPIRY_NS, so the proposal can be
     /// cancelled or re-applied (migrate is idempotent) instead of blocking upgrades forever.
     fn apply_in_flight(&self, p: &PendingUpgrade) -> bool {
-        p.applying && env::block_timestamp() < p.applying_since_ns.0.saturating_add(self.upgrade_delay_ns)
+        p.applying && env::block_timestamp() < p.applying_since_ns.0.saturating_add(APPLYING_EXPIRY_NS)
     }
 
     fn assert_not_frozen(&self) {

@@ -437,7 +437,12 @@ async fn failing_migrate_rolls_the_deploy_back() -> anyhow::Result<()> {
     let v1 = wasm("release/zarf_near.wasm");
     let bad = wasm("migrate-panic/zarf_near.wasm");
     propose_and_wait(&e, &bad).await?;
+    let before = e.owner.view_account().await?.balance.as_yoctonear();
     let out = apply(&e, bad.clone()).await?;
+    // m2: the deposit comes back; the owner pays only gas.
+    let spent = before - e.owner.view_account().await?.balance.as_yoctonear();
+    println!("failing migrate: owner spent {spent} yocto (deposit {UPGRADE_DEPOSIT})");
+    assert!(spent < UPGRADE_DEPOSIT / 10, "deposit not refunded: spent {spent}");
     println!("failing migrate: success={} logs={:?}", out.is_success(), out.logs());
     assert!(!out.logs().iter().any(|l| l.contains("upgrade_applied")));
     assert!(out.logs().iter().any(|l| l.contains("upgrade_failed")));

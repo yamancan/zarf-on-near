@@ -1246,6 +1246,7 @@ fn cancel_upgrade_clears_the_proposal() {
     at(owner(), now());
     c.cancel_upgrade();
     assert!(get_logs()[0].contains("\"event\":\"upgrade_cancelled\""));
+    assert!(!get_logs()[0].contains("was_applying"));
     assert!(c.pending_upgrade().is_none());
     c.propose_upgrade(other_root(9), "src".into()); // a new proposal is allowed again
 }
@@ -1484,10 +1485,24 @@ fn failed_apply_clears_the_flag_keeps_the_proposal_and_says_so() {
 fn a_lost_on_upgrade_does_not_block_upgrades_forever() {
     let mut c = base();
     proposed_and_applied(&mut c, b"\0asm v2");
-    at(owner(), now() + 2 * UPGRADE_DELAY - 1);
+    let applied_at = now() + UPGRADE_DELAY;
+    // Fixed 24 h, not upgrade_delay_ns.
+    assert_eq!(APPLYING_EXPIRY_NS, 86_400_000_000_000);
+    at(owner(), applied_at + APPLYING_EXPIRY_NS - 1);
     assert_err(E108, || c.cancel_upgrade());
-    at(owner(), now() + 2 * UPGRADE_DELAY);
+    at(owner(), applied_at + APPLYING_EXPIRY_NS);
     c.cancel_upgrade();
+    assert!(get_logs()[0].contains("\"was_applying\":true"));
+}
+
+#[test]
+fn constants_and_duplicate_initial_signers() {
+    assert_eq!(FREEZE_NS, 7 * 86_400 * 1_000_000_000);
+    let s = vector_signer();
+    at(me(), now());
+    assert_err(E108, || {
+        init_with("testnet", vec![s.clone(), s]);
+    });
 }
 
 #[test]
