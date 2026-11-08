@@ -6,7 +6,7 @@ and is the acceptance test. Every layer's suite loads it, **asserts the vector c
 non-zero**, and reproduces every value. Change this file only together with the generator,
 then regenerate.
 
-Owner: orchestrator (`zarf main`). Other sessions propose changes; they don't edit.
+This file has one maintainer; other contributors propose changes rather than editing it.
 
 v2 changes from v1: per-recipient salt in the claim link (nothing is sealed); verifier
 registry inside the escrow (Mode W owner keys, Mode T attested Shade agents); `network` as
