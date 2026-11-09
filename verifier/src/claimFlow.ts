@@ -2,6 +2,7 @@ import type { ChainReader } from './chain';
 import { commitment, hex, isValidAccountId, leafHash, signClaim, unhex, verifyMerkleProof, type Signer } from './claim';
 import { TokenError, verifyGoogleIdToken } from './googleIdToken';
 import type { JwksSource } from './jwks';
+import { UpstreamError } from './upstream';
 
 export const SIGNATURE_TTL_NS = 600_000_000_000n; // spec: expires_at_ns = now + 10 min
 
@@ -36,7 +37,8 @@ export async function handleClaim(input: unknown, d: ClaimDeps): Promise<ClaimRe
   if (typeof campaign_id !== 'string' || !U64.test(campaign_id) || BigInt(campaign_id) >> 64n) return refuse(400, 'E108_INVALID_INPUT');
   if (typeof c !== 'string' || !HEX32.test(c) || typeof salt !== 'string' || !HEX32.test(salt)) return refuse(400, 'E108_INVALID_INPUT');
   if (!Array.isArray(proof) || proof.length > 20 || !proof.every((p) => typeof p === 'string' && HEX32.test(p))) return refuse(400, 'E108_INVALID_INPUT');
-  if (typeof amount !== 'string' || !U128.test(amount) || BigInt(amount) >> 128n) return refuse(400, 'E109_INVALID_AMOUNT');
+  if (typeof amount !== 'string') return refuse(400, 'E108_INVALID_INPUT');
+  if (!U128.test(amount) || BigInt(amount) >> 128n) return refuse(400, 'E109_INVALID_AMOUNT');
 
   const nowMs = d.nowMs ?? Date.now();
   let email: string;
@@ -48,9 +50,11 @@ export async function handleClaim(input: unknown, d: ClaimDeps): Promise<ClaimRe
   }
 
   // Contract check order (spec/claim.md), so the verifier never signs a claim the contract would refuse.
-  const [network, campaign, state] = await Promise.all([
-    d.chain.getNetwork(), d.chain.getCampaign(campaign_id), d.chain.claimState(campaign_id, c),
-  ]);
+  const [network, campaign, state, agent] = await Promise.all([
+    d.chain.getNetwork(), d.chain.getCampaign(campaign_id), d.chain.claimState(campaign_id, c), d.chain.getAgent(d.signer.signer),
+  ]).catch(() => {
+    throw new UpstreamError('chain');
+  });
   if (!campaign) return refuse(404, 'E110_UNKNOWN_CAMPAIGN');
   const nowNs = BigInt(Math.floor(nowMs)) * 1_000_000n;
   if (nowNs > BigInt(campaign.deadline_ns)) return refuse(409, 'E125_CAMPAIGN_ENDED');
@@ -64,9 +68,12 @@ export async function handleClaim(input: unknown, d: ClaimDeps): Promise<ClaimRe
   // Our key must be one this campaign accepts: our signer (owner policy) or our measurement (attested).
   const allowedAs = campaign.policy === 'owner' ? d.signer.signer : d.measurementId;
   if (!allowedAs || !campaign.snapshot.includes(allowedAs)) return refuse(403, 'E101_INVALID_SIGNATURE');
+  // Our own registry entry must outlive the signature (it is gone while a key is removed and re-added).
+  const expiresNs = nowNs + SIGNATURE_TTL_NS;
+  if (!agent || BigInt(agent.valid_until_ns) < expiresNs) return refuse(403, 'E101_INVALID_SIGNATURE');
   if (BigInt(campaign.balance) < BigInt(amount)) return refuse(409, 'E129_INSUFFICIENT_BALANCE');
 
-  const expires_at_ns = (nowNs + SIGNATURE_TTL_NS).toString();
+  const expires_at_ns = expiresNs.toString();
   const signature = await signClaim(d.signer.key, {
     network, contract_id: d.contractId, campaign_id, commitment: c, amount, destination, expires_at_ns,
   });

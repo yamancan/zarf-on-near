@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { destinationNonce } from '../src/claim';
 import { TokenError, verifyGoogleIdToken } from '../src/googleIdToken';
 import { remoteJwks } from '../src/jwks';
+import { UpstreamError } from '../src/upstream';
 import { b64url, jwksResponse, sign, testIssuer, type TestIssuer } from './jwtFixture';
 
 const NOW = 1_763_150_000_000;
@@ -126,16 +127,16 @@ describe('remoteJwks', () => {
     let now = NOW;
     const fetchFn = vi.fn(async () => new Response('down', { status: 503 }));
     const jwks = remoteJwks('x', fetchFn, () => now);
-    await expect(jwks('k1')).rejects.toThrow('HTTP 503');
-    await expect(jwks('k1')).rejects.toThrow('HTTP 503');
+    await expect(jwks('k1')).rejects.toThrow(UpstreamError);
+    await expect(jwks('k1')).rejects.toThrow(UpstreamError);
     expect(fetchFn).toHaveBeenCalledTimes(1);
     now += 31_000;
-    await expect(jwks('k1')).rejects.toThrow('HTTP 503');
+    await expect(jwks('k1')).rejects.toThrow(UpstreamError);
     expect(fetchFn).toHaveBeenCalledTimes(2);
   });
 
   it('fails closed when the JWKS endpoint errors', async () => {
     const jwks = remoteJwks('x', async () => new Response('down', { status: 503 }));
-    await expect(jwks('k1')).rejects.toThrow('HTTP 503');
+    await expect(jwks('k1')).rejects.toThrow(UpstreamError);
   });
 });

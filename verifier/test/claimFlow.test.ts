@@ -4,6 +4,7 @@ import type { ChainReader } from '../src/chain';
 import { destinationNonce, hex, importSigner, isValidAccountId, leafHash, verifyMerkleProof, type Signer } from '../src/claim';
 import { handleClaim, type ClaimDeps } from '../src/claimFlow';
 import { remoteJwks } from '../src/jwks';
+import { UpstreamError } from '../src/upstream';
 import { jwksResponse, sign, testIssuer, type TestIssuer } from './jwtFixture';
 
 const { keys, context, campaigns, claims } = vectors;
@@ -15,6 +16,7 @@ const alice = campaigns.main.recipients.find((r) => r.commitment === named.call_
 type ChainOver = Partial<{
   network: string; root: string; deadline: string; missing: boolean; balance: string;
   policy: 'owner' | 'attested'; snapshot: string[]; state: 'unclaimed' | 'pending' | 'claimed';
+  agent: { valid_until_ns: string } | null;
 }>;
 const chain = (over: ChainOver = {}): ChainReader => ({
   getNetwork: async () => over.network ?? context.network,
@@ -29,6 +31,7 @@ const chain = (over: ChainOver = {}): ChainReader => ({
           snapshot: over.snapshot ?? [keys.signer],
         },
   claimState: async () => over.state ?? 'unclaimed',
+  getAgent: async (id) => ('agent' in over ? over.agent! : id === keys.signer ? { valid_until_ns: context.deadline_ns } : null),
 });
 
 let google: TestIssuer, signer: Signer, deps: ClaimDeps;
@@ -112,6 +115,9 @@ describe('handleClaim', () => {
     ['transfer in flight', 409, 'E123_CLAIM_PENDING', () => request(), { chain: chain({ state: 'pending' }) }],
     ['our signer not in the owner snapshot', 403, 'E101_INVALID_SIGNATURE', () => request(), { chain: chain({ snapshot: [keys.rogue_signer] }) }],
     ['attested campaign, no measurement id (Mode W)', 403, 'E101_INVALID_SIGNATURE', () => request(), { chain: chain({ policy: 'attested', snapshot: ['ab'.repeat(32)] }) }],
+    ['our key removed from the registry', 403, 'E101_INVALID_SIGNATURE', () => request(), { chain: chain({ agent: null }) }],
+    ['our key expires before the signature', 403, 'E101_INVALID_SIGNATURE', () => request(), { chain: chain({ agent: { valid_until_ns: (BigInt(context.expires_at_ns) - 1n).toString() } }) }],
+    ['amount missing', 400, 'E108_INVALID_INPUT', () => request({ amount: undefined })],
     ['balance below amount', 409, 'E129_INSUFFICIENT_BALANCE', () => request(), { chain: chain({ balance: (BigInt(named.call_args.amount) - 1n).toString() }) }],
   ])('refuses %s', async (_, status, error, make, over) => {
     expect(await handleClaim(await make(), { ...deps, ...over })).toEqual({ status, body: { error } });
@@ -140,6 +146,11 @@ describe('handleClaim', () => {
     expect(res).toEqual({ status: 200, body: named.call_args });
   });
 
+  it('accepts our key expiring exactly at expires_at_ns', async () => {
+    const res = await handleClaim(await request(), { ...deps, chain: chain({ agent: { valid_until_ns: context.expires_at_ns } }) });
+    expect(res.status).toBe(200);
+  });
+
   it('accepts a balance exactly equal to the amount', async () => {
     const res = await handleClaim(await request(), { ...deps, chain: chain({ balance: named.call_args.amount }) });
     expect(res.status).toBe(200);
@@ -158,6 +169,6 @@ describe('handleClaim', () => {
 
   it('fails closed when the chain read fails', async () => {
     const broken: ChainReader = { ...chain(), getNetwork: () => Promise.reject(new Error('rpc down')) };
-    await expect(handleClaim(await request(), { ...deps, chain: broken })).rejects.toThrow('rpc down');
+    await expect(handleClaim(await request(), { ...deps, chain: broken })).rejects.toThrow(UpstreamError);
   });
 });

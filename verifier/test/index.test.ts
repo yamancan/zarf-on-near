@@ -41,14 +41,18 @@ describe('worker', () => {
     expect(await res.json()).toEqual({ error: 'BAD_DESTINATION' });
   });
 
-  it.each(['SIGNER_SEED', 'CONTRACT_ID', 'GOOGLE_CLIENT_ID'])('500s, without signing, when %s is missing', async (k) => {
-    const res = await req('POST', '{"id_token":"a.b"}', undefined, '/claim', { ...env, [k]: '' });
+  it.each([
+    ['SIGNER_SEED', ''], ['CONTRACT_ID', ''], ['GOOGLE_CLIENT_ID', ''],
+    ['SIGNER_SEED', 'not-hex'], ['SIGNER_SEED', 'AB'.repeat(32)], ['SIGNER_SEED', 'ab'.repeat(31)],
+  ])('500s, without signing, when %s is %j', async (k, value) => {
+    const res = await req('POST', '{"id_token":"a.b"}', undefined, '/claim', { ...env, [k]: value });
     expect(res.status).toBe(500);
     expect(await res.json()).toEqual({ error: 'VERIFIER_MISCONFIGURED' });
   });
 
   it('503s with CORS, signing nothing, when an upstream read fails', async () => {
     vi.stubGlobal('fetch', async () => new Response('down', { status: 503 })); // Google's JWKS is unreachable
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     try {
       const v = vectors.claims.valid[0].call_args;
       const enc = (o: object) => btoa(JSON.stringify(o)).replace(/=+$/, '');
@@ -58,7 +62,9 @@ describe('worker', () => {
       expect(res.status).toBe(503);
       expect(await res.json()).toEqual({ error: 'UPSTREAM_UNAVAILABLE' });
       expect(res.headers.get('Access-Control-Allow-Origin')).toBe('https://claim.example');
+      expect(log).toHaveBeenCalledWith('upstream_unavailable:jwks'); // a fixed tag, nothing from the request
     } finally {
+      log.mockRestore();
       vi.unstubAllGlobals();
     }
   });

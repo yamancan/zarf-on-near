@@ -2,6 +2,7 @@ import { undeployedChain } from './chain';
 import { importSigner, type Signer } from './claim';
 import { handleClaim } from './claimFlow';
 import { GOOGLE_JWKS_URL, remoteJwks } from './jwks';
+import { UpstreamError } from './upstream';
 
 interface Env {
   GOOGLE_CLIENT_ID: string;
@@ -35,16 +36,21 @@ export default {
 
     const body = await req.json().catch(() => null);
     if (!body || typeof body !== 'object') return json({ error: 'E108_INVALID_INPUT' }, 400);
-    if (!env.SIGNER_SEED || !env.CONTRACT_ID || !env.GOOGLE_CLIENT_ID) return json({ error: 'VERIFIER_MISCONFIGURED' }, 500);
+    // A malformed seed must fail here, not get cached as a rejected import that looks like an outage.
+    if (!/^[0-9a-f]{64}$/.test(env.SIGNER_SEED ?? '') || !env.CONTRACT_ID || !env.GOOGLE_CLIENT_ID) {
+      return json({ error: 'VERIFIER_MISCONFIGURED' }, 500);
+    }
     signer ??= importSigner(env.SIGNER_SEED);
     try {
       const { status, body: out } = await handleClaim(body, {
         clientId: env.GOOGLE_CLIENT_ID, contractId: env.CONTRACT_ID, jwks, chain: undeployedChain, signer: await signer,
       });
       return json(out, status);
-    } catch {
-      // Google's JWKS or the chain read failed. Nothing was signed; keep CORS so the app can say so.
-      // Never log the request or the error's context: it carries the salt and the id_token.
+    } catch (e) {
+      if (!(e instanceof UpstreamError)) throw e;
+      // Nothing was signed; keep CORS so the app can say so. Log the fixed tag only: never the
+      // request or the error's context, which could carry the salt or the id_token.
+      console.log(`upstream_unavailable:${e.source}`);
       return json({ error: 'UPSTREAM_UNAVAILABLE' }, 503);
     }
   },

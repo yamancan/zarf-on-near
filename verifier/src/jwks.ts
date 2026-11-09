@@ -1,3 +1,5 @@
+import { UpstreamError } from './upstream';
+
 /** Resolves a JWT `kid` to an RS256 verification key, or undefined if the issuer has no such key. */
 export type JwksSource = (kid: string) => Promise<CryptoKey | undefined>;
 
@@ -35,9 +37,9 @@ export function remoteJwks(
       keys = next;
       fetchedAt = attemptedAt;
       lastError = null;
-    } catch (e) {
-      lastError = e;
-      throw e;
+    } catch {
+      lastError = new UpstreamError('jwks');
+      throw lastError;
     }
   }
 
