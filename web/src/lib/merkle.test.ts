@@ -29,13 +29,13 @@ describe('checkedProof (list vs on-chain root)', () => {
   it('refuses a list whose leaves were tampered with', async () => {
     const l = list();
     l.leaves[l.leaves.length - 1] = { ...l.leaves[l.leaves.length - 1], amount: '999999999' };
-    expect(await code(checkedProof(l, main.merkle_root, c.commitment))).toBe('LEAVES_ROOT_MISMATCH');
+    expect(await code(checkedProof(l, main.merkle_root, c.commitment))).toBe('LEAVES_MISMATCH');
   });
   it('refuses when the chain holds another root', async () => {
-    expect(await code(checkedProof(list(), '00'.repeat(32), c.commitment))).toBe('LEAVES_ROOT_MISMATCH');
+    expect(await code(checkedProof(list(), '00'.repeat(32), c.commitment))).toBe('LEAVES_MISMATCH');
   });
   it('refuses a file whose declared root differs from the chain', async () => {
-    expect(await code(checkedProof({ ...list(), merkle_root: '00'.repeat(32) }, main.merkle_root, c.commitment))).toBe('LEAVES_ROOT_MISMATCH');
+    expect(await code(checkedProof({ ...list(), merkle_root: '00'.repeat(32) }, main.merkle_root, c.commitment))).toBe('LEAVES_MISMATCH');
   });
   it('refuses a commitment not in the list', async () => {
     expect(await code(checkedProof(list(), main.merkle_root, '11'.repeat(32)))).toBe('NOT_IN_LIST');

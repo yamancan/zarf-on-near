@@ -29,13 +29,16 @@ describe('getCampaign (NEAR RPC view)', () => {
 describe('fetchLeaves', () => {
   const main = vectors.campaigns.main;
   const file = { campaign_id: main.campaign_id, merkle_root: main.merkle_root, leaves: main.recipients.map(({ commitment, amount }) => ({ commitment, amount })) };
+  it('refuses a file for another campaign', async () => {
+    vi.stubGlobal('fetch', reply({ ...file, campaign_id: '8' }));
+    expect(await code(fetchLeaves('https://leaves.test', main.campaign_id))).toBe('LEAVES_MISMATCH');
+  });
   it('accepts the spec file shape', async () => {
     vi.stubGlobal('fetch', reply(file));
     expect(await fetchLeaves('https://leaves.test', main.campaign_id)).toEqual(file);
   });
   it.each([
     ['a bare array', file.leaves],
-    ['another campaign id', { ...file, campaign_id: '8' }],
     ['a bad root', { ...file, merkle_root: 'AB' }],
     ['no leaves', { ...file, leaves: [] }],
     ['an uppercase commitment', { ...file, leaves: [{ commitment: 'AB'.repeat(32), amount: '1' }] }],
@@ -53,16 +56,20 @@ describe('verifier and relayer', () => {
     expect(err).toBeInstanceOf(ClaimError);
     expect(describeError(err)).toMatch(/different Google account/);
   });
+  const HASH = '6zgh2u9DqHHiXzdy9ouTP7oGky2T4nugqzqt9wJZwNFm';
   it('posts the signed args to the relayer and returns the tx hash', async () => {
-    const fetchMock = reply({ tx_hash: 'H' });
+    const fetchMock = reply({ tx_hash: HASH });
     vi.stubGlobal('fetch', fetchMock);
     const args = vectors.claims.valid[0].call_args;
-    expect(await submitClaim('https://r.test', args)).toBe('H');
+    expect(await submitClaim('https://r.test', args)).toBe(HASH);
     expect((fetchMock.mock.calls[0] as unknown as [string])[0]).toBe('https://r.test/claim');
   });
-  it('refuses a relayer reply without a tx hash', async () => {
-    vi.stubGlobal('fetch', reply({}));
+  it.each([[{}], [{ tx_hash: 'H' }], [{ tx_hash: `${HASH}"><script>` }], [{ tx_hash: 'O0Il'.repeat(11) }]])('refuses relayer reply %j', async (body) => {
+    vi.stubGlobal('fetch', reply(body));
     expect(await code(submitClaim('https://r.test', vectors.claims.valid[0].call_args))).toBe('RELAYER_NO_TX');
+  });
+  it.each(['UPSTREAM_UNAVAILABLE', 'E101_INVALID_SIGNATURE', 'E129_INSUFFICIENT_BALANCE', 'BAD_DESTINATION', 'LEAVES_MISMATCH', 'LEAVES_INVALID', 'LEAVES_UNAVAILABLE'])('has copy for %s', (c) => {
+    expect(describeError(new ClaimError(c))).not.toMatch(/did not go through/);
   });
   it('explains missing config and unknown codes', () => {
     expect(describeError(new ClaimError('NOT_CONFIGURED:PUBLIC_VERIFIER_URL'))).toMatch(/PUBLIC_VERIFIER_URL/);

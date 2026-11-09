@@ -68,12 +68,13 @@ export async function fetchLeaves(baseUrl: string | undefined, campaignId: strin
   if (!res.ok) throw new ClaimError('LEAVES_UNAVAILABLE');
   const f = await res.json().catch(() => null);
   const ok =
-    f?.campaign_id === campaignId &&
+    typeof f?.campaign_id === 'string' &&
     /^[0-9a-f]{64}$/.test(f.merkle_root) &&
     Array.isArray(f.leaves) &&
     f.leaves.length > 0 &&
     f.leaves.every((l: { commitment?: unknown; amount?: unknown }) => /^[0-9a-f]{64}$/.test(String(l?.commitment)) && /^[1-9]\d{0,38}$/.test(String(l?.amount)));
   if (!ok) throw new ClaimError('LEAVES_INVALID');
+  if (f.campaign_id !== campaignId) throw new ClaimError('LEAVES_MISMATCH');
   return f;
 }
 
@@ -83,7 +84,8 @@ export const requestSignature = async (verifierUrl: string | undefined, body: Re
 /** spec/claim.md "Relayer": POST /claim with exactly the verifier's 200 body → { tx_hash }. */
 export async function submitClaim(relayerUrl: string | undefined, args: ClaimArgs): Promise<string> {
   const { tx_hash } = await postJson<{ tx_hash?: string }>(`${need(relayerUrl, 'PUBLIC_RELAYER_URL')}/claim`, args);
-  if (!tx_hash) throw new ClaimError('RELAYER_NO_TX');
+  // A NEAR tx hash is base58 of 32 bytes; anything else would end up in the explorer link.
+  if (typeof tx_hash !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(tx_hash)) throw new ClaimError('RELAYER_NO_TX');
   return tx_hash;
 }
 
@@ -98,7 +100,14 @@ const MESSAGES: Record<string, string> = {
   BAD_NONCE: 'This sign-in was for a different destination. Open your claim link and start again.',
   EMAIL_NOT_VERIFIED: 'Google says this email is not verified.',
   NOT_IN_LIST: 'This claim is not in the published campaign list.',
-  LEAVES_ROOT_MISMATCH: 'The published campaign list does not match the contract. Nothing was sent.',
+  LEAVES_MISMATCH: 'The published campaign list does not match the contract. Nothing was sent.',
+  LEAVES_INVALID: 'The published campaign list is damaged. Nothing was sent; contact the sender.',
+  LEAVES_UNAVAILABLE: 'The campaign list could not be loaded. Try again in a minute.',
+  UPSTREAM_UNAVAILABLE: 'A service we depend on is not answering. Try again in a minute.',
+  E101_INVALID_SIGNATURE: 'The verifier is not authorised for this campaign right now. Try again later or contact the sender.',
+  E129_INSUFFICIENT_BALANCE: 'This campaign is underfunded; contact the sender.',
+  BAD_DESTINATION: 'That is not a valid NEAR account. Open your claim link and start again.',
+  RATE_LIMITED: 'Too many attempts. Wait a minute and try again.',
 };
 
 export function describeError(e: unknown): string {

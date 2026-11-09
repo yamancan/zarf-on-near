@@ -56,6 +56,6 @@ export async function proofFor(leaves: Leaf[], commitment: string): Promise<{ am
 export async function checkedProof(list: LeafList, chainRoot: string, commitment: string): Promise<{ amount: string; proof: string[] }> {
   const found = await proofFor(list.leaves, commitment);
   if (!found) throw new ClaimError('NOT_IN_LIST');
-  if (found.root !== chainRoot || list.merkle_root !== chainRoot) throw new ClaimError('LEAVES_ROOT_MISMATCH');
+  if (found.root !== chainRoot || list.merkle_root !== chainRoot) throw new ClaimError('LEAVES_MISMATCH');
   return { amount: found.amount, proof: found.proof };
 }
