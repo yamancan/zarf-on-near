@@ -1,4 +1,4 @@
-# Exact pin: the deployed wasm (code hash 5GdxDSB4…) is rebuilt byte-for-byte only with this toolchain,
+# Exact pin: the deployed wasm (code hash 5GdxDSB4…) is rebuilt byte-for-byte only with this toolchain.
 # History: rustc 1.87+ emits bulk-memory and nontrapping-float-to-int opcodes that nearcore VMs
 # before protocol 84 rejected (cargo-near-build 0.11.5, src/near/build/mod.rs). Mainnet and testnet
 # reported protocol 88 on 2026-11-12, so that limit no longer binds; the hash above is why 1.86 stays.
