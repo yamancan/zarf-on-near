@@ -1,13 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import vectors from '../../../spec/vectors.json';
 import {
-  claimState, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isValidAccountId, loadAttempt, parseCallback,
-  saltFromFragment, saveAttempt,
+  claimState, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isImplicitAccount, isValidAccountId, loadAttempt, newAttemptId,
+  parseCallback, saltFromFragment, saveAttempt, clearAttempt,
 } from './claim';
 
-describe('nonce', () => {
-  it.each(vectors.claims.valid)('matches spec vector $name', async (c) => {
-    expect(await destinationNonce(c.args.destination)).toBe(c.nonce);
+const main = vectors.campaigns.main;
+
+describe('spec/vectors.json (v2.1)', () => {
+  it('is not empty', () => {
+    expect(vectors.claims.valid.length).toBeGreaterThanOrEqual(4);
+    expect(vectors.claims.invalid.length).toBeGreaterThanOrEqual(10);
+    expect(main.recipients.length).toBeGreaterThanOrEqual(1);
+  });
+  it.each(vectors.claims.valid)('nonce matches $name', async (c) => {
+    expect(isValidAccountId(c.call_args.destination)).toBe(true);
+    expect(await destinationNonce(c.call_args.destination)).toBe(c.nonce);
   });
 });
 
@@ -19,20 +27,24 @@ describe('isValidAccountId', () => {
 });
 
 describe('claim link', () => {
-  const salt = vectors.campaign.salt;
+  const salt = main.recipients[0].salt;
   it('reads the salt from the fragment', () => {
     expect(saltFromFragment(`#s=${salt}`)).toBe(salt);
     expect(saltFromFragment(`s=${salt}`)).toBe(salt);
   });
-  it.each(['', '#', '#s=', '#s=abc', `#s=${vectors.campaign.recipients[0].commitment.toUpperCase()}`, `#x=${salt}`])('rejects fragment %j', (h) =>
+  it.each(['', '#', '#s=', '#s=abc', `#s=${main.recipients[0].commitment.toUpperCase()}`, `#x=${salt}`])('rejects fragment %j', (h) =>
     expect(saltFromFragment(h)).toBeNull());
+  it('recognises implicit accounts', () => {
+    expect(isImplicitAccount(vectors.keys.signer)).toBe(true);
+    expect(isImplicitAccount('alice.testnet')).toBe(false);
+  });
   it('validates campaign id and commitment', () => {
     expect(isCampaignId('7')).toBe(true);
     expect(isCampaignId('18446744073709551615')).toBe(true);
     expect(isCampaignId('18446744073709551616')).toBe(false);
     expect(isCampaignId('07')).toBe(false);
     expect(isCampaignId('-1')).toBe(false);
-    expect(isHex32(vectors.campaign.recipients[0].commitment)).toBe(true);
+    expect(isHex32(main.recipients[0].commitment)).toBe(true);
     expect(isHex32('zz'.repeat(32))).toBe(false);
   });
 });
@@ -51,8 +63,14 @@ describe('Google redirect', () => {
     expect(parseCallback('#error=access_denied&state=7%2Fabc')).toEqual({ error: 'access_denied' });
     expect(parseCallback('')).toEqual({ error: 'missing_token' });
   });
+  it('state carries a random per-attempt id', () => {
+    const a = newAttemptId(), b = newAttemptId();
+    expect(a).toMatch(/^[0-9a-f]{32}$/);
+    expect(a).not.toBe(b);
+    expect(claimState('7', 'c', a)).toBe(`7/c/${a}`);
+  });
   it('state round-trips through URL encoding', () => {
-    const s = claimState('7', vectors.campaign.recipients[0].commitment);
+    const s = claimState('7', main.recipients[0].commitment, newAttemptId());
     expect(parseCallback(`#id_token=t&${new URLSearchParams({ state: s })}`)).toEqual({ idToken: 't', state: s });
   });
 });
@@ -60,14 +78,17 @@ describe('Google redirect', () => {
 describe('attempt storage', () => {
   const mem = (): Storage => {
     const m = new Map<string, string>();
-    return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => void m.set(k, v) } as Storage;
+    return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => void m.set(k, v), removeItem: (k) => void m.delete(k) } as Storage;
   };
   it('round-trips and tolerates garbage', () => {
     const s = mem();
     expect(loadAttempt(s)).toBeNull();
-    const a = { campaign: '7', commitment: 'c', salt: 's', destination: 'alice.testnet' };
+    const a = { campaign: '7', commitment: 'c', salt: 's', destination: 'alice.testnet', attemptId: 'x' };
     saveAttempt(a, s);
     expect(loadAttempt(s)).toEqual(a);
+    clearAttempt(s);
+    expect(loadAttempt(s)).toBeNull();
+    saveAttempt(a, s);
     s.setItem('zarf-near:attempt', '{');
     expect(loadAttempt(s)).toBeNull();
   });

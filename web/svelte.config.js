@@ -13,7 +13,7 @@ export default {
         'script-src': ['self'],
         'style-src': ['self', 'unsafe-inline'],
         'img-src': ['self', 'data:'],
-        'connect-src': ['self'], // + the verifier origin when POST /claim is wired
+        'connect-src': ['self'], // hooks.server.ts appends the configured verifier/relayer/RPC/leaves origins
         'base-uri': ['none'],
         'form-action': ['self'],
         'frame-ancestors': ['none'],

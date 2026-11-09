@@ -14,10 +14,10 @@ describe('base58', () => {
 
 describe('implicit account', () => {
   it('derives the account id from the ed25519 public key (spec test key)', async () => {
-    const a = await implicitAccountFromSeed(unhex(vectors.keys.verifier_seed));
-    expect(a.accountId).toBe(vectors.keys.verifier_pubkey);
-    expect(a.publicKey).toBe(`ed25519:${base58(unhex(vectors.keys.verifier_pubkey))}`);
-    expect(a.privateKey).toBe(`ed25519:${base58(unhex(vectors.keys.verifier_seed + vectors.keys.verifier_pubkey))}`);
+    const a = await implicitAccountFromSeed(unhex(vectors.keys.signer_seed));
+    expect(a.accountId).toBe(vectors.keys.signer);
+    expect(a.publicKey).toBe(`ed25519:${base58(unhex(vectors.keys.signer))}`);
+    expect(a.privateKey).toBe(`ed25519:${base58(unhex(vectors.keys.signer_seed + vectors.keys.signer))}`);
     expect(JSON.parse(keyFile(a))).toEqual({ account_id: a.accountId, public_key: a.publicKey, private_key: a.privateKey });
   });
   it('creates a fresh 64-hex account each time', async () => {

@@ -7,6 +7,15 @@
   "vars": {
     // The OAuth web client id (docs/spikes/S4.md). The redirect URI is <origin>/auth/google,
     // so the claim host itself needs no config here, only an entry in the Google client.
-    "PUBLIC_GOOGLE_CLIENT_ID": ""
+    "PUBLIC_GOOGLE_CLIENT_ID": "",
+    // "off" hides "Create one for me" (in-browser implicit account); the owner decides the gas story.
+    "PUBLIC_IMPLICIT_ACCOUNTS": "on",
+    // Endpoints. Empty values make the page say what is not set up yet; they also feed CSP connect-src.
+    "PUBLIC_VERIFIER_URL": "",
+    "PUBLIC_RELAYER_URL": "",
+    "PUBLIC_NEAR_RPC_URL": "",
+    "PUBLIC_CONTRACT_ID": "",
+    "PUBLIC_LEAVES_URL": "",
+    "PUBLIC_EXPLORER_TX_URL": ""
   }
 }

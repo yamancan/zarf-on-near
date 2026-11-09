@@ -1,0 +1,96 @@
+// Network calls the claim app makes. Every endpoint comes from config; none is hard-coded.
+
+export interface Campaign {
+  merkle_root: string;
+  deadline_ns: string;
+}
+
+export interface ClaimArgs {
+  campaign_id: string;
+  commitment: string;
+  amount: string;
+  proof: string[];
+  destination: string;
+  expires_at_ns: string;
+  signer: string;
+  signature: string;
+}
+
+/** A refusal with a stable code (verifier/relayer error, or a local one). */
+export class ClaimError extends Error {
+  constructor(readonly code: string) {
+    super(code);
+  }
+}
+
+const need = (value: string | undefined, name: string): string => {
+  if (!value) throw new ClaimError(`NOT_CONFIGURED:${name}`);
+  return value;
+};
+
+async function postJson<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const out = (await res.json().catch(() => ({}))) as { error?: string };
+  if (!res.ok) throw new ClaimError(out.error ?? `HTTP_${res.status}`);
+  return out as T;
+}
+
+/** NEAR RPC view call (`query` / `call_function`). */
+export async function nearView<T>(rpcUrl: string, contractId: string, method: string, args: object): Promise<T> {
+  const res = await postJson<{ result?: { result?: number[]; error?: string }; error?: unknown }>(rpcUrl, {
+    jsonrpc: '2.0',
+    id: 'zarf',
+    method: 'query',
+    params: {
+      request_type: 'call_function',
+      finality: 'final',
+      account_id: contractId,
+      method_name: method,
+      args_base64: btoa(JSON.stringify(args)),
+    },
+  });
+  if (res.error || !res.result?.result) throw new ClaimError('RPC_ERROR');
+  return JSON.parse(new TextDecoder().decode(Uint8Array.from(res.result.result)));
+}
+
+export const getCampaign = async (rpcUrl: string | undefined, contractId: string | undefined, campaignId: string) =>
+  nearView<Campaign | null>(need(rpcUrl, 'PUBLIC_NEAR_RPC_URL'), need(contractId, 'PUBLIC_CONTRACT_ID'), 'get_campaign', { campaign_id: campaignId });
+
+// shortcut: the leaf-list location is not in the spec yet (T7 publishes it); assumed <PUBLIC_LEAVES_URL>/<campaign_id>.json.
+export async function fetchLeaves(baseUrl: string | undefined, campaignId: string): Promise<{ commitment: string; amount: string }[]> {
+  const res = await fetch(`${need(baseUrl, 'PUBLIC_LEAVES_URL')}/${campaignId}.json`);
+  if (!res.ok) throw new ClaimError('LEAVES_UNAVAILABLE');
+  const leaves = await res.json();
+  const ok = Array.isArray(leaves) && leaves.every((l) => /^[0-9a-f]{64}$/.test(l?.commitment) && /^[1-9]\d{0,38}$/.test(l?.amount));
+  if (!ok) throw new ClaimError('LEAVES_INVALID');
+  return leaves;
+}
+
+export const requestSignature = async (verifierUrl: string | undefined, body: Record<string, unknown>) =>
+  postJson<ClaimArgs>(`${need(verifierUrl, 'PUBLIC_VERIFIER_URL')}/claim`, body);
+
+// shortcut: T5 has not fixed the relayer API; assumed POST <PUBLIC_RELAYER_URL>/claim with the claim args → { tx_hash }.
+export async function submitClaim(relayerUrl: string | undefined, args: ClaimArgs): Promise<string> {
+  const { tx_hash } = await postJson<{ tx_hash?: string }>(`${need(relayerUrl, 'PUBLIC_RELAYER_URL')}/claim`, args);
+  if (!tx_hash) throw new ClaimError('RELAYER_NO_TX');
+  return tx_hash;
+}
+
+const MESSAGES: Record<string, string> = {
+  COMMITMENT_MISMATCH: 'This link belongs to a different Google account. Sign in with the address the sender used.',
+  E125_CAMPAIGN_ENDED: 'This campaign has ended. Unclaimed funds go back to the sender.',
+  E110_UNKNOWN_CAMPAIGN: 'This campaign does not exist.',
+  E102_INVALID_MERKLE_PROOF: 'This claim is not in the campaign list.',
+  E105_ALREADY_CLAIMED: 'This allocation has already been claimed.',
+  E123_CLAIM_PENDING: 'This claim is already being paid. Check back in a minute.',
+  EXPIRED: 'Your Google sign-in expired. Open your claim link and sign in again.',
+  BAD_NONCE: 'This sign-in was for a different destination. Open your claim link and start again.',
+  EMAIL_NOT_VERIFIED: 'Google says this email is not verified.',
+  NOT_IN_LIST: 'This claim is not in the published campaign list.',
+};
+
+export function describeError(e: unknown): string {
+  const code = e instanceof ClaimError ? e.code : 'UNEXPECTED';
+  if (code.startsWith('NOT_CONFIGURED:')) return `This site is not fully set up yet (${code.slice(15)}).`;
+  return MESSAGES[code] ?? `The claim did not go through (${code}).`;
+}

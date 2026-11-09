@@ -3,14 +3,17 @@
   import { page } from '$app/state';
   import { env } from '$env/dynamic/public';
   import {
-    claimState, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isValidAccountId, loadAttempt, saltFromFragment,
-    saveAttempt,
+    claimState, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isValidAccountId, loadAttempt, newAttemptId,
+    saltFromFragment, saveAttempt,
   } from '$lib/claim';
+  import { describeError, getCampaign } from '$lib/services';
   import { createImplicitAccount, keyFile, type ImplicitAccount } from '$lib/implicit';
 
   const campaign = page.params.campaign!;
   const commitment = page.params.commitment!;
   const linkOk = isCampaignId(campaign) && isHex32(commitment);
+  // Pending the owner's decision on gas for in-browser accounts; on unless PUBLIC_IMPLICIT_ACCOUNTS=off.
+  const implicitEnabled = env.PUBLIC_IMPLICIT_ACCOUNTS !== 'off';
 
   let salt = $state<string | null>(null);
   let loaded = $state(false);
@@ -20,6 +23,7 @@
   let exported = $state(false);
   let confirmed = $state(false);
   let error = $state('');
+  let deadline = $state('loading…');
 
   const destination = $derived(mode === 'existing' ? typed.trim().toLowerCase() : (implicit?.accountId ?? ''));
   const ready = $derived(!!salt && isValidAccountId(destination) && (mode === 'existing' || (exported && confirmed)));
@@ -29,9 +33,19 @@
     salt = saltFromFragment(location.hash) ?? (prev?.campaign === campaign && prev.commitment === commitment ? prev.salt : null);
     // Keep the salt out of the address bar and synced history; this tab's sessionStorage holds it.
     if (location.hash) history.replaceState(history.state, '', location.pathname); // $app/navigation's replaceState throws before the router is up
-    if (salt && linkOk) saveAttempt({ campaign, commitment, salt, destination: '' });
+    if (salt && linkOk) saveAttempt({ campaign, commitment, salt, destination: '', attemptId: '' });
     loaded = true;
+    if (linkOk) loadDeadline();
   });
+
+  async function loadDeadline() {
+    try {
+      const c = await getCampaign(env.PUBLIC_NEAR_RPC_URL, env.PUBLIC_CONTRACT_ID, campaign);
+      deadline = c ? new Date(Number(BigInt(c.deadline_ns) / 1_000_000n)).toLocaleString() : 'this campaign does not exist';
+    } catch (e) {
+      deadline = `unavailable (${describeError(e)})`;
+    }
+  }
 
   async function create() {
     error = '';
@@ -62,12 +76,13 @@
       error = 'Google sign-in is not configured on this site yet.';
       return;
     }
-    saveAttempt({ campaign, commitment, salt: salt!, destination });
+    const attemptId = newAttemptId();
+    saveAttempt({ campaign, commitment, salt: salt!, destination, attemptId });
     location.href = googleAuthUrl({
       clientId,
       redirectUri: `${location.origin}/auth/google`,
       nonce: await destinationNonce(destination),
-      state: claimState(campaign, commitment),
+      state: claimState(campaign, commitment, attemptId),
     });
   }
 </script>
@@ -80,13 +95,15 @@
   <p class="muted">The part after <code>#</code> is missing. Open the full link from your email again.</p>
 {:else if loaded}
   <h1>Claim your tokens</h1>
-  <p class="muted">Campaign {campaign}. Deadline: shown once the contract is connected.</p>
+  <p class="muted">Campaign {campaign}. Claim before: {deadline}</p>
 
   <h2>Where should they go?</h2>
-  <p>
-    <label><input type="radio" bind:group={mode} value="existing" /> I have a NEAR account</label><br />
-    <label><input type="radio" bind:group={mode} value="new" /> Create one for me</label>
-  </p>
+  {#if implicitEnabled}
+    <p>
+      <label><input type="radio" bind:group={mode} value="existing" /> I have a NEAR account</label><br />
+      <label><input type="radio" bind:group={mode} value="new" /> Create one for me</label>
+    </p>
+  {/if}
 
   {#if mode === 'existing'}
     <input
@@ -116,7 +133,13 @@
     </label>
   {/if}
 
-  <p class="muted">Google confirms your email. Your sign-in is bound to this account, so it cannot be used for another one.</p>
+  {#if isValidAccountId(destination)}
+    <p>Funds go to: <code>{destination}</code></p>
+  {/if}
+  <p class="muted">
+    Our verifier sees your email to check it matches this claim. It is never put on chain. Your sign-in is bound to
+    the account above, so it cannot be used to pay anyone else.
+  </p>
   <button class="primary" disabled={!ready} onclick={signIn}>Continue with Google</button>
 {/if}
 

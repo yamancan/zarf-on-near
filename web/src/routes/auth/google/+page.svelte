@@ -11,7 +11,7 @@
     const attempt = loadAttempt();
     if ('error' in cb) {
       error = cb.error === 'access_denied' ? 'Google sign-in was cancelled.' : `Google sign-in failed (${cb.error}).`;
-    } else if (!attempt?.destination || claimState(attempt.campaign, attempt.commitment) !== cb.state) {
+    } else if (!attempt?.destination || !attempt.attemptId || claimState(attempt.campaign, attempt.commitment, attempt.attemptId) !== cb.state) {
       error = 'This sign-in does not match a claim started in this tab.';
     } else {
       signedIn.idToken = cb.idToken;

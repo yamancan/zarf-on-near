@@ -9,6 +9,9 @@ export const hex = (b: ArrayBuffer | Uint8Array): string =>
 const ACCOUNT_ID = /^(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/;
 export const isValidAccountId = (id: string): boolean => id.length >= 2 && id.length <= 64 && ACCOUNT_ID.test(id);
 
+/** A NEAR implicit account: the hex of an ed25519 public key. It exists on chain only once NEAR is sent to it. */
+export const isImplicitAccount = (id: string): boolean => /^[0-9a-f]{64}$/.test(id);
+
 export const isCampaignId = (s: string): boolean => /^(0|[1-9]\d{0,19})$/.test(s) && BigInt(s) < 1n << 64n;
 export const isHex32 = (s: string): boolean => /^[0-9a-f]{64}$/.test(s);
 
@@ -22,7 +25,11 @@ export function saltFromFragment(hash: string): string | null {
   return s && isHex32(s) ? s : null;
 }
 
-export const claimState = (campaign: string, commitment: string): string => `${campaign}/${commitment}`;
+/** OAuth `state`: the claim plus a random per-attempt value, so a callback from another attempt is refused. */
+export const claimState = (campaign: string, commitment: string, attemptId: string): string =>
+  `${campaign}/${commitment}/${attemptId}`;
+
+export const newAttemptId = (): string => hex(crypto.getRandomValues(new Uint8Array(16)));
 
 export function googleAuthUrl(o: { clientId: string; redirectUri: string; nonce: string; state: string }): string {
   const params = new URLSearchParams({
@@ -52,6 +59,7 @@ export interface Attempt {
   commitment: string;
   salt: string;
   destination: string;
+  attemptId: string;
 }
 
 const KEY = 'zarf-near:attempt';
@@ -63,6 +71,8 @@ export function loadAttempt(store: Storage = sessionStorage): Attempt | null {
     return null;
   }
 }
+
+export const clearAttempt = (store: Storage = sessionStorage) => store.removeItem(KEY);
 
 /** The id_token lives in memory only: a reload means signing in again. */
 export const signedIn: { idToken: string | null } = { idToken: null };
