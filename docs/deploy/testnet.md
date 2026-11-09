@@ -216,3 +216,25 @@ After: code hash `5GdxDSB4sGW9Ewod4Q4Na613C2sLQjVfFjLbbZbKt6N8`; `view_access_ke
 `{"version":"0.1.2","link":"https://github.com/yamancan/zarf-on-near","standards":[{"standard":"nep330","version":"1.3.0"}],"build_info":null}`.
 `build_info` stays null: near-sdk fills it only for reproducible builds (cargo-near
 `reproducible-wasm`, Docker), not for `non-reproducible-wasm`.
+
+### Resume path on the live escrow: `SKIP_DEPLOY=1` (2026-11-11)
+
+A real-chain check of the post-deploy steps that a failed mainnet run would repeat, run from
+revision `1af355f` against the locked escrow, with the same env as its deploy:
+
+```bash
+SKIP_DEPLOY=1 LOCK_CONTRACT=1 CONTRACT_ID=zarf-near-1112.testnet OWNER_ID=zarf-near-owner-1111.testnet \
+RELAYER_ID=zarf-near-relayer-1111.testnet \
+RELAYER_KEY_FILE=<relayer-key-file> scripts/deploy.sh
+```
+
+| Step | Transaction | Result |
+| --- | --- | --- |
+| lock | none | no full-access key found, nothing to delete; verified |
+| USDC `storage_deposit` (registration_only, owner) | `7AvhCmgos1f274cd6g3wXoAeASqNREzifugjAnA5Vnu4` | "The account is already registered, refunding the deposit": 0.00125 NEAR back to the owner; 3.18 Tgas |
+| `refresh_token_storage` (owner) | `H13A8SscYqpHh6TB9ARC5EhbZppXx5V7rsms9F65HJkS` | success, no state change; 6.34 Tgas |
+| relayer claim-only key | none | "relayer key already present (resumed run)" (`ed25519:69m6cJwr…`) |
+
+Exit 0. Before and after, byte-identical: `view_access_key_list` = `[]`; `get_config`;
+`contract_source_metadata` (0.1.2); campaign 0 (balance 2000000, in_flight 0) and campaign 1
+(balance 1000000, in_flight 0); the escrow's USDC balance 3000000.
