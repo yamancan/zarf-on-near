@@ -248,3 +248,24 @@ RELAYER_KEY_FILE=<relayer-key-file> scripts/deploy.sh
 Exit 0. Before and after, byte-identical: `view_access_key_list` = `[]`; `get_config`;
 `contract_source_metadata` (0.1.2); campaign 0 (balance 2000000, in_flight 0) and campaign 1
 (balance 1000000, in_flight 0); the escrow's USDC balance 3000000.
+
+### Evidence on 0.1.2, the code that goes to mainnet (2026-11-12)
+
+The claims above ran on 0.1.1. These ran on 0.1.2 (code hash `5GdxDSB4…`), contract-level as
+before: signed locally with the testnet verifier seed, sent by the relayer's claim-only key with
+exactly `required_claim_gas` = 55 Tgas, campaign 0. Leaves 1 and 2 were built from placeholder
+emails (`@example.com`), so no Google login could ever claim them. Destination: fresh, unregistered
+`zarf-near-dest3-1112.testnet` (created `FSju7xPHvzxP8bLyQuvC5d6HYhuUw1wGjs1gqBc1C1K6`,
+`storage_balance_of` = null before).
+
+| Claim | Transaction | Result | Gas burnt (Tgas) |
+| --- | --- | --- | --- |
+| leaf 1 → `zarf-near-dest3-1112.testnet` | `Cmi5X9XyiQjSfhJDahWz6TvZKSjkVX5MKjFqAYS7m7Zt` | `claim_started`, `ft_transfer` 1000000, `claim_paid` | tx 0.335; `claim` 3.920; `storage_deposit` 2.039; `ft_transfer` 2.299; `on_claim` 2.150; 4 refunds × 0.223; **total 11.64** |
+| leaf 1 again (same commitment) | `FLmmkbCQckFQWK9CEKxmxrtMrf2XLB28qR2guPnk6RFL` | refused, `E105_ALREADY_CLAIMED` | total 2.14 |
+| leaf 2 with amount 2000000 instead of 1000000 (signed over the wrong amount) | `7FcwE5qrzgKMtgHdgbgNHFSQ1MDRvFdhytgg941KhBPp` | refused, `E102_INVALID_MERKLE_PROOF` (check 7, before the signature) | total 2.16 |
+| leaf 2, correct amount, one signature nibble flipped | `FFqKA2ZfHxAGBc9md2WmTRG9kUzDVPH3JT4Abnp2dkdd` | refused, `E101_INVALID_SIGNATURE` | total 2.49 |
+
+After: `view_access_key_list` = `[]`; `get_config` unchanged; `claim_state` leaf 1 = claimed, leaf 2
+= unclaimed; campaign 0 balance 1000000 (was 2000000), in_flight 0, storage_reserved 0.00231 NEAR (one
+claim left); campaign 1 (faucet) unchanged at 1000000; escrow USDC 2000000 = the sum of both
+campaigns; destination USDC 1000000.
