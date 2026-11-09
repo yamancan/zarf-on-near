@@ -82,15 +82,9 @@ Setup, from `zarf-near-sender-1111.testnet` (funded with 20 test USDC by the own
 The first `ft_transfer_call` attempt returned "Transaction has expired" from the RPC and had no
 effect on chain (balances, `campaigns_of`, `campaign_by_root` unchanged), so it was sent once more.
 
-Campaign 0, public leaf list (salts and the placeholder emails stay on the deploy host):
-
-```json
-{ "campaign_id": "0", "merkle_root": "cbad6057878de5892f1b6756e6860e0ca3438f7c07b9a0a38d4bc10775618417",
-  "leaves": [
-    { "commitment": "cde1b853a5295983f83b8af4fea3cb1e509c6644eef9bf6aaafc79ed3b8026fb", "amount": "1000000" },
-    { "commitment": "063dbafc9ab3003bdabbecc8df07b69ab188cf655004b692274b3f1f272f3356", "amount": "1000000" },
-    { "commitment": "a30ff9dae7a81834c7300caedc535a3f7f8edd10049ae09f692a1c7308526fe1", "amount": "1000000" } ] }
-```
+Campaign 0: merkle root `cbad6057878de5892f1b6756e6860e0ca3438f7c07b9a0a38d4bc10775618417`,
+3 leaves of 1000000 (1 USDC) each. The leaf list is not published (spec: it stays in the
+sender's recovery file, with each leaf's email and salt).
 
 ### The claim: leaf 0 → `zarf-near-dest-1111.testnet`, prepaid gas exactly 55 Tgas
 
@@ -191,16 +185,10 @@ verifier seed, sent by the relayer's claim-only key with exactly 55 Tgas.
 | `BLjpF12EbZp77Xz8Wh6cqL1jnriM59MBccc62yE9tQMB` | `claim_paid`; `claim_state` = claimed; destination USDC 1000000 | claim 3.91, storage_deposit 2.04, ft_transfer 2.30, on_claim 2.14; total 11.62 Tgas |
 | `FdUxYG5zYeNRPrAZPNEbpe7JxEq9AUesUkyD2zNietT2` (same commitment again) | refused, `E105_ALREADY_CLAIMED` | |
 
-Campaign 0 public leaf list (salts and placeholder emails stay on the deploy host; the
-placeholders are not Google accounts, so leaves 1 and 2 are not claimable by a real login):
-
-```json
-{ "campaign_id": "0", "merkle_root": "b16f95d49f920d41fbdffae49d1bb3929b2131f400ae7a34e48e8d428e8d3ad2",
-  "leaves": [
-    { "commitment": "2115df30cfe18401b770e0cb333989cd34e757cde099a45d71faa95c935ab37c", "amount": "1000000" },
-    { "commitment": "80a0163bfbb3da59ce667b6eda73d2f376669462f6d48bc91527489878f2d48a", "amount": "1000000" },
-    { "commitment": "f1862fa4c12d8effc8ea3dfdbfc0af344eb93ade40b3bfe8efc97a2ca2f4e8a5", "amount": "1000000" } ] }
-```
+Campaign 0: merkle root `b16f95d49f920d41fbdffae49d1bb3929b2131f400ae7a34e48e8d428e8d3ad2`,
+3 leaves of 1000000 (1 USDC) each. The leaf list is not published; it stays in the sender's
+recovery file. Leaves 1 and 2 were made from placeholder emails, not Google accounts, so a
+real login cannot claim them.
 
 Sender USDC after: 14000000 (14 USDC).
 
