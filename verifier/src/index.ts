@@ -1,27 +1,45 @@
-import { TokenError, verifyGoogleIdToken } from './googleIdToken';
+import { undeployedChain } from './chain';
+import { importSigner, type Signer } from './claim';
+import { handleClaim } from './claimFlow';
 import { GOOGLE_JWKS_URL, remoteJwks } from './jwks';
 
 interface Env {
   GOOGLE_CLIENT_ID: string;
+  CONTRACT_ID: string;
+  CLAIM_ORIGINS: string; // comma-separated origins of the claim app
+  SIGNER_SEED: string; // secret: hex of the 32-byte ed25519 seed
 }
 
 // Release builds use Google's JWKS only; there is no env switch to another issuer.
 const jwks = remoteJwks(GOOGLE_JWKS_URL);
+let signer: Promise<Signer> | undefined;
 
-const json = (body: unknown, status: number) => Response.json(body, { status });
+function cors(req: Request, env: Env): Record<string, string> {
+  const origin = req.headers.get('Origin') ?? '';
+  const allowed = (env.CLAIM_ORIGINS ?? '').split(',').map((o) => o.trim()).filter(Boolean);
+  return allowed.includes(origin) ? { 'Access-Control-Allow-Origin': origin, Vary: 'Origin' } : { Vary: 'Origin' };
+}
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
-    if (req.method !== 'POST' || new URL(req.url).pathname !== '/claim') return json({ error: 'NOT_FOUND' }, 404);
-    const body = (await req.json().catch(() => null)) as { id_token?: unknown; destination?: unknown } | null;
-    if (typeof body?.id_token !== 'string' || typeof body.destination !== 'string') return json({ error: 'BAD_REQUEST' }, 400);
-    try {
-      await verifyGoogleIdToken(body.id_token, { clientId: env.GOOGLE_CLIENT_ID, destination: body.destination, jwks });
-    } catch (e) {
-      if (e instanceof TokenError) return json({ error: e.code }, 401);
-      throw e;
+    const headers = cors(req, env);
+    const json = (body: unknown, status: number) => Response.json(body, { status, headers });
+    if (new URL(req.url).pathname !== '/claim') return json({ error: 'NOT_FOUND' }, 404);
+    if (req.method === 'OPTIONS') {
+      return new Response(null, {
+        status: 204,
+        headers: { ...headers, 'Access-Control-Allow-Methods': 'POST', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Max-Age': '600' },
+      });
     }
-    // T4b: read get_network + get_campaign, check the deadline, recompute HMAC(salt, email), verify the proof, sign.
-    return json({ error: 'NOT_IMPLEMENTED' }, 501);
+    if (req.method !== 'POST') return json({ error: 'NOT_FOUND' }, 404);
+
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object') return json({ error: 'E108_INVALID_INPUT' }, 400);
+    if (!env.SIGNER_SEED || !env.CONTRACT_ID) return json({ error: 'VERIFIER_MISCONFIGURED' }, 500);
+    signer ??= importSigner(env.SIGNER_SEED);
+    const { status, body: out } = await handleClaim(body, {
+      clientId: env.GOOGLE_CLIENT_ID, contractId: env.CONTRACT_ID, jwks, chain: undeployedChain, signer: await signer,
+    });
+    return json(out, status); // never log the request: it carries the salt and the id_token
   },
 };

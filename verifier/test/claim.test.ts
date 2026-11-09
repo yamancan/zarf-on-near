@@ -13,8 +13,9 @@ const argsOf = (c: (typeof claims.valid)[number]) => ({
 describe('spec/vectors.json (v2)', () => {
   it('is not empty', () => {
     expect(recipients.length).toBeGreaterThanOrEqual(1);
-    expect(claims.valid.length).toBeGreaterThanOrEqual(3);
-    expect(claims.invalid.length).toBeGreaterThanOrEqual(1);
+    // Match the generator's counts so a dropped vector fails.
+    expect(claims.valid.length).toBeGreaterThanOrEqual(4);
+    expect(claims.invalid.length).toBeGreaterThanOrEqual(10);
     expect(vectors.rejected_emails.length).toBeGreaterThanOrEqual(1);
   });
 

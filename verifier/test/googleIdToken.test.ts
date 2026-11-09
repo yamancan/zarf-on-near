@@ -2,32 +2,15 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { destinationNonce } from '../src/claim';
 import { TokenError, verifyGoogleIdToken } from '../src/googleIdToken';
 import { remoteJwks } from '../src/jwks';
-
-// Self-signed RSA keys stand in for Google's: no network, no real tokens.
-const RSA = { name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: Uint8Array.of(1, 0, 1), hash: 'SHA-256' };
-const b64url = (b: Uint8Array | string) =>
-  btoa(String.fromCharCode(...(typeof b === 'string' ? new TextEncoder().encode(b) : b)))
-    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-
-interface Signer { kid: string; key: CryptoKey; jwk: JsonWebKey }
-async function signer(kid: string): Promise<Signer> {
-  const kp = await crypto.subtle.generateKey(RSA, true, ['sign', 'verify']);
-  return { kid, key: kp.privateKey, jwk: { ...(await crypto.subtle.exportKey('jwk', kp.publicKey)), kid, alg: 'RS256', use: 'sig' } as JsonWebKey };
-}
-async function sign(s: Signer, payload: object, header: object = { alg: 'RS256', kid: s.kid, typ: 'JWT' }) {
-  const input = `${b64url(JSON.stringify(header))}.${b64url(JSON.stringify(payload))}`;
-  const sig = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', s.key, new TextEncoder().encode(input));
-  return `${input}.${b64url(new Uint8Array(sig))}`;
-}
-const jwksResponse = (...signers: Signer[]) => new Response(JSON.stringify({ keys: signers.map((s) => s.jwk) }));
+import { b64url, jwksResponse, sign, testIssuer, type TestIssuer } from './jwtFixture';
 
 const NOW = 1_763_150_000_000;
 const CLIENT_ID = 'client-123.apps.googleusercontent.com';
 const DEST = 'alice.testnet';
 
-let google: Signer, other: Signer, claims: Record<string, unknown>;
+let google: TestIssuer, other: TestIssuer, claims: Record<string, unknown>;
 beforeAll(async () => {
-  [google, other] = await Promise.all([signer('k1'), signer('k2')]);
+  [google, other] = await Promise.all([testIssuer('k1'), testIssuer('k2')]);
   claims = {
     iss: 'https://accounts.google.com', aud: CLIENT_ID, sub: '1', exp: NOW / 1000 + 600, iat: NOW / 1000,
     email: 'Alice@Example.com', email_verified: true, nonce: await destinationNonce(DEST),

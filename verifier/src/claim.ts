@@ -95,3 +95,27 @@ export async function importSigner(seedHex: string): Promise<Signer> {
 
 export const signClaim = async (key: CryptoKey, args: ClaimArgs): Promise<string> =>
   hex(await crypto.subtle.sign('Ed25519', key, claimPayload(args)));
+
+// NEAR account id: 2-64 chars, lowercase alphanumerics joined by single '-', '_' or '.'.
+const ACCOUNT_ID = /^(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/;
+export const isValidAccountId = (id: string): boolean => id.length >= 2 && id.length <= 64 && ACCOUNT_ID.test(id);
+
+export const leafHash = (commitmentHex: string, amount: string) =>
+  sha256(concat(Uint8Array.of(0), unhex(commitmentHex, 32), uintLe(amount, 16)));
+
+/** Byte-wise lexicographic order, as spec/claim.md sorts node pairs. */
+function lessOrEqual(a: Uint8Array, b: Uint8Array): boolean {
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] < b[i];
+  return true;
+}
+
+const nodeHash = (a: Uint8Array, b: Uint8Array) =>
+  lessOrEqual(a, b) ? sha256(concat(Uint8Array.of(1), a, b)) : sha256(concat(Uint8Array.of(1), b, a));
+
+/** h = leaf; for s in proof: h = node(h, s); h == root. An empty proof is valid for a one-leaf tree. */
+export async function verifyMerkleProof(leaf: Uint8Array, proofHex: string[], rootHex: string): Promise<boolean> {
+  if (proofHex.length > 20) return false;
+  let h = leaf;
+  for (const s of proofHex) h = await nodeHash(h, unhex(s, 32));
+  return hex(h) === rootHex;
+}
