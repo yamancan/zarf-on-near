@@ -87,22 +87,26 @@ interface TxOutcome {
  * The tx's own status is on_claim's `()`, a success whether the transfer paid or reverted, so the
  * contract's NEP-297 event for this commitment decides.
  */
-export function claimEvent(o: TxOutcome, contractId: string, commitment: string): 'claim_paid' | 'claim_reverted' | null {
+type ClaimEvent = 'claim_started' | 'claim_paid' | 'claim_reverted';
+
+/** The latest of this commitment's claim events logged by our contract, in receipt order. */
+export function claimEvent(o: TxOutcome, contractId: string, commitment: string): ClaimEvent | null {
+  let found: ClaimEvent | null = null;
   for (const r of o.receipts_outcome ?? []) {
     if (r.outcome?.executor_id !== contractId) continue;
     for (const log of r.outcome.logs ?? []) {
       if (!log.startsWith('EVENT_JSON:')) continue;
       try {
         const e = JSON.parse(log.slice('EVENT_JSON:'.length));
-        if (e.standard === 'zarf-near' && (e.event === 'claim_paid' || e.event === 'claim_reverted') && e.data?.[0]?.commitment === commitment) {
-          return e.event;
+        if (e.standard === 'zarf-near' && ['claim_started', 'claim_paid', 'claim_reverted'].includes(e.event) && e.data?.[0]?.commitment === commitment) {
+          found = e.event;
         }
       } catch {
         // not our event
       }
     }
   }
-  return null;
+  return found;
 }
 
 const submitted = (hash: string): RelayResult => ({ status: 202, body: { tx_hash: hash, status: 'submitted' } });
@@ -142,25 +146,28 @@ async function submit(args: Uint8Array, d: RelayDeps, retryNonce: boolean): Prom
     if (detail.includes('TIMEOUT_ERROR')) return submitted(hash); // sent; the app follows claim_state
     throw e;
   }
+  const { commitment } = JSON.parse(new TextDecoder().decode(args)) as { commitment: string };
+  const event = claimEvent(outcome, d.contractId, commitment);
   if (outcome.status?.Failure) {
+    // claim_started was logged, so the claim went pending before a later receipt failed (a stranded
+    // callback): the outcome is unknown, not refused.
+    if (event === 'claim_started') return submitted(hash);
     const code = /E1\d\d_[A-Z_]+/.exec(JSON.stringify(outcome.status.Failure))?.[0] ?? 'CLAIM_TX_FAILED';
     return { status: 409, body: { error: code, tx_hash: hash } };
   }
-  const { commitment } = JSON.parse(new TextDecoder().decode(args)) as { commitment: string };
-  const event = claimEvent(outcome, d.contractId, commitment);
   if (event === 'claim_paid') return { status: 200, body: { tx_hash: hash, status: 'paid' } };
   if (event === 'claim_reverted') return { status: 409, body: { error: 'E115_TOKEN_TRANSFER_FAILED', tx_hash: hash } };
   return submitted(hash);
 }
 
 /** GET /health: numbers only, for monitoring the relayer key and account. */
-export async function handleHealth(d: Pick<RelayDeps, 'rpc' | 'relayerAccountId' | 'key' | 'perIp'>, ip: string): Promise<RelayResult> {
+export async function handleHealth(d: Pick<RelayDeps, 'rpc' | 'relayerAccountId' | 'key' | 'perIp' | 'contractId'>, ip: string): Promise<RelayResult> {
   if (!(await d.perIp.limit({ key: ip })).success) return refuse(429, 'RATE_LIMITED');
   try {
     const [ak, account] = await Promise.all([viewAccessKey(d.rpc, d.relayerAccountId, d.key.publicKeyStr), viewAccount(d.rpc, d.relayerAccountId)]);
     const fc = ak.permission === 'FullAccess' ? null : ak.permission.FunctionCall;
     // allowance null = unlimited (still claim-only); balance in yoctoNEAR
-    return { status: 200, body: { allowance: fc ? fc.allowance : null, balance: account.amount, claim_only: !!fc && fc.method_names.join() === 'claim' } };
+    return { status: 200, body: { allowance: fc ? fc.allowance : null, balance: account.amount, claim_only: !!fc && fc.receiver_id === d.contractId && fc.method_names.join() === 'claim' } };
   } catch (e) {
     if (!(e instanceof RpcError)) throw e;
     console.log('rpc_unavailable');

@@ -16,6 +16,17 @@ const req = (method: string, e = env, path = '/claim') =>
   worker.fetch(new Request(`https://r.test${path}`, { method, body: method === 'POST' ? '{}' : undefined, headers: { Origin: 'https://claim.example' } }), e);
 
 describe('relayer worker', () => {
+  it('a rejected key parse is not cached: the next request with a good key gets past the gate', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const bad = await req('POST', { ...env, RELAYER_KEY: MISMATCHED_KEY });
+    expect(await bad.json()).toEqual({ error: 'RELAYER_MISCONFIGURED' });
+    const good = await req('POST', env); // body '{}' -> refused by shape, after the key gate
+    expect(await good.json()).toEqual({ error: 'E108_INVALID_INPUT' });
+    const badAgain = await req('POST', { ...env, RELAYER_KEY: MISMATCHED_KEY }); // a cached good key is not reused for another secret
+    expect(await badAgain.json()).toEqual({ error: 'RELAYER_MISCONFIGURED' });
+    log.mockRestore();
+  });
+
   it('404s other routes and methods', async () => {
     expect((await req('POST', env, '/x')).status).toBe(404);
     expect((await req('POST', env, '/health')).status).toBe(404);

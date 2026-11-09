@@ -15,6 +15,7 @@ interface Env {
 }
 
 let key: Promise<NearKey> | undefined;
+let keySecret: string | undefined; // the secret `key` was parsed from
 const list = (s: string | undefined) => (s ?? '').split(',').map((x) => x.trim()).filter(Boolean);
 
 function cors(req: Request, env: Env): Record<string, string> {
@@ -39,13 +40,16 @@ export default {
       return json({ error: 'RELAYER_MISCONFIGURED' }, 500);
     }
     // A key whose public half does not match its seed fails here every time; never cache the rejection.
-    key ??= parseNearKey(env.RELAYER_KEY).catch((e) => {
-      key = undefined;
-      throw e;
-    });
+    if (keySecret !== env.RELAYER_KEY) {
+      keySecret = env.RELAYER_KEY;
+      key = parseNearKey(env.RELAYER_KEY).catch((e) => {
+        key = keySecret = undefined; // never cache a rejection
+        throw e;
+      });
+    }
     let k: NearKey;
     try {
-      k = await key;
+      k = await key!; // set just above whenever the secret changed
     } catch {
       console.log('misconfigured');
       return json({ error: 'RELAYER_MISCONFIGURED' }, 500);
@@ -53,7 +57,7 @@ export default {
     const ip = req.headers.get('CF-Connecting-IP') ?? 'unknown';
     const rpc = httpRpc(env.NEAR_RPC_URL);
     if (path === '/health') {
-      const { status, body } = await handleHealth({ rpc, relayerAccountId: env.RELAYER_ACCOUNT_ID, key: k, perIp: env.PER_IP }, ip);
+      const { status, body } = await handleHealth({ rpc, relayerAccountId: env.RELAYER_ACCOUNT_ID, key: k, perIp: env.PER_IP, contractId: env.CONTRACT_ID }, ip);
       return json(body, status);
     }
     const body = await req.json().catch(() => null);

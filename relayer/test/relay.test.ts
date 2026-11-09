@@ -167,6 +167,17 @@ describe('handleRelay', () => {
     expect(res).toEqual({ status: 202, body: { tx_hash: expect.any(String), status: 'submitted' } });
   });
 
+  it('a Failure after this claim_started (stranded callback) is 202 submitted, not a refusal', async () => {
+    const failure = { ActionError: { index: 0, kind: { FunctionCallError: { ExecutionError: 'Exceeded the prepaid gas.' } } } };
+    const s = stubRpc({ send: () => ({ status: { Failure: failure }, receipts_outcome: [event('claim_started')] }) });
+    expect(await handleRelay({ ...valid }, 'ip', deps({ rpc: s.rpc }))).toEqual({ status: 202, body: { tx_hash: expect.any(String), status: 'submitted' } });
+  });
+  it('a Failure with claim_started for another commitment is still a refusal', async () => {
+    const failure = { ActionError: { kind: { FunctionCallError: { ExecutionError: 'Smart contract panicked: E105_ALREADY_CLAIMED' } } } };
+    const s = stubRpc({ send: () => ({ status: { Failure: failure }, receipts_outcome: [event('claim_started', '00'.repeat(32))] }) });
+    expect((await handleRelay({ ...valid }, 'ip', deps({ rpc: s.rpc }))).body.error).toBe('E105_ALREADY_CLAIMED');
+  });
+
   it('a reverted transfer (claim_reverted) is 409 E115, not paid, although the tx status is a success', async () => {
     const s = stubRpc({ send: () => executed(event('claim_started'), event('claim_reverted')) });
     expect(await handleRelay({ ...valid }, 'ip', deps({ rpc: s.rpc }))).toEqual({ status: 409, body: { error: 'E115_TOKEN_TRANSFER_FAILED', tx_hash: expect.any(String) } });
@@ -199,15 +210,19 @@ describe('handleRelay', () => {
 describe('handleHealth', () => {
   it('reports allowance (null = unlimited), balance and whether the key is claim-only: numbers only', async () => {
     const s = stubRpc();
-    expect(await handleHealth({ rpc: s.rpc, relayerAccountId: 'relayer.testnet', key, perIp: allow }, 'ip')).toEqual({
+    expect(await handleHealth({ rpc: s.rpc, relayerAccountId: 'relayer.testnet', key, perIp: allow, contractId: context.contract_id }, 'ip')).toEqual({
       status: 200, body: { allowance: null, balance: '4200000000000000000000000', claim_only: true },
     });
   });
   it('flags a full-access key', async () => {
     const s = stubRpc({ permission: 'FullAccess' });
-    expect((await handleHealth({ rpc: s.rpc, relayerAccountId: 'relayer.testnet', key, perIp: allow }, 'ip')).body.claim_only).toBe(false);
+    expect((await handleHealth({ rpc: s.rpc, relayerAccountId: 'relayer.testnet', key, perIp: allow, contractId: context.contract_id }, 'ip')).body.claim_only).toBe(false);
+  });
+  it('flags a claim-only key for another contract', async () => {
+    const s = stubRpc({ permission: { FunctionCall: { ...fcKey.FunctionCall, receiver_id: 'evil.testnet' } } });
+    expect((await handleHealth({ rpc: s.rpc, relayerAccountId: 'relayer.testnet', key, perIp: allow, contractId: context.contract_id }, 'ip')).body.claim_only).toBe(false);
   });
   it('is rate-limited per IP', async () => {
-    expect((await handleHealth({ rpc: stubRpc().rpc, relayerAccountId: 'r', key, perIp: deny }, 'ip')).status).toBe(429);
+    expect((await handleHealth({ rpc: stubRpc().rpc, relayerAccountId: 'r', key, perIp: deny, contractId: 'c' }, 'ip')).status).toBe(429);
   });
 });

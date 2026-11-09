@@ -2,7 +2,7 @@ import { KeyPair, KeyPairEd25519, PublicKey } from '@near-js/crypto';
 import { actionCreators, createTransaction, encodeTransaction, Signature, SignedTransaction } from '@near-js/transactions';
 import { describe, expect, it } from 'vitest';
 import vectors from '../../spec/vectors.json';
-import { base58Decode, base58Encode, encodeTx, parseNearKey, signTx } from '../src/near';
+import { base58Decode, base58Encode, encodeTx, isNearSecretKey, parseNearKey, signTx } from '../src/near';
 
 // A throwaway key built from the spec's test seed: seed || pub, as NEAR CLI writes it.
 const unhex = (s: string) => Uint8Array.from(s.match(/../g)!, (x) => parseInt(x, 16));
@@ -34,6 +34,15 @@ describe('transaction encoding (oracle: @near-js/transactions)', () => {
     expect(ours.signed).toEqual(new Uint8Array(refSigned));
     expect(ours.hash).toBe(base58Encode(digest));
   });
+});
+
+describe('isNearSecretKey (the RELAYER_MISCONFIGURED gate)', () => {
+  it('accepts ed25519:<base58 of 64 bytes>', () => expect(isNearSecretKey(SECRET)).toBe(true));
+  it.each([
+    ['undefined', undefined], ['empty', ''], ['no prefix', SECRET.slice(8)], ['secp256k1 prefix', `secp256k1:${SECRET.slice(8)}`],
+    ['32 bytes', `ed25519:${base58Encode(unhex(vectors.keys.signer_seed))}`], ['65 bytes', `ed25519:${base58Encode(unhex(vectors.keys.signer_seed + vectors.keys.signer + '00'))}`],
+    ['non-base58 characters', `ed25519:${SECRET.slice(8, -1)}0`],
+  ])('rejects %s', (_, s) => expect(isNearSecretKey(s)).toBe(false));
 });
 
 describe('parseNearKey', () => {
