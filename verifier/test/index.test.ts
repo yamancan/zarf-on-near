@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import vectors from '../../spec/vectors.json';
 import worker from '../src/index';
 
@@ -41,9 +41,25 @@ describe('worker', () => {
     expect(await res.json()).toEqual({ error: 'BAD_DESTINATION' });
   });
 
-  it('500s, without signing, when the signer seed or contract id is missing', async () => {
-    const res = await req('POST', '{"id_token":"a.b"}', undefined, '/claim', { ...env, SIGNER_SEED: '' });
+  it.each(['SIGNER_SEED', 'CONTRACT_ID', 'GOOGLE_CLIENT_ID'])('500s, without signing, when %s is missing', async (k) => {
+    const res = await req('POST', '{"id_token":"a.b"}', undefined, '/claim', { ...env, [k]: '' });
     expect(res.status).toBe(500);
     expect(await res.json()).toEqual({ error: 'VERIFIER_MISCONFIGURED' });
+  });
+
+  it('503s with CORS, signing nothing, when an upstream read fails', async () => {
+    vi.stubGlobal('fetch', async () => new Response('down', { status: 503 })); // Google's JWKS is unreachable
+    try {
+      const v = vectors.claims.valid[0].call_args;
+      const enc = (o: object) => btoa(JSON.stringify(o)).replace(/=+$/, '');
+      const token = `${enc({ alg: 'RS256', kid: 'k1' })}.${enc({})}.AAAA`;
+      const body = { id_token: token, campaign_id: v.campaign_id, commitment: v.commitment, amount: v.amount, proof: v.proof, destination: v.destination, salt: '00'.repeat(32) };
+      const res = await req('POST', JSON.stringify(body));
+      expect(res.status).toBe(503);
+      expect(await res.json()).toEqual({ error: 'UPSTREAM_UNAVAILABLE' });
+      expect(res.headers.get('Access-Control-Allow-Origin')).toBe('https://claim.example');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

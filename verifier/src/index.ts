@@ -35,11 +35,17 @@ export default {
 
     const body = await req.json().catch(() => null);
     if (!body || typeof body !== 'object') return json({ error: 'E108_INVALID_INPUT' }, 400);
-    if (!env.SIGNER_SEED || !env.CONTRACT_ID) return json({ error: 'VERIFIER_MISCONFIGURED' }, 500);
+    if (!env.SIGNER_SEED || !env.CONTRACT_ID || !env.GOOGLE_CLIENT_ID) return json({ error: 'VERIFIER_MISCONFIGURED' }, 500);
     signer ??= importSigner(env.SIGNER_SEED);
-    const { status, body: out } = await handleClaim(body, {
-      clientId: env.GOOGLE_CLIENT_ID, contractId: env.CONTRACT_ID, jwks, chain: undeployedChain, signer: await signer,
-    });
-    return json(out, status); // never log the request: it carries the salt and the id_token
+    try {
+      const { status, body: out } = await handleClaim(body, {
+        clientId: env.GOOGLE_CLIENT_ID, contractId: env.CONTRACT_ID, jwks, chain: undeployedChain, signer: await signer,
+      });
+      return json(out, status);
+    } catch {
+      // Google's JWKS or the chain read failed. Nothing was signed; keep CORS so the app can say so.
+      // Never log the request or the error's context: it carries the salt and the id_token.
+      return json({ error: 'UPSTREAM_UNAVAILABLE' }, 503);
+    }
   },
 };
