@@ -269,3 +269,39 @@ After: `view_access_key_list` = `[]`; `get_config` unchanged; `claim_state` leaf
 = unclaimed; campaign 0 balance 1000000 (was 2000000), in_flight 0, storage_reserved 0.00231 NEAR (one
 claim left); campaign 1 (faucet) unchanged at 1000000; escrow USDC 2000000 = the sum of both
 campaigns; destination USDC 1000000.
+
+### Check it yourself by RPC (no explorer needed)
+
+nearblocks answers non-browser requests with 403. These lines ask FastNEAR's public testnet RPC
+directly (`curl` and `jq`); each expected output is the line under it.
+
+The 0.1.2 claim paid out (`Cmi5X9Xy…`):
+
+```bash
+curl -s https://test.rpc.fastnear.com -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tx","params":{"tx_hash":"Cmi5X9XyiQjSfhJDahWz6TvZKSjkVX5MKjFqAYS7m7Zt","sender_account_id":"zarf-near-relayer-1111.testnet","wait_until":"FINAL"}}' | jq -c '[.result.receipts_outcome[].outcome.logs[] | select(test("claim_paid")) | ltrimstr("EVENT_JSON:") | fromjson | .data[0] | {campaign_id, amount, destination}]'
+# [{"campaign_id":"0","amount":"1000000","destination":"zarf-near-dest3-1112.testnet"}]
+```
+
+The same claim again was refused (`FLmmkbCQ…`):
+
+```bash
+curl -s https://test.rpc.fastnear.com -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tx","params":{"tx_hash":"FLmmkbCQckFQWK9CEKxmxrtMrf2XLB28qR2guPnk6RFL","sender_account_id":"zarf-near-relayer-1111.testnet","wait_until":"FINAL"}}' | jq -c '.result.status.Failure.ActionError.kind.FunctionCallError.ExecutionError'
+# "Smart contract panicked: E105_ALREADY_CLAIMED"
+```
+
+The contract's view agrees (`claim_state` of that commitment; the args are base64 of
+`{"campaign_id":"0","commitment":"80a0163b…f2d48a"}`):
+
+```bash
+curl -s https://test.rpc.fastnear.com -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"query","params":{"request_type":"call_function","finality":"final","account_id":"zarf-near-1112.testnet","method_name":"claim_state","args_base64":"eyJjYW1wYWlnbl9pZCI6IjAiLCJjb21taXRtZW50IjoiODBhMDE2M2JmYmIzZGE1OWNlNjY3YjZlZGE3M2QyZjM3NjY2OTQ2MmY2ZDQ4YmM5MTUyNzQ4OTg3OGYyZDQ4YSJ9"}}' | jq -r '.result.result | implode'
+# "claimed"
+```
+
+Nobody holds a key to the escrow, and its code is 0.1.2:
+
+```bash
+curl -s https://test.rpc.fastnear.com -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"query","params":{"request_type":"view_access_key_list","finality":"final","account_id":"zarf-near-1112.testnet"}}' | jq -c '.result.keys'
+# []
+curl -s https://test.rpc.fastnear.com -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"query","params":{"request_type":"view_code","finality":"final","account_id":"zarf-near-1112.testnet"}}' | jq -r '.result.hash'
+# 5GdxDSB4sGW9Ewod4Q4Na613C2sLQjVfFjLbbZbKt6N8
+```
