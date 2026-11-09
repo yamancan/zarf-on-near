@@ -224,15 +224,26 @@ if [[ -n ${RELAYER_ID:-} ]]; then
     for (; m > 0n; m /= 58n) out.unshift(A[Number(m % 58n)]);
     for (const x of pub) { if (x) break; out.unshift("1"); } // base58 keeps leading zero bytes as "1"
     process.stdout.write("ed25519:" + out.join(""));' "$RELAYER_KEY_FILE")
-  if [[ ${DRY_RUN:-} != 1 ]] && curl -sSf "$RPC" -H 'content-type: application/json' -d "$(jq -nc \
+  # Resumed run: skip only an exact claim-only key. An empty method_names means every method.
+  existing=""
+  if [[ ${DRY_RUN:-} != 1 ]]; then
+    existing=$(curl -sSf "$RPC" -H 'content-type: application/json' -d "$(jq -nc \
       --arg a "$RELAYER_ID" --arg k "$relayer_pub" \
       '{jsonrpc:"2.0",id:1,method:"query",params:{request_type:"view_access_key",finality:"final",account_id:$a,public_key:$k}}')" |
-      jq -e --arg c "$CONTRACT_ID" '.result.permission.FunctionCall.receiver_id == $c' >/dev/null; then
-    echo "relayer key already present (resumed run)"
-  else
+      jq -c '.result.permission // empty') || existing=""
+  fi
+  if [[ -z $existing ]]; then
     run near account add-key "$RELAYER_ID" grant-function-call-access --allowance unlimited \
       --contract-account-id "$CONTRACT_ID" --function-names claim \
       use-manually-provided-public-key "$relayer_pub" network-config "$NETWORK" sign-with-legacy-keychain send
+  elif jq -e --arg c "$CONTRACT_ID" '.FunctionCall.receiver_id == $c and .FunctionCall.method_names == ["claim"]' \
+      <<<"$existing" >/dev/null 2>&1; then
+    echo "relayer key already present (resumed run)"
+  else
+    echo "relayer key $relayer_pub is already on $RELAYER_ID with another permission: $existing" >&2
+    echo "delete it (near account delete-keys $RELAYER_ID public-keys $relayer_pub ...) and rerun" >&2
+    on_fail
+    exit 65
   fi
   echo "relayer public key: $relayer_pub"
 fi
