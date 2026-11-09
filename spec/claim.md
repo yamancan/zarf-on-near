@@ -34,7 +34,8 @@ commitment_i    = HMAC-SHA256(key = salt_i, msg = canonical_email)      // 32 by
   is not ASCII after trimming, including a CSV BOM. No dot/plus folding: the CSV must hold
   the address Google returns in `email`.
 - The same email may appear twice. Different salts give different commitments, so each row
-  is a separate allocation.
+  is a separate allocation. The create app refuses a repeated email anyway ("same email as
+  line N"), as Zarf does: a repeat is almost always a paste mistake that would pay twice.
 - **The claim link carries everything the recipient needs, in the fragment:**
   `https://<claim-host>/claim/<campaign_id>/<commitment>#s=<salt_hex>&a=<amount>&p=<proof>`
   - `s`: the 32-byte salt, 64 lowercase hex.
