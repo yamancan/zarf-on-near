@@ -12,12 +12,23 @@ const CLIENT_ID = 'client-123';
 const named = claims.valid.find((c) => c.name === 'named-account')!;
 const alice = campaigns.main.recipients.find((r) => r.commitment === named.call_args.commitment)!;
 
-const chain = (over: Partial<{ network: string; root: string; deadline: string; missing: boolean }> = {}): ChainReader => ({
+type ChainOver = Partial<{
+  network: string; root: string; deadline: string; missing: boolean; balance: string;
+  policy: 'owner' | 'attested'; snapshot: string[]; state: 'unclaimed' | 'pending' | 'claimed';
+}>;
+const chain = (over: ChainOver = {}): ChainReader => ({
   getNetwork: async () => over.network ?? context.network,
   getCampaign: async (id) =>
     over.missing || id !== campaigns.main.campaign_id
       ? null
-      : { merkle_root: over.root ?? campaigns.main.merkle_root, deadline_ns: over.deadline ?? context.deadline_ns },
+      : {
+          merkle_root: over.root ?? campaigns.main.merkle_root,
+          deadline_ns: over.deadline ?? context.deadline_ns,
+          balance: over.balance ?? '1000000000',
+          policy: over.policy ?? 'owner',
+          snapshot: over.snapshot ?? [keys.signer],
+        },
+  claimState: async () => over.state ?? 'unclaimed',
 });
 
 let google: TestIssuer, signer: Signer, deps: ClaimDeps;
@@ -97,6 +108,11 @@ describe('handleClaim', () => {
     ['another email', 403, 'COMMITMENT_MISMATCH', async () => request({ id_token: await token({ email: 'mallory@example.com' }) })],
     ['amount not in the tree', 403, 'E102_INVALID_MERKLE_PROOF', () => request({ amount: '99' })],
     ['root from chain differs', 403, 'E102_INVALID_MERKLE_PROOF', () => request(), { chain: chain({ root: '00'.repeat(32) }) }],
+    ['already claimed', 409, 'E105_ALREADY_CLAIMED', () => request(), { chain: chain({ state: 'claimed' }) }],
+    ['transfer in flight', 409, 'E123_CLAIM_PENDING', () => request(), { chain: chain({ state: 'pending' }) }],
+    ['our signer not in the owner snapshot', 403, 'E101_INVALID_SIGNATURE', () => request(), { chain: chain({ snapshot: [keys.rogue_signer] }) }],
+    ['attested campaign, no measurement id (Mode W)', 403, 'E101_INVALID_SIGNATURE', () => request(), { chain: chain({ policy: 'attested', snapshot: ['ab'.repeat(32)] }) }],
+    ['balance below amount', 409, 'E129_INSUFFICIENT_BALANCE', () => request(), { chain: chain({ balance: (BigInt(named.call_args.amount) - 1n).toString() }) }],
   ])('refuses %s', async (_, status, error, make, over) => {
     expect(await handleClaim(await make(), { ...deps, ...over })).toEqual({ status, body: { error } });
   });
@@ -118,6 +134,17 @@ describe('handleClaim', () => {
     }
   });
 
+  it('signs for an attested campaign when our measurement id is in its snapshot', async () => {
+    const m = 'ab'.repeat(32);
+    const res = await handleClaim(await request(), { ...deps, measurementId: m, chain: chain({ policy: 'attested', snapshot: [m] }) });
+    expect(res).toEqual({ status: 200, body: named.call_args });
+  });
+
+  it('accepts a balance exactly equal to the amount', async () => {
+    const res = await handleClaim(await request(), { ...deps, chain: chain({ balance: named.call_args.amount }) });
+    expect(res.status).toBe(200);
+  });
+
   it('accepts a claim exactly at the deadline (claim iff now <= deadline)', async () => {
     const res = await handleClaim(await request(), { ...deps, chain: chain({ deadline: context.now_ns }) });
     expect(res.status).toBe(200);
@@ -130,7 +157,7 @@ describe('handleClaim', () => {
   });
 
   it('fails closed when the chain read fails', async () => {
-    const broken: ChainReader = { getNetwork: () => Promise.reject(new Error('rpc down')), getCampaign: async () => null };
+    const broken: ChainReader = { ...chain(), getNetwork: () => Promise.reject(new Error('rpc down')) };
     await expect(handleClaim(await request(), { ...deps, chain: broken })).rejects.toThrow('rpc down');
   });
 });

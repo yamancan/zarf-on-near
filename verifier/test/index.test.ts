@@ -23,6 +23,13 @@ describe('worker', () => {
     expect((await req('OPTIONS', undefined, 'https://evil.example')).headers.get('Access-Control-Allow-Origin')).toBeNull();
   });
 
+  it('allows no origin when CLAIM_ORIGINS is unset', async () => {
+    const { CLAIM_ORIGINS: _, ...unset } = env;
+    const res = await req('OPTIONS', undefined, 'http://localhost:5173', '/claim', unset as typeof env);
+    expect(res.status).toBe(204);
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBeNull();
+  });
+
   it('adds CORS to error responses too, so the app can read them', async () => {
     const res = await req('POST', 'not json', 'http://localhost:5173');
     expect(res.status).toBe(400);

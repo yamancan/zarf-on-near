@@ -11,6 +11,7 @@ export interface ClaimDeps {
   jwks: JwksSource;
   chain: ChainReader;
   signer: Signer;
+  measurementId?: string; // Mode T only: this agent's approved measurement id
   nowMs?: number;
 }
 
@@ -46,15 +47,24 @@ export async function handleClaim(input: unknown, d: ClaimDeps): Promise<ClaimRe
     throw e;
   }
 
-  const [network, campaign] = await Promise.all([d.chain.getNetwork(), d.chain.getCampaign(campaign_id)]);
+  // Contract check order (spec/claim.md), so the verifier never signs a claim the contract would refuse.
+  const [network, campaign, state] = await Promise.all([
+    d.chain.getNetwork(), d.chain.getCampaign(campaign_id), d.chain.claimState(campaign_id, c),
+  ]);
   if (!campaign) return refuse(404, 'E110_UNKNOWN_CAMPAIGN');
   const nowNs = BigInt(Math.floor(nowMs)) * 1_000_000n;
   if (nowNs > BigInt(campaign.deadline_ns)) return refuse(409, 'E125_CAMPAIGN_ENDED');
+  if (state === 'claimed') return refuse(409, 'E105_ALREADY_CLAIMED');
+  if (state === 'pending') return refuse(409, 'E123_CLAIM_PENDING');
   // The salt proves which allocation this email opens; a wrong salt or another person's link fails here.
   if (hex(await commitment(unhex(salt, 32), email)) !== c) return refuse(403, 'COMMITMENT_MISMATCH');
   if (!(await verifyMerkleProof(await leafHash(c, amount), proof as string[], campaign.merkle_root))) {
     return refuse(403, 'E102_INVALID_MERKLE_PROOF');
   }
+  // Our key must be one this campaign accepts: our signer (owner policy) or our measurement (attested).
+  const allowedAs = campaign.policy === 'owner' ? d.signer.signer : d.measurementId;
+  if (!allowedAs || !campaign.snapshot.includes(allowedAs)) return refuse(403, 'E101_INVALID_SIGNATURE');
+  if (BigInt(campaign.balance) < BigInt(amount)) return refuse(409, 'E129_INSUFFICIENT_BALANCE');
 
   const expires_at_ns = (nowNs + SIGNATURE_TTL_NS).toString();
   const signature = await signClaim(d.signer.key, {
