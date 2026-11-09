@@ -75,8 +75,15 @@ No secrets and no Google login are needed. Node 24 and pnpm 10.30.3 (pinned in e
 `package.json` as `packageManager`); `pnpm install` needs network access.
 
 ```sh
-make test   # verifier, relayer and web: tests, type checks, build; then the contract's tests
+make test   # verifier, relayer, web and the demo harness: tests, type checks, build; then the contract's tests
 make demo   # the claim flow end to end
+```
+
+`make test` keeps going after a failure and ends with one summary line; it exits 1 only if
+something that ran failed. Expected on a machine without the Rust toolchain:
+
+```text
+SUMMARY: verifier ✓ relayer ✓ web ✓ scripts ✓ contract NOT RUN (cargo missing)
 ```
 
 `make test` runs the contract's tests (`contract/Makefile`: unit, then near-workspaces
@@ -106,7 +113,7 @@ includes it and rejects its tokens (`verifier/test/demo.test.ts`).
 | The relayer can only call `claim`, never with a deposit, and refuses claims our verifier did not sign | `relayer/test/relay.test.ts`, `relayer/test/near.test.ts` (transaction bytes checked against `@near-js/transactions`) |
 | A reverted transfer is never shown as paid | `relayer/test/relay.test.ts` (`claim_reverted`), `web/src/lib/services.test.ts` (`settleClaim`) |
 | A draft can be funded at most once: (sender, merkle_root) is an idempotency key (E132), and after a lost wallet response the app checks `campaign_by_root` before any resend | `web/src/lib/create/create.test.ts` (`fundCampaign`, `resolveByRoot`); contract test `duplicate_root_is_e132_and_changes_nothing` (**TODO**: path once `contract/` lands) |
-| Funds never stay stuck in `pending`; reclaim excludes in-flight funds | **TODO (T3)** contract tests |
+| A claim whose callback fails stays pending until the owner's `resolve_pending` (after 1 h); `reclaim` never touches in-flight funds | **TODO (T3)** contract tests |
 | A real claim on testnet | **TODO:** tx hash |
 | A cross-chain claim through NEAR Intents lands on Base | **TODO (T9):** tx hashes |
 
@@ -134,6 +141,7 @@ History: [hackathon-submission](https://github.com/yamancan/zarf-on-near/tree/ha
 | web | `@sveltejs/kit`, `svelte`, `vite`, `@sveltejs/adapter-cloudflare` | apps |
 | web (create only) | `@near-wallet-selector/core` + `@near-wallet-selector/my-near-wallet` 10.1.4, `@near-js/transactions` 2.5.1, `buffer` 6.0.3 | sender wallet (MyNearWallet popup) |
 | all | `typescript`, `vitest`, `wrangler`, `svelte-check` | build and tests |
+| verifier (tests only) | `@types/node` 24 | builds the release and demo bundles in a test, to check what each contains |
 | contract | **TODO (T2)** | `near-sdk`, `cargo-near`, `near-workspaces` versions |
 
 AI assistance: this code was written with Claude Code agents (implementation and review), with

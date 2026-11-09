@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import vectors from '../../spec/vectors.json';
 import worker from '../src/index';
 import { base58Encode } from '../src/near';
@@ -14,6 +14,9 @@ const env = {
 };
 const req = (method: string, e = env, path = '/claim') =>
   worker.fetch(new Request(`https://r.test${path}`, { method, body: method === 'POST' ? '{}' : undefined, headers: { Origin: 'https://claim.example' } }), e);
+
+beforeEach(() => void vi.spyOn(console, 'log').mockImplementation(() => {}));
+afterEach(() => vi.restoreAllMocks());
 
 describe('relayer worker', () => {
   it('a rejected key parse is not cached: the next request with a good key gets past the gate', async () => {

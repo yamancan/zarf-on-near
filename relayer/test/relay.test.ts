@@ -1,5 +1,5 @@
 import { decodeSignedTransaction } from '@near-js/transactions';
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import vectors from '../../spec/vectors.json';
 import { base58Encode, parseNearKey, type NearKey } from '../src/near';
 import { handleHealth, handleRelay, resetNonce, type RateLimiter, type RelayDeps } from '../src/relay';
@@ -59,7 +59,12 @@ beforeAll(async () => {
   // Any well-formed key works for the relayer itself; reuse the spec's test seed.
   key = await parseNearKey(`ed25519:${base58Encode(unhex(keys.signer_seed + keys.signer))}`);
 });
-beforeEach(() => resetNonce());
+// The relayer logs fixed tags (misconfigured, rpc_unavailable, nonce_retry); keep test output clean.
+beforeEach(() => {
+  resetNonce();
+  vi.spyOn(console, 'log').mockImplementation(() => {});
+});
+afterEach(() => vi.restoreAllMocks());
 
 describe('handleRelay', () => {
   it('submits claim with a function-call tx: our contract, method claim, exact args, required gas, zero deposit', async () => {
