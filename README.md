@@ -69,19 +69,29 @@ small NEAR drip.
 | Create app | `web/src/routes/create` | CSV → salts, commitments, tree; storage pre-pay + one `ft_transfer_call`; claim links and the public leaf list |
 | Claim app | `web/src/routes/claim` | Destination (existing account or an in-browser implicit account), Google sign-in, verifier → relayer; the receipt trusts the relayer's event-based 200 (`claim_paid`) and polls `claim_state` only on a 202 |
 
-## Run the tests
+## Run it
 
 No secrets and no Google login are needed. Node 24 and pnpm 10.30.3 (pinned in each
-`package.json` as `packageManager`); `pnpm install` needs network access:
+`package.json` as `packageManager`); `pnpm install` needs network access.
 
 ```sh
-(cd verifier && pnpm install && pnpm test && pnpm typecheck)
-(cd relayer  && pnpm install && pnpm test && pnpm typecheck)
-(cd web      && pnpm install && pnpm test && pnpm check && pnpm build)
+make test   # verifier, relayer and web: tests, type checks, build; then the contract's tests
+make demo   # the claim flow end to end
 ```
 
-**TODO (T8):** `make test` runs all of the above plus the contract's tests; `make demo` runs the
-full flow in a local sandbox with a test-only OIDC issuer.
+`make test` runs the contract's tests (`contract/Makefile`: unit, then near-workspaces
+integration) when `cargo` is installed, and prints `SKIP contract: …` with the reason otherwise.
+
+`make demo` starts the verifier and the relayer locally and plays one recipient's claim: a sign-in
+token, the verifier's checks and signature, the relayer's `claim` transaction, then it asserts
+`claim_state == "claimed"`. The demo verifier is a separate build (`verifier/src/demo.ts`) whose
+token issuer is generated in memory at startup in place of Google; the release verifier never
+includes it and rejects its tokens (`verifier/test/demo.test.ts`).
+
+- With `NEAR_RPC_URL` and the other variables listed at the top of `scripts/demo.mjs`, it runs
+  against a NEAR sandbox with the deployed contract and a seeded campaign.
+- Without them it runs `--dry`: a mocked NEAR RPC stands in for the chain, so the TypeScript side
+  runs end to end but the contract does not. The output says so.
 
 ## Claim → evidence
 
