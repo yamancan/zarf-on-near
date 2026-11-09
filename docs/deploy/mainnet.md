@@ -2,6 +2,59 @@
 
 Public data only. Nothing here has been executed. The owner provides the mainnet accounts.
 
+## Joint runbook: escrow, hosting, cross-chain demo (owner approved 2026-11-12; not run yet)
+
+Agreed between coding-agent (escrow, `scripts/deploy.sh`) and web-agent (keys and hosting,
+`scripts/mainnet-keys.mjs`, `scripts/deploy-mainnet-hosting.sh`, `docs/deploy/mainnet-hosting.md`).
+Nothing starts until step 0 is complete.
+
+**What is deployed.** Contract 0.1.2: the reviewed `contract/` tree (later commits change only scripts and docs). Release wasm 316,408 B, sha256 `3f703dd7808b25b990dd8623f3603b47a5325ec139e5186344da00f308493bd5`,
+**code hash `5GdxDSB4sGW9Ewod4Q4Na613C2sLQjVfFjLbbZbKt6N8`**: the same as testnet `zarf-near-1112.testnet`,
+rebuilt on the deploy host with the same result. If `deploy.sh` builds a different hash,
+stop. Hosting is the reviewed web build (or the reviewed head at the time).
+
+| # | Who | Step | Done when |
+| --- | --- | --- | --- |
+| 0a | owner | Fund `<owner>.near` with ≈ 5.2 NEAR (the table below plus ≈ 0.05 NEAR demo prepay) and ≥ 3 mainnet USDC (`17208628…`) for the demo | balance visible on nearblocks |
+| 0b | second person | Create `<guardian>.near` with 0.1 NEAR in their own wallet; send only the name | name received |
+| 0c | owner | In **their own SSH terminal**: `near account import-account` → using-seed-phrase → `<owner>.near` → mainnet → legacy keychain | `~/.near-credentials/mainnet/<owner>.near.json` exists |
+| 0d | owner | Google OAuth client: add JavaScript origin `https://zarf-near-claim.sparkling-queen-5e77.workers.dev` and redirect URI `…/auth/google`; give the client id to web-agent | client id received |
+| 1 | web-agent | `node scripts/mainnet-keys.mjs`: writes the verifier seed and relayer key off the repository (mode 600, never overwritten), prints the signer hex **S** and the relayer public key **R**. **Must run before any `deploy.sh` run on mainnet, even a dry run**: `deploy.sh` creates those files if they are missing, and then `mainnet-keys.mjs` refuses | S and R sent to coding-agent |
+| 2 | coding-agent | Create `escrow.<owner>.near` (3.5 NEAR) and `relayer.<owner>.near` (1 NEAR) with `create-account fund-myself … sign-as <owner>.near` (commands below) | both keys in `~/.near-credentials/mainnet/` |
+| 3 | coding-agent | `deploy.sh` with `DRY_RUN=1`, then for real (command below). Check in the dry run: the `new` args carry `network: mainnet`, the guardian, and `initial_signers[0].signer` = **S**. The `add-key` line carries **R**. `deploy.sh` does deploy + `new` (S is active at once, so no `add_owner_key`), the lock, the USDC registration, the refresh and the relayer's claim-only key. On a failure after deploy it prints a `SKIP_DEPLOY=1` rerun command | "contract has no full-access key"; code hash as above |
+| 4 | coding-agent → web-agent | Hand over the contract id and relayer account, with checks: `get_network` = `"mainnet"`; `get_config.token_ids` ∋ `17208628…`; `get_agent(S)` = owner kind; relayer `view_access_key(R)` = FunctionCall, receiver = contract, methods `["claim"]` | message sent |
+| 5 | web-agent | Fill `env.mainnet` (`CONTRACT_ID`/`PUBLIC_CONTRACT_ID`, `RELAYER_ACCOUNT_ID`, `VERIFIER_SIGNERS` = S, both Google client ids), commit, `scripts/deploy-mainnet-hosting.sh`, smoke as in `mainnet-hosting.md` | `/health` of verifier and relayer show the contract, signer S, `claim_only: true` |
+| 6 | owner (+ both agents watching) | Demo: on `https://zarf-near-claim.sparkling-queen-5e77.workers.dev/create`, from `<owner>.near`: a 2-3 USDC campaign, deadline ≈ 45 days (the contract requires ≥ 30 days on mainnet; the verifier key S is valid 60 days), prepay as the page computes (≈ 0.05 NEAR). Then one claim of ≥ 1 USDC with payout to **Base**, to the owner's own Base wallet (not an exchange). Live 1Click quotes: 1 USDC loses ≈ 1.25%, 3 USDC ≈ 1.09%; the page refuses a worst case over 5% | claim and payout tx hashes recorded below |
+| 7 | owner | Explorer checks (below) | ticked |
+
+Commands for steps 2-3 (`<…>` filled in at run time):
+
+```bash
+near account create-account fund-myself escrow.<owner>.near '3.5 NEAR' autogenerate-new-keypair \
+  save-to-legacy-keychain sign-as <owner>.near network-config mainnet sign-with-legacy-keychain send
+near account create-account fund-myself relayer.<owner>.near '1 NEAR' autogenerate-new-keypair \
+  save-to-legacy-keychain sign-as <owner>.near network-config mainnet sign-with-legacy-keychain send
+
+NETWORK=mainnet LOCK_CONTRACT=1 \
+CONTRACT_ID=escrow.<owner>.near OWNER_ID=<owner>.near RELAYER_ID=relayer.<owner>.near \
+GUARDIAN_ID=<guardian>.near SIGNER_PUBKEY=<S> \
+RELAYER_KEY_FILE=<relayer-key-file> \
+DRY_RUN=1 scripts/deploy.sh          # then the same without DRY_RUN=1
+```
+
+`SIGNER_PUBKEY` is passed explicitly so `deploy.sh` never reads or creates the verifier seed.
+The relayer key file is read only to derive R (`deploy.sh` keeps base58 leading zeros since
+`ead1417`; compare its printed R with web-agent's anyway).
+
+Later: the verifier key S expires after 60 days. Before that, the owner adds a new key with
+`add_owner_key`, which takes effect after the 1 h delay; campaigns snapshot the keys valid
+through their deadline.
+
+### Mainnet record
+
+(filled in at run time: account creation, deploy + `new`, lock, USDC registration, refresh,
+relayer key, hosting versions, demo campaign, claim and payout tx hashes)
+
 ## Owner checklist (about 15 minutes)
 
 **Budget: about 5.1 NEAR in total** (minimum that works: about 3.4 NEAR). Gas price on mainnet
@@ -19,7 +72,8 @@ funds `<owner>.near` with about 5.0 NEAR and the guardian with 0.1 NEAR.
 
 **What the owner does**
 
-1. In a wallet (e.g. Meteor or MyNearWallet), have `<owner>.near` with about 5.0 NEAR.
+1. In a wallet (e.g. Meteor or MyNearWallet), have `<owner>.near` with about 5.0 NEAR (5.2 with
+   the demo prepay) and, for the demo, ≥ 3 mainnet USDC.
 2. A second person creates `<guardian>.near` in their own wallet, funds it with 0.1 NEAR, and
    sends us only the account name.
 3. In **your own SSH terminal on the deploy host** (not in an agent chat: the seed phrase must not
