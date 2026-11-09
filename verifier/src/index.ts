@@ -14,6 +14,7 @@ interface Env {
 // Release builds use Google's JWKS only; there is no env switch to another issuer.
 const jwks = remoteJwks(GOOGLE_JWKS_URL);
 let signer: Promise<Signer> | undefined;
+let signerSeed: string | undefined; // the SIGNER_SEED `signer` was imported from
 
 function cors(req: Request, env: Env): Record<string, string> {
   const origin = req.headers.get('Origin') ?? '';
@@ -40,10 +41,14 @@ export default {
     if (!/^[0-9a-f]{64}$/.test(env.SIGNER_SEED ?? '') || !env.CONTRACT_ID || !env.GOOGLE_CLIENT_ID) {
       return json({ error: 'VERIFIER_MISCONFIGURED' }, 500);
     }
-    signer ??= importSigner(env.SIGNER_SEED);
+    // Keyed by the seed, so a rotated secret never keeps signing with the old key.
+    if (signerSeed !== env.SIGNER_SEED) {
+      signerSeed = env.SIGNER_SEED;
+      signer = importSigner(env.SIGNER_SEED);
+    }
     try {
       const { status, body: out } = await handleClaim(body, {
-        clientId: env.GOOGLE_CLIENT_ID, contractId: env.CONTRACT_ID, jwks, chain: undeployedChain, signer: await signer,
+        clientId: env.GOOGLE_CLIENT_ID, contractId: env.CONTRACT_ID, jwks, chain: undeployedChain, signer: await signer!, // set just above whenever the seed changed
       });
       return json(out, status);
     } catch (e) {
