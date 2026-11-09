@@ -30,6 +30,10 @@
 #   LOCK_CONTRACT=1      finally delete every full-access key on CONTRACT_ID. After that the code
 #                        changes only through propose_upgrade/apply_upgrade (the timelock).
 #                        Mandatory on mainnet, opt-in on testnet.
+#   SKIP_DEPLOY=1        resume after deploy + new: skip build and deploy, run only the lock (again;
+#                        a no-op if no full-access key is left), the USDC registration, refresh and
+#                        the relayer key. Every step is safe to repeat. A failure after deploy prints
+#                        the exact rerun command.
 set -euo pipefail
 
 NETWORK=${NETWORK:-testnet}
@@ -132,6 +136,7 @@ if [[ ${CREATE_ACCOUNTS:-} == 1 ]]; then
   done
 fi
 
+if [[ ${SKIP_DEPLOY:-} != 1 ]]; then
 echo "== build"
 run make -C "$repo_root/contract" wasm
 [[ ${DRY_RUN:-} == 1 || -s $wasm ]] || { echo "missing $wasm" >&2; exit 66; }
@@ -145,6 +150,19 @@ init_args=$(jq -nc --arg o "$OWNER_ID" --arg u "$USDC_ID" --arg m "$MIN_LIFETIME
 run near contract deploy "$CONTRACT_ID" use-file "$wasm" \
   with-init-call new json-args "$init_args" prepaid-gas '100 Tgas' attached-deposit '0 NEAR' \
   network-config "$NETWORK" sign-with-legacy-keychain send
+fi
+
+# From here on the escrow exists: on failure, print how to resume without redeploying.
+rerun_cmd() {
+  local v out="SKIP_DEPLOY=1"
+  for v in DRY_RUN NETWORK LOCK_CONTRACT CONTRACT_ID OWNER_ID RELAYER_ID GUARDIAN_ID USDC_ID SIGNER_PUBKEY RELAYER_KEY_FILE RPC; do
+    [[ -n ${!v:-} ]] && out+=" $v=$(printf '%q' "${!v}")"
+  done
+  echo "$out $(printf '%q' "$0")"
+}
+on_fail() { echo "FAILED after deploy. Resume with:" >&2; echo "  $(rerun_cmd)" >&2; }
+set -E
+trap on_fail ERR
 
 # Locked right after deploy + new: nothing below needs the escrow's full-access key
 # (storage_deposit and refresh are signed by OWNER_ID, the add-key by RELAYER_ID).
@@ -159,9 +177,18 @@ if [[ ${LOCK_CONTRACT:-} == 1 ]]; then
   keys=$( [[ ${DRY_RUN:-} == 1 ]] && echo "<full-access keys>" || full_access_keys )
   [[ -n $keys ]] && run near account delete-keys "$CONTRACT_ID" public-keys "$keys" \
     network-config "$NETWORK" sign-with-legacy-keychain send
-  if [[ ${DRY_RUN:-} != 1 && -n $(full_access_keys) ]]; then
-    echo "LOCK FAILED: full-access keys remain on $CONTRACT_ID: $(full_access_keys)" >&2
-    exit 70
+  if [[ ${DRY_RUN:-} != 1 ]]; then
+    # RPC nodes can lag the delete by a block: 3 reads, 2 s apart, before calling it a failure.
+    for attempt in 1 2 3; do
+      remaining=$(full_access_keys) || remaining="<RPC error>"
+      [[ -z $remaining ]] && break
+      [[ $attempt == 3 ]] || sleep 2
+    done
+    if [[ -n $remaining ]]; then
+      echo "LOCK FAILED: full-access keys remain on $CONTRACT_ID: $remaining" >&2
+      on_fail
+      exit 70
+    fi
   fi
 fi
 
@@ -173,7 +200,6 @@ run near contract call-function as-transaction "$USDC_ID" storage_deposit \
 
 echo "== refresh_token_storage (owner)"
 call refresh_token_storage "$(jq -nc --arg u "$USDC_ID" '{token_id:$u}')" '50 Tgas'
-
 
 if [[ -n ${RELAYER_ID:-} ]]; then
   echo "== relayer claim-only key ($RELAYER_ID)"
@@ -197,12 +223,20 @@ if [[ -n ${RELAYER_ID:-} ]]; then
     const pub = b.subarray(32), out = []; let m = BigInt("0x" + pub.toString("hex"));
     for (; m > 0n; m /= 58n) out.unshift(A[Number(m % 58n)]);
     process.stdout.write("ed25519:" + out.join(""));' "$RELAYER_KEY_FILE")
-  run near account add-key "$RELAYER_ID" grant-function-call-access --allowance unlimited \
-    --contract-account-id "$CONTRACT_ID" --function-names claim \
-    use-manually-provided-public-key "$relayer_pub" network-config "$NETWORK" sign-with-legacy-keychain send
+  if [[ ${DRY_RUN:-} != 1 ]] && curl -sSf "$RPC" -H 'content-type: application/json' -d "$(jq -nc \
+      --arg a "$RELAYER_ID" --arg k "$relayer_pub" \
+      '{jsonrpc:"2.0",id:1,method:"query",params:{request_type:"view_access_key",finality:"final",account_id:$a,public_key:$k}}')" |
+      jq -e --arg c "$CONTRACT_ID" '.result.permission.FunctionCall.receiver_id == $c' >/dev/null; then
+    echo "relayer key already present (resumed run)"
+  else
+    run near account add-key "$RELAYER_ID" grant-function-call-access --allowance unlimited \
+      --contract-account-id "$CONTRACT_ID" --function-names claim \
+      use-manually-provided-public-key "$relayer_pub" network-config "$NETWORK" sign-with-legacy-keychain send
+  fi
   echo "relayer public key: $relayer_pub"
 fi
 
+trap - ERR
 [[ ${DRY_RUN:-} == 1 ]] && exit 0
 echo "== views"
 echo "get_config:         $(view "$CONTRACT_ID" get_config)"
