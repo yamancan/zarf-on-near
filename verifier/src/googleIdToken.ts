@@ -15,6 +15,8 @@ export interface VerifyOptions {
   destination: string;
   jwks: JwksSource;
   nowMs?: number;
+  /** Accepted `iss` values. Only the demo build (src/demo.ts) passes anything but Google's. */
+  issuers?: string[];
 }
 
 const fail = (code: string): never => {
@@ -46,7 +48,7 @@ export async function verifyGoogleIdToken(token: string, opts: VerifyOptions): P
   const signed = new TextEncoder().encode(`${h}.${p}`);
   if (!(await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, sig, signed))) fail('BAD_SIGNATURE');
 
-  if (!GOOGLE_ISSUERS.includes(payload.iss as string)) fail('BAD_ISSUER');
+  if (!(opts.issuers ?? GOOGLE_ISSUERS).includes(payload.iss as string)) fail('BAD_ISSUER');
   if (payload.aud !== opts.clientId) fail('BAD_AUDIENCE');
   const nowS = (opts.nowMs ?? Date.now()) / 1000;
   if (typeof payload.exp !== 'number' || payload.exp + EXP_SKEW_S < nowS) fail('EXPIRED');

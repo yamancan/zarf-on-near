@@ -3,7 +3,7 @@ import vectors from '../../spec/vectors.json';
 import worker from '../src/index';
 
 const env = {
-  GOOGLE_CLIENT_ID: 'client-123', CONTRACT_ID: 'zarf-near.testnet', SIGNER_SEED: vectors.keys.signer_seed,
+  GOOGLE_CLIENT_ID: 'client-123', CONTRACT_ID: 'zarf-near.testnet', NEAR_RPC_URL: 'https://rpc.test', SIGNER_SEED: vectors.keys.signer_seed,
   CLAIM_ORIGINS: 'http://localhost:5173, https://claim.example',
 };
 const req = (method: string, body?: string, origin = 'https://claim.example', path = '/claim', e = env) =>

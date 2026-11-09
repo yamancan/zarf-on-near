@@ -10,7 +10,7 @@ vi.mock('../src/claimFlow', () => ({
 const { default: worker } = await import('../src/index');
 
 it('lets a non-upstream error escape (500), instead of reporting UPSTREAM_UNAVAILABLE', async () => {
-  const env = { GOOGLE_CLIENT_ID: 'c', CONTRACT_ID: 'zarf-near.testnet', SIGNER_SEED: vectors.keys.signer_seed, CLAIM_ORIGINS: '' };
+  const env = { GOOGLE_CLIENT_ID: 'c', CONTRACT_ID: 'zarf-near.testnet', NEAR_RPC_URL: 'https://rpc.test', SIGNER_SEED: vectors.keys.signer_seed, CLAIM_ORIGINS: '' };
   const log = vi.spyOn(console, 'log').mockImplementation(() => {});
   const req = new Request('https://v.test/claim', { method: 'POST', body: '{}' });
   await expect(worker.fetch(req, env)).rejects.toThrow(TypeError);

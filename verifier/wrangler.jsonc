@@ -10,14 +10,16 @@
     // Claim app origins allowed by CORS. The deployed claim host is added once the owner picks it.
     "CLAIM_ORIGINS": "",
     // The escrow contract's account id; it is signed into every payload.
-    "CONTRACT_ID": ""
+    "CONTRACT_ID": "",
+    // NEAR JSON-RPC endpoint the verifier reads the contract's views from.
+    "NEAR_RPC_URL": ""
   },
   // SIGNER_SEED (hex32) is set with `wrangler secret put SIGNER_SEED`; requests 500 until it is.
   "secrets": { "required": ["SIGNER_SEED"] },
   "env": {
     // `wrangler dev --env dev`: vars are not inherited, so all of them are repeated here.
     "dev": {
-      "vars": { "GOOGLE_CLIENT_ID": "", "CLAIM_ORIGINS": "http://localhost:5173", "CONTRACT_ID": "" }
+      "vars": { "GOOGLE_CLIENT_ID": "", "CLAIM_ORIGINS": "http://localhost:5173", "CONTRACT_ID": "", "NEAR_RPC_URL": "" }
     }
   }
 }

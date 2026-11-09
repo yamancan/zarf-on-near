@@ -10,6 +10,7 @@ export interface ClaimDeps {
   clientId: string;
   contractId: string;
   jwks: JwksSource;
+  issuers?: string[];
   chain: ChainReader;
   signer: Signer;
   measurementId?: string; // Mode T only: this agent's approved measurement id
@@ -43,7 +44,7 @@ export async function handleClaim(input: unknown, d: ClaimDeps): Promise<ClaimRe
   const nowMs = d.nowMs ?? Date.now();
   let email: string;
   try {
-    ({ email } = await verifyGoogleIdToken(id_token, { clientId: d.clientId, destination, jwks: d.jwks, nowMs }));
+    ({ email } = await verifyGoogleIdToken(id_token, { clientId: d.clientId, destination, jwks: d.jwks, issuers: d.issuers, nowMs }));
   } catch (e) {
     if (e instanceof TokenError) return refuse(401, e.code);
     throw e;
