@@ -28,3 +28,12 @@ export async function mintDemoToken(o: { email: string; destination: string; aud
   return `${header}.${payload}.${b64url(new Uint8Array(sig))}`;
 }
 
+
+/** The demo only ever talks to a local chain (a NEAR sandbox or the --dry mock). */
+export const isLocalRpc = (url: string | undefined): boolean => {
+  try {
+    return ['127.0.0.1', 'localhost'].includes(new URL(url ?? '').hostname);
+  } catch {
+    return false;
+  }
+};

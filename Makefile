@@ -1,10 +1,20 @@
 # Clean clone -> `make test` and `make demo`. No secrets, no Google login.
 # Needs Node 24 and pnpm 10.30.3 (pinned per package); `pnpm install` needs network access.
-.PHONY: test demo install verifier relayer web contract
+.PHONY: test demo install verifier relayer web scripts contract
 
 PNPM_INSTALL := pnpm install --frozen-lockfile
 
-test: verifier relayer web contract
+# Runs every suite, keeps going after a failure, and ends with one SUMMARY line.
+# Exit 1 if anything that ran failed; a contract skipped for a missing toolchain is not a failure.
+test:
+	@status=""; fail=0; \
+	for t in verifier relayer web scripts; do \
+	  if $(MAKE) --no-print-directory $$t; then status="$$status $$t ✓"; else status="$$status $$t ✗"; fail=1; fi; \
+	done; \
+	if [ ! -d contract ]; then status="$$status contract NOT RUN (no contract/)"; \
+	elif ! command -v cargo >/dev/null 2>&1; then status="$$status contract NOT RUN (cargo missing)"; \
+	elif $(MAKE) --no-print-directory contract; then status="$$status contract ✓"; else status="$$status contract ✗"; fail=1; fi; \
+	echo; echo "SUMMARY:$$status"; exit $$fail
 
 install:
 	cd verifier && $(PNPM_INSTALL)
@@ -19,6 +29,11 @@ relayer:
 
 web:
 	cd web && $(PNPM_INSTALL) && pnpm test && pnpm check && pnpm build
+
+# The demo harness's own tests (the --dry mock must refuse a tampered claim tx).
+scripts:
+	cd relayer && $(PNPM_INSTALL)
+	node --test 'scripts/*.test.mjs'
 
 # The contract's own tests (contract/Makefile: unit = cargo test, integration = wasm + near-workspaces);
 # skipped with a reason when they cannot run here.

@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import vectors from '../../spec/vectors.json';
 import { claimPayload, unhex } from '../src/claim';
 import demo from '../src/demo';
-import { DEMO_ISSUER } from '../src/demoIssuer';
+import { DEMO_ISSUER, isLocalRpc } from '../src/demoIssuer';
 import { verifyGoogleIdToken } from '../src/googleIdToken';
 import release from '../src/index';
 import { remoteJwks } from '../src/jwks';
@@ -17,7 +17,7 @@ import { jwksResponse, sign, testIssuer } from './jwtFixture';
 const named = vectors.claims.valid.find((c) => c.name === 'named-account')!;
 const alice = vectors.campaigns.main.recipients.find((r) => r.commitment === named.call_args.commitment)!;
 const env = {
-  GOOGLE_CLIENT_ID: 'zarf-near-demo-client', CONTRACT_ID: 'zarf-near.testnet', NEAR_RPC_URL: 'https://rpc.test',
+  GOOGLE_CLIENT_ID: 'zarf-near-demo-client', CONTRACT_ID: 'zarf-near.testnet', NEAR_RPC_URL: 'http://127.0.0.1:8545',
   SIGNER_SEED: vectors.keys.signer_seed, CLAIM_ORIGINS: '',
 };
 const post = (worker: { fetch(r: Request, e: typeof env): Promise<Response> }, path: string, body: unknown) =>
@@ -31,7 +31,7 @@ const views: Record<string, unknown> = {
   get_agent: { kind: 'owner', valid_until_ns: '9'.repeat(19) },
 };
 const rpcStub = async (url: string, init?: RequestInit) => {
-  if (url === 'https://rpc.test') {
+  if (url === 'http://127.0.0.1:8545') {
     const method = JSON.parse(init!.body as string).params.method_name as string;
     return Response.json({ jsonrpc: '2.0', id: 'zarf', result: { result: [...new TextEncoder().encode(JSON.stringify(views[method]))] } });
   }
@@ -54,6 +54,16 @@ describe('demo build (src/demo.ts)', () => {
     const key = await crypto.subtle.importKey('raw', unhex(out.signer, 32), 'Ed25519', false, ['verify']);
     expect(await crypto.subtle.verify('Ed25519', key, unhex(out.signature, 64), payload)).toBe(true);
   });
+});
+
+describe('demo build only runs against a local chain', () => {
+  it.each(['https://rpc.testnet.near.org', 'https://127.0.0.1.evil.example', 'http://localhost.evil.example:3030', 'not a url', ''])('refuses NEAR_RPC_URL %j', async (u) => {
+    expect(isLocalRpc(u)).toBe(false);
+    const res = await demo.fetch(new Request('https://v.test/demo/token', { method: 'POST', body: '{"email":"a@example.com","destination":"alice.testnet"}' }), { ...env, NEAR_RPC_URL: u });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: 'DEMO_NEEDS_LOCAL_RPC' });
+  });
+  it.each(['http://127.0.0.1:3030', 'http://localhost:3030'])('accepts %s', (u) => expect(isLocalRpc(u)).toBe(true));
 });
 
 describe('release build (src/index.ts) never accepts the demo issuer', () => {

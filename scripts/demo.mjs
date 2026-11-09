@@ -14,11 +14,11 @@
 //   DEMO_VECTOR_CAMPAIGN "single" (solo@example.com, 5 USDC; the sandbox default) or "main"
 //                        (alice@example.com; total u128::MAX, so it needs a mintable token). --dry uses "main".
 //   DEMO_DESTINATION     account that receives the tokens (default alice.testnet)
+//   DEMO_REQUIRE_RPC=1   a sandbox run (scripts/demo-sandbox.sh sets it): never fall back to --dry
 // The demo verifier signs with spec/vectors.json keys.signer_seed: a public test key, sandbox only.
 
 import { createRequire } from 'node:module';
 import { createHash, generateKeyPairSync } from 'node:crypto';
-import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -26,6 +26,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const require = createRequire(import.meta.url);
 const { unstable_dev } = require(`${root}relayer/node_modules/wrangler`);
 const vectors = JSON.parse(readFileSync(`${root}spec/vectors.json`, 'utf8'));
+const { base58, startMockRpc } = await import(`${root}scripts/mock-near-rpc.mjs`);
 
 const dry = process.argv.includes('--dry');
 const step = (n, msg) => console.log(`\n[${n}] ${msg}`);
@@ -43,62 +44,12 @@ const recipient = campaign.recipients.find((r) => r.commitment === claimVector.c
 const destination = process.env.DEMO_DESTINATION ?? 'alice.testnet';
 const NETWORK = process.env.NETWORK ?? 'testnet';
 
-const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-const base58 = (bytes) => {
-  let n = 0n;
-  for (const b of bytes) n = n * 256n + BigInt(b);
-  let out = '';
-  for (; n > 0n; n /= 58n) out = B58[Number(n % 58n)] + out;
-  for (const b of bytes) { if (b) break; out = '1' + out; }
-  return out;
-};
-
-// ---- dry mode: a NEAR RPC that behaves like the contract for this one claim --------------------
-async function startMockRpc(contractId) {
-  const { decodeSignedTransaction } = await import(`${root}relayer/node_modules/@near-js/transactions/lib/esm/index.js`);
-  const state = new Map(); // commitment -> claim_state
-  const view = (o) => ({ result: [...Buffer.from(JSON.stringify(o))] });
-  const far = '9'.repeat(19);
-  const views = {
-    get_network: () => NETWORK,
-    get_campaign: () => ({ merkle_root: campaign.merkle_root, deadline_ns: far, balance: campaign.recipients.reduce((t, r) => t + BigInt(r.amount), 0n).toString(), policy: 'owner', snapshot: [vectors.keys.signer] }),
-    claim_state: (a) => state.get(a.commitment) ?? 'unclaimed',
-    get_agent: () => ({ kind: 'owner', valid_until_ns: far }),
-    required_claim_gas: () => '150000000000000',
-  };
-  const server = createServer(async (req, res) => {
-    let body = '';
-    for await (const c of req) body += c;
-    const { method, params, id } = JSON.parse(body);
-    let result;
-    if (method === 'query' && params.request_type === 'call_function') {
-      result = view(views[params.method_name](JSON.parse(Buffer.from(params.args_base64, 'base64').toString())));
-    } else if (method === 'query' && params.request_type === 'view_access_key') {
-      result = { nonce: 1, block_hash: base58(new Uint8Array(32).fill(1)), permission: { FunctionCall: { receiver_id: contractId, method_names: ['claim'], allowance: null } } };
-    } else if (method === 'send_tx') {
-      const tx = decodeSignedTransaction(Buffer.from(params.signed_tx_base64, 'base64')).transaction;
-      const fc = tx.actions[0].functionCall;
-      const args = JSON.parse(Buffer.from(Object.values(fc.args)).toString());
-      if (tx.receiverId !== contractId || fc.methodName !== 'claim' || fc.deposit !== 0n) throw new Error('mock RPC: unexpected tx');
-      state.set(args.commitment, 'claimed');
-      const event = { standard: 'zarf-near', version: '1.0.0', event: 'claim_paid', data: [{ campaign_id: args.campaign_id, commitment: args.commitment, amount: args.amount, destination: args.destination }] };
-      result = { status: { SuccessValue: '' }, receipts_outcome: [{ outcome: { executor_id: contractId, logs: [`EVENT_JSON:${JSON.stringify(event)}`] } }] };
-      console.log(`      mock RPC: claim tx from ${tx.signerId} -> ${tx.receiverId}.claim, gas ${fc.gas}, deposit ${fc.deposit}`);
-    } else {
-      res.writeHead(400).end();
-      return;
-    }
-    res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ jsonrpc: '2.0', id, result }));
-  });
-  await new Promise((r) => server.listen(0, '127.0.0.1', r));
-  return { url: `http://127.0.0.1:${server.address().port}`, close: () => server.close() };
-}
-
+// ---- dry mode: a mock NEAR RPC that verifies the claim tx like the chain would (scripts/mock-near-rpc.mjs)
 function dryRelayerKey() {
   const { privateKey, publicKey } = generateKeyPairSync('ed25519');
   const seed = privateKey.export({ format: 'der', type: 'pkcs8' }).subarray(-32);
   const pub = publicKey.export({ format: 'der', type: 'spki' }).subarray(-32);
-  return `ed25519:${base58(Buffer.concat([seed, pub]))}`;
+  return { secret: `ed25519:${base58(Buffer.concat([seed, pub]))}`, publicKey: pub };
 }
 
 // Every call has a deadline, so a broken Worker fails the demo instead of hanging it.
@@ -115,18 +66,23 @@ const viewOn = async (rpcUrl, contractId, method, args) => {
 };
 
 async function main() {
+  // A sandbox run must never report a mocked pass.
+  if (process.env.DEMO_REQUIRE_RPC === '1' && (dry || !process.env.NEAR_RPC_URL)) return fail('sandbox exports missing');
   const workers = [];
   let mock;
   try {
     step(1, dry ? 'NEAR RPC: mocked (--dry)' : 'NEAR RPC: sandbox from env');
     const contractId = process.env.CONTRACT_ID ?? (dry ? 'zarf-near.test.near' : undefined);
     let rpcUrl = process.env.NEAR_RPC_URL;
+    let relayerKey = process.env.RELAYER_KEY;
     if (dry) {
-      mock = await startMockRpc(contractId);
+      const k = dryRelayerKey();
+      relayerKey = k.secret;
+      const ctx = { contractId, network: NETWORK, relayerPublicKey: k.publicKey, verifierSigner: vectors.keys.signer, merkleRoot: campaign.merkle_root };
+      mock = await startMockRpc(ctx, campaign, console.log);
       rpcUrl = mock.url;
     }
     const relayerAccount = process.env.RELAYER_ACCOUNT_ID ?? (dry ? 'relayer.test.near' : undefined);
-    const relayerKey = process.env.RELAYER_KEY ?? (dry ? dryRelayerKey() : undefined);
     const campaignId = process.env.DEMO_CAMPAIGN_ID ?? (dry ? campaign.campaign_id : undefined);
     const missing = Object.entries({ NEAR_RPC_URL: rpcUrl, CONTRACT_ID: contractId, RELAYER_ACCOUNT_ID: relayerAccount, RELAYER_KEY: relayerKey, DEMO_CAMPAIGN_ID: campaignId }).filter(([, v]) => !v).map(([k]) => k);
     if (missing.length) return fail(`set ${missing.join(', ')} (see the header of scripts/demo.mjs), or run with --dry`);
