@@ -163,6 +163,7 @@ if [[ ${LOCK_CONTRACT:-} == 1 ]]; then
     echo "LOCK FAILED: full-access keys remain on $CONTRACT_ID: $(full_access_keys)" >&2
     exit 70
   fi
+fi
 
 echo "== register the escrow on USDC (it must hold tokens; ft_transfer_call fails otherwise)"
 run near contract call-function as-transaction "$USDC_ID" storage_deposit \
@@ -200,8 +201,6 @@ if [[ -n ${RELAYER_ID:-} ]]; then
     --contract-account-id "$CONTRACT_ID" --function-names claim \
     use-manually-provided-public-key "$relayer_pub" network-config "$NETWORK" sign-with-legacy-keychain send
   echo "relayer public key: $relayer_pub"
-fi
-
 fi
 
 [[ ${DRY_RUN:-} == 1 ]] && exit 0
