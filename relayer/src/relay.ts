@@ -89,9 +89,9 @@ interface TxOutcome {
  */
 type ClaimEvent = 'claim_started' | 'claim_paid' | 'claim_reverted';
 
-/** The latest of this commitment's claim events logged by our contract, in receipt order. */
+/** This commitment's most decisive claim event from our contract: paid or reverted beat started, in any receipt order. */
 export function claimEvent(o: TxOutcome, contractId: string, commitment: string): ClaimEvent | null {
-  let found: ClaimEvent | null = null;
+  const seen = new Set<ClaimEvent>();
   for (const r of o.receipts_outcome ?? []) {
     if (r.outcome?.executor_id !== contractId) continue;
     for (const log of r.outcome.logs ?? []) {
@@ -99,14 +99,14 @@ export function claimEvent(o: TxOutcome, contractId: string, commitment: string)
       try {
         const e = JSON.parse(log.slice('EVENT_JSON:'.length));
         if (e.standard === 'zarf-near' && ['claim_started', 'claim_paid', 'claim_reverted'].includes(e.event) && e.data?.[0]?.commitment === commitment) {
-          found = e.event;
+          seen.add(e.event);
         }
       } catch {
         // not our event
       }
     }
   }
-  return found;
+  return seen.has('claim_paid') ? 'claim_paid' : seen.has('claim_reverted') ? 'claim_reverted' : seen.has('claim_started') ? 'claim_started' : null;
 }
 
 const submitted = (hash: string): RelayResult => ({ status: 202, body: { tx_hash: hash, status: 'submitted' } });

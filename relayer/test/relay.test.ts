@@ -178,6 +178,11 @@ describe('handleRelay', () => {
     expect((await handleRelay({ ...valid }, 'ip', deps({ rpc: s.rpc }))).body.error).toBe('E105_ALREADY_CLAIMED');
   });
 
+  it('paid outranks started whatever the receipt order', async () => {
+    const s = stubRpc({ send: () => executed(event('claim_paid'), event('claim_started')) });
+    expect((await handleRelay({ ...valid }, 'ip', deps({ rpc: s.rpc }))).body.status).toBe('paid');
+  });
+
   it('a reverted transfer (claim_reverted) is 409 E115, not paid, although the tx status is a success', async () => {
     const s = stubRpc({ send: () => executed(event('claim_started'), event('claim_reverted')) });
     expect(await handleRelay({ ...valid }, 'ip', deps({ rpc: s.rpc }))).toEqual({ status: 409, body: { error: 'E115_TOKEN_TRANSFER_FAILED', tx_hash: expect.any(String) } });
