@@ -1,5 +1,7 @@
 # Exact pin: the deployed wasm (code hash 5GdxDSB4…) is rebuilt byte-for-byte only with this toolchain,
-# and Rust 1.87+ turns on wasm features by default (bulk memory etc.) that the NEAR runtime rejects.
+# History: rustc 1.87+ emits bulk-memory and nontrapping-float-to-int opcodes that nearcore VMs
+# before protocol 84 rejected (cargo-near-build 0.11.5, src/near/build/mod.rs). Mainnet and testnet
+# reported protocol 88 on 2026-11-12, so that limit no longer binds; the hash above is why 1.86 stays.
 [toolchain]
 channel = "1.86.0"
 components = ["rustfmt", "clippy"]
