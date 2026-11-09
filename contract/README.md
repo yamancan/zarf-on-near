@@ -8,7 +8,7 @@ views are defined in [`../spec/claim.md`](../spec/claim.md); the tests load
 
 | Path | Rust | Why |
 | --- | --- | --- |
-| `contract/`, `contract/mock-ft/` | 1.86.0 | near-sdk 5.26.1 and shade-attestation 0.2.0 (Mode T) |
+| `contract/`, `contract/mock-ft/` | 1.86.0 | near-sdk 5.26.1, the only dependency. No attestation crate: the `"attested"` policy path is inert (such a campaign is refused with `E127_NO_VERIFIER`); Mode T, a TEE-attested verifier, is roadmap |
 | `contract/integration/` | 1.95.0 | near-workspaces 0.24.0 needs ≥ 1.95; it only loads the built wasm. OpenSSL is vendored (built from source: needs a C compiler and perl, not libssl-dev) |
 
 Each directory's `rust-toolchain.toml` selects its toolchain automatically.
