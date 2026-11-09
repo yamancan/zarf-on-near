@@ -105,7 +105,8 @@ with the verifier service described above.
 
 **Hackathon diff (Q-003).** Everything in this repository was built in the build window, starting
 from the first commit on 2026-11-07.
-[hackathon-submission](https://github.com/yamancan/zarf-on-near/tree/hackathon-submission) is the submission tag.
+History: [hackathon-submission](https://github.com/yamancan/zarf-on-near/tree/hackathon-submission)
+(**TODO:** create the `hackathon-submission` tag at submission).
 
 **Libraries (Q-005).**
 
