@@ -1,0 +1,161 @@
+import { decodeSignedTransaction } from '@near-js/transactions';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import vectors from '../../spec/vectors.json';
+import { base58Encode, parseNearKey, type NearKey } from '../src/near';
+import { handleRelay, resetNonce, type RateLimiter, type RelayDeps } from '../src/relay';
+import { RpcError, type Rpc } from '../src/rpc';
+
+const { keys, context, claims } = vectors;
+const unhex = (s: string) => Uint8Array.from(s.match(/../g)!, (x) => parseInt(x, 16));
+const NOW_MS = Number(BigInt(context.now_ns) / 1_000_000n);
+const GAS = '150000000000000';
+const BLOCK = base58Encode(unhex('22'.repeat(32)));
+const valid = claims.valid[0].call_args;
+const fcKey = { FunctionCall: { receiver_id: context.contract_id, method_names: ['claim'], allowance: null } };
+
+type Sent = { signed: Uint8Array };
+function stubRpc(o: { permission?: unknown; nonce?: number; send?: (n: number) => unknown } = {}) {
+  const sent: Sent[] = [];
+  let calls = 0;
+  const rpc: Rpc = {
+    async call<T>(method: string, params: any): Promise<T> {
+      calls++;
+      if (method === 'query' && params.request_type === 'view_access_key') {
+        return { nonce: o.nonce ?? 5, block_hash: BLOCK, permission: o.permission ?? fcKey } as T;
+      }
+      if (method === 'query' && params.method_name === 'required_claim_gas') {
+        return { result: [...new TextEncoder().encode(JSON.stringify(GAS))] } as T;
+      }
+      if (method === 'send_tx') {
+        sent.push({ signed: Uint8Array.from(atob(params.signed_tx_base64), (c) => c.charCodeAt(0)) });
+        const r = o.send ? o.send(sent.length) : { status: { SuccessValue: '' } };
+        if (r instanceof RpcError) throw r;
+        return r as T;
+      }
+      throw new Error(`unexpected rpc ${method}`);
+    },
+  };
+  return { rpc, sent, calls: () => calls };
+}
+const allow: RateLimiter = { limit: async () => ({ success: true }) };
+const deny: RateLimiter = { limit: async () => ({ success: false }) };
+
+let key: NearKey;
+const deps = (over: Partial<RelayDeps> = {}): RelayDeps => ({
+  rpc: stubRpc().rpc, network: context.network, contractId: context.contract_id, relayerAccountId: 'relayer.testnet', key,
+  verifierSigners: [keys.signer], perIp: allow, perCommitment: allow, nowMs: NOW_MS, ...over,
+});
+
+beforeAll(async () => {
+  // Any well-formed key works for the relayer itself; reuse the spec's test seed.
+  key = await parseNearKey(`ed25519:${base58Encode(unhex(keys.signer_seed + keys.signer))}`);
+});
+beforeEach(() => resetNonce());
+
+describe('handleRelay', () => {
+  it('submits claim with a function-call tx: our contract, method claim, exact args, required gas, zero deposit', async () => {
+    const s = stubRpc();
+    const res = await handleRelay({ ...valid }, '1.2.3.4', deps({ rpc: s.rpc }));
+    expect(res.status).toBe(200);
+    const stx = decodeSignedTransaction(s.sent[0].signed);
+    const tx = stx.transaction;
+    expect(tx.signerId).toBe('relayer.testnet');
+    expect(tx.receiverId).toBe(context.contract_id);
+    expect(tx.nonce).toBe(6n);
+    expect(Uint8Array.from((tx.publicKey as unknown as { ed25519Key: { data: number[] } }).ed25519Key.data)).toEqual(key.publicKey);
+    expect(tx.actions).toHaveLength(1);
+    const fc = tx.actions[0].functionCall!;
+    expect(fc.methodName).toBe('claim');
+    expect(JSON.parse(new TextDecoder().decode(Uint8Array.from(fc.args as unknown as number[])))).toEqual(valid);
+    expect(fc.gas).toBe(BigInt(GAS));
+    expect(fc.deposit).toBe(0n);
+    const unsigned = s.sent[0].signed.slice(0, -65); // SignedTransaction = tx || KeyType(1) || signature(64)
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', unsigned));
+    expect(res.body).toEqual({ tx_hash: base58Encode(digest) });
+  });
+
+  it('uses a fresh nonce for each claim in the same isolate', async () => {
+    const s = stubRpc();
+    await handleRelay({ ...valid }, 'ip', deps({ rpc: s.rpc }));
+    await handleRelay({ ...valid }, 'ip', deps({ rpc: s.rpc }));
+    expect(s.sent.map((x) => decodeSignedTransaction(x.signed).transaction.nonce)).toEqual([6n, 7n]);
+  });
+
+  it.each([
+    ['an extra field', { ...valid, network: 'mainnet' }, 400, 'E108_INVALID_INPUT'],
+    ['a missing field', (({ signature: _, ...r }) => r)(valid), 400, 'E108_INVALID_INPUT'],
+    ['an array body', [valid], 400, 'E108_INVALID_INPUT'],
+    ['a bad destination', { ...valid, destination: 'Alice.testnet' }, 400, 'BAD_DESTINATION'],
+    ['amount 0', { ...valid, amount: '0' }, 400, 'E109_INVALID_AMOUNT'],
+    ['a short signature', { ...valid, signature: 'ab' }, 400, 'E108_INVALID_INPUT'],
+    ['proof over 20', { ...valid, proof: Array(21).fill('00'.repeat(32)) }, 400, 'E108_INVALID_INPUT'],
+    ['a signer that is not our verifier', { ...valid, signer: keys.rogue_signer }, 403, 'E101_INVALID_SIGNATURE'],
+    ['an expired signature', { ...valid, expires_at_ns: (BigInt(context.now_ns) - 1n).toString() }, 409, 'E114_CLAIM_EXPIRED'],
+    ['an expiry beyond 1 h', { ...valid, expires_at_ns: (BigInt(context.now_ns) + 3_600_000_000_001n).toString() }, 400, 'E108_INVALID_INPUT'],
+  ])('refuses %s without touching the chain', async (_, body, status, error) => {
+    const s = stubRpc();
+    expect(await handleRelay(body, 'ip', deps({ rpc: s.rpc }))).toEqual({ status, body: { error } });
+    expect(s.calls()).toBe(0);
+  });
+
+  const e101 = claims.invalid.filter((c) => c.expect === 'E101_INVALID_SIGNATURE');
+  it.each(e101)('refuses spec vector $name before spending gas', async (c) => {
+    const s = stubRpc();
+    const res = await handleRelay({ ...c.call_args }, 'ip', deps({ rpc: s.rpc }));
+    expect(res).toEqual({ status: 403, body: { error: 'E101_INVALID_SIGNATURE' } });
+    expect(s.calls()).toBe(0);
+  });
+
+  it('relays an honestly signed claim and reports the contract panic code (E102 vector)', async () => {
+    const c = claims.invalid.find((x) => x.expect === 'E102_INVALID_MERKLE_PROOF')!;
+    const failure = { ActionError: { index: 0, kind: { FunctionCallError: { ExecutionError: 'Smart contract panicked: E102_INVALID_MERKLE_PROOF' } } } };
+    const s = stubRpc({ send: () => ({ status: { Failure: failure } }) });
+    const res = await handleRelay({ ...c.call_args }, 'ip', deps({ rpc: s.rpc }));
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('E102_INVALID_MERKLE_PROOF');
+    expect(res.body.tx_hash).toMatch(/^[1-9A-HJ-NP-Za-km-z]+$/);
+  });
+
+  it('rate-limits per IP before parsing, and per commitment', async () => {
+    const s = stubRpc();
+    expect(await handleRelay('garbage', 'ip', deps({ rpc: s.rpc, perIp: deny }))).toEqual({ status: 429, body: { error: 'RATE_LIMITED' } });
+    const keysSeen: string[] = [];
+    const perCommitment: RateLimiter = { limit: async ({ key }) => (keysSeen.push(key), { success: false }) };
+    expect(await handleRelay({ ...valid }, 'ip', deps({ rpc: s.rpc, perCommitment }))).toEqual({ status: 429, body: { error: 'RATE_LIMITED' } });
+    expect(keysSeen).toEqual([`${valid.campaign_id}/${valid.commitment}`]);
+    expect(s.calls()).toBe(0);
+  });
+
+  it.each([
+    ['a full-access key', 'FullAccess'],
+    ['a key for another contract', { FunctionCall: { ...fcKey.FunctionCall, receiver_id: 'evil.testnet' } }],
+    ['a key for more methods', { FunctionCall: { ...fcKey.FunctionCall, method_names: ['claim', 'reclaim'] } }],
+    ['a key for any method', { FunctionCall: { ...fcKey.FunctionCall, method_names: [] } }],
+  ])('refuses to sign with %s', async (_, permission) => {
+    const s = stubRpc({ permission });
+    expect(await handleRelay({ ...valid }, 'ip', deps({ rpc: s.rpc }))).toEqual({ status: 500, body: { error: 'RELAYER_MISCONFIGURED' } });
+    expect(s.sent).toHaveLength(0);
+  });
+
+  it('retries once on InvalidNonce, then gives up', async () => {
+    const nonceErr = new RpcError({ name: 'HANDLER_ERROR', cause: { name: 'INVALID_TRANSACTION', info: { InvalidNonce: {} } }, data: { TxExecutionError: { InvalidTxError: { InvalidNonce: {} } } } });
+    const once = stubRpc({ send: (n) => (n === 1 ? nonceErr : { status: { SuccessValue: '' } }) });
+    expect((await handleRelay({ ...valid }, 'ip', deps({ rpc: once.rpc }))).status).toBe(200);
+    expect(once.sent).toHaveLength(2);
+    const always = stubRpc({ send: () => nonceErr });
+    expect(await handleRelay({ ...valid }, 'ip', deps({ rpc: always.rpc }))).toEqual({ status: 503, body: { error: 'UPSTREAM_UNAVAILABLE' } });
+    expect(always.sent).toHaveLength(2);
+  });
+
+  it('returns the hash when the RPC times out after accepting the tx', async () => {
+    const s = stubRpc({ send: () => new RpcError({ name: 'TIMEOUT_ERROR' }) });
+    const res = await handleRelay({ ...valid }, 'ip', deps({ rpc: s.rpc }));
+    expect(res.status).toBe(200);
+    expect(res.body.tx_hash).toBeTruthy();
+  });
+
+  it('503s when the RPC is down', async () => {
+    const down: Rpc = { call: () => Promise.reject(new RpcError('HTTP 502')) };
+    expect(await handleRelay({ ...valid }, 'ip', deps({ rpc: down }))).toEqual({ status: 503, body: { error: 'UPSTREAM_UNAVAILABLE' } });
+  });
+});
