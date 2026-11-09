@@ -1,6 +1,6 @@
 import { claimPayload, isValidAccountId, unhex } from '../../verifier/src/claim';
 import { base58Decode, signTx, type NearKey } from './near';
-import { RpcError, viewAccessKey, viewFunction, type Rpc } from './rpc';
+import { RpcError, viewAccessKey, viewAccount, viewFunction, type Rpc } from './rpc';
 
 /** The Cloudflare rate-limit binding's interface. */
 export interface RateLimiter {
@@ -63,8 +63,15 @@ export async function handleRelay(input: unknown, ip: string, d: RelayDeps): Pro
   try {
     return await submit(args, d, true);
   } catch (e) {
-    if (e instanceof RelayerMisconfigured) return refuse(500, 'RELAYER_MISCONFIGURED');
-    if (e instanceof RpcError) return refuse(503, 'UPSTREAM_UNAVAILABLE');
+    // Logs are fixed tags only: never the request, the error text or the tx.
+    if (e instanceof RelayerMisconfigured) {
+      console.log('misconfigured');
+      return refuse(500, 'RELAYER_MISCONFIGURED');
+    }
+    if (e instanceof RpcError) {
+      console.log('rpc_unavailable');
+      return refuse(503, 'UPSTREAM_UNAVAILABLE');
+    }
     throw e;
   }
 }
@@ -73,7 +80,32 @@ class RelayerMisconfigured extends Error {}
 
 interface TxOutcome {
   status?: { SuccessValue?: string; Failure?: unknown };
+  receipts_outcome?: { outcome?: { executor_id?: string; logs?: string[] } }[];
 }
+
+/**
+ * The tx's own status is on_claim's `()`, a success whether the transfer paid or reverted, so the
+ * contract's NEP-297 event for this commitment decides.
+ */
+export function claimEvent(o: TxOutcome, contractId: string, commitment: string): 'claim_paid' | 'claim_reverted' | null {
+  for (const r of o.receipts_outcome ?? []) {
+    if (r.outcome?.executor_id !== contractId) continue;
+    for (const log of r.outcome.logs ?? []) {
+      if (!log.startsWith('EVENT_JSON:')) continue;
+      try {
+        const e = JSON.parse(log.slice('EVENT_JSON:'.length));
+        if (e.standard === 'zarf-near' && (e.event === 'claim_paid' || e.event === 'claim_reverted') && e.data?.[0]?.commitment === commitment) {
+          return e.event;
+        }
+      } catch {
+        // not our event
+      }
+    }
+  }
+  return null;
+}
+
+const submitted = (hash: string): RelayResult => ({ status: 202, body: { tx_hash: hash, status: 'submitted' } });
 
 async function submit(args: Uint8Array, d: RelayDeps, retryNonce: boolean): Promise<RelayResult> {
   const [gas, ak] = await Promise.all([
@@ -100,13 +132,38 @@ async function submit(args: Uint8Array, d: RelayDeps, retryNonce: boolean): Prom
     outcome = await d.rpc.call<TxOutcome>('send_tx', { signed_tx_base64: btoa(String.fromCharCode(...signed)), wait_until: 'EXECUTED_OPTIMISTIC' });
   } catch (e) {
     const detail = e instanceof RpcError ? JSON.stringify(e.detail) : '';
-    if (retryNonce && detail.includes('InvalidNonce')) return submit(args, d, false); // another isolate took this nonce
-    if (detail.includes('TIMEOUT_ERROR')) return { status: 200, body: { tx_hash: hash } }; // sent; the app follows the hash
+    if (retryNonce && detail.includes('InvalidNonce')) {
+      // Another isolate used this nonce; the error says where the key is now.
+      const ak = /"ak_nonce":\s*(\d+)/.exec(detail);
+      if (ak && BigInt(ak[1]) > lastNonce) lastNonce = BigInt(ak[1]);
+      console.log('nonce_retry');
+      return submit(args, d, false);
+    }
+    if (detail.includes('TIMEOUT_ERROR')) return submitted(hash); // sent; the app follows claim_state
     throw e;
   }
   if (outcome.status?.Failure) {
     const code = /E1\d\d_[A-Z_]+/.exec(JSON.stringify(outcome.status.Failure))?.[0] ?? 'CLAIM_TX_FAILED';
     return { status: 409, body: { error: code, tx_hash: hash } };
   }
-  return { status: 200, body: { tx_hash: hash } };
+  const { commitment } = JSON.parse(new TextDecoder().decode(args)) as { commitment: string };
+  const event = claimEvent(outcome, d.contractId, commitment);
+  if (event === 'claim_paid') return { status: 200, body: { tx_hash: hash, status: 'paid' } };
+  if (event === 'claim_reverted') return { status: 409, body: { error: 'E115_TOKEN_TRANSFER_FAILED', tx_hash: hash } };
+  return submitted(hash);
+}
+
+/** GET /health: numbers only, for monitoring the relayer key and account. */
+export async function handleHealth(d: Pick<RelayDeps, 'rpc' | 'relayerAccountId' | 'key' | 'perIp'>, ip: string): Promise<RelayResult> {
+  if (!(await d.perIp.limit({ key: ip })).success) return refuse(429, 'RATE_LIMITED');
+  try {
+    const [ak, account] = await Promise.all([viewAccessKey(d.rpc, d.relayerAccountId, d.key.publicKeyStr), viewAccount(d.rpc, d.relayerAccountId)]);
+    const fc = ak.permission === 'FullAccess' ? null : ak.permission.FunctionCall;
+    // allowance null = unlimited (still claim-only); balance in yoctoNEAR
+    return { status: 200, body: { allowance: fc ? fc.allowance : null, balance: account.amount, claim_only: !!fc && fc.method_names.join() === 'claim' } };
+  } catch (e) {
+    if (!(e instanceof RpcError)) throw e;
+    console.log('rpc_unavailable');
+    return refuse(503, 'UPSTREAM_UNAVAILABLE');
+  }
 }

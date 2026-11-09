@@ -38,4 +38,7 @@ export interface AccessKeyView {
 }
 
 export const viewAccessKey = (rpc: Rpc, accountId: string, publicKey: string) =>
-  rpc.call<AccessKeyView>('query', { request_type: 'view_access_key', finality: 'final', account_id: accountId, public_key: publicKey });
+  rpc.call<AccessKeyView>('query', { request_type: 'view_access_key', finality: 'optimistic', account_id: accountId, public_key: publicKey });
+
+export const viewAccount = (rpc: Rpc, accountId: string) =>
+  rpc.call<{ amount: string }>('query', { request_type: 'view_account', finality: 'optimistic', account_id: accountId });

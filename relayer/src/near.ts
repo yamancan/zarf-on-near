@@ -77,6 +77,12 @@ export const encodeTx = (t: FunctionCallTx): Uint8Array<ArrayBuffer> =>
     uintLe(0n, 16), // deposit
   );
 
+/** Shape check only (prefix, alphabet, 64 bytes); parseNearKey also checks the public half. */
+export function isNearSecretKey(s: string | undefined): s is string {
+  const m = /^ed25519:([1-9A-HJ-NP-Za-km-z]{60,100})$/.exec(s ?? '');
+  return !!m && base58Decode(m[1]).length === 64;
+}
+
 export interface NearKey {
   key: CryptoKey;
   publicKey: Uint8Array;

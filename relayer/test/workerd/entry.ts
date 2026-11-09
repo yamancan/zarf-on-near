@@ -10,7 +10,10 @@ export default {
   async fetch(): Promise<Response> {
     const rpc: Rpc = {
       async call<T>(method: string, params: { request_type?: string }): Promise<T> {
-        if (method === 'send_tx') return { status: { SuccessValue: '' } } as T;
+        if (method === 'send_tx') {
+          const log = `EVENT_JSON:${JSON.stringify({ standard: 'zarf-near', version: '1.0.0', event: 'claim_paid', data: [{ commitment: v.claims.valid[0].call_args.commitment }] })}`;
+          return { status: { SuccessValue: '' }, receipts_outcome: [{ outcome: { executor_id: v.context.contract_id, logs: [log] } }] } as T;
+        }
         if (params.request_type === 'view_access_key') {
           return { nonce: 1, block_hash: base58Encode(new Uint8Array(32).fill(3)), permission: { FunctionCall: { receiver_id: v.context.contract_id, method_names: ['claim'], allowance: null } } } as T;
         }
