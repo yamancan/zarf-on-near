@@ -34,16 +34,15 @@ describe('parseAmount / formatAmount (USDC, 6 decimals)', () => {
 });
 
 describe('parseRecipients', () => {
-  it('reads the vector emails (canonical) and amounts, skipping the header, with the total', () => {
-    const fits = campaigns.main.recipients.filter((r) => BigInt(r.amount) < 1n << 64n);
-    const { rows, rejected, total } = parseRecipients(csvOf(fits));
+  it('reads the vector campaign (canonical emails, amounts), skipping the header; total is exactly u128::MAX', () => {
+    const { rows, rejected, total } = parseRecipients(csvOf(campaigns.main.recipients));
     expect(rejected).toEqual([]);
-    expect(rows.map((r) => r.email)).toEqual(fits.map((r) => r.canonical_email));
-    expect(rows.map((r) => r.amount.toString())).toEqual(fits.map((r) => r.amount));
-    expect(total).toBe(fits.reduce((t, r) => t + BigInt(r.amount), 0n));
+    expect(rows.map((r) => r.email)).toEqual(campaigns.main.recipients.map((r) => r.canonical_email));
+    expect(rows.map((r) => r.amount.toString())).toEqual(campaigns.main.recipients.map((r) => r.amount));
+    expect(total).toBe((1n << 128n) - 1n);
   });
-  it('the full vector campaign does not fit one ft_transfer_call: its u128::MAX row is refused', () => {
-    const { rejected } = parseRecipients(csvOf(campaigns.main.recipients));
+  it('one more base unit on top of the vector campaign is refused', () => {
+    const { rejected } = parseRecipients(`${csvOf(campaigns.main.recipients)}\r\nz@example.com,0.000001`);
     expect(rejected).toEqual([expect.objectContaining({ reason: expect.stringContaining('token maximum') })]);
   });
   it.each(vectors.rejected_emails)('rejects %j as non-ASCII with its line number', (e) => {
@@ -68,6 +67,25 @@ describe('parseRecipients', () => {
   });
   it('keeps duplicate emails as separate allocations', () => {
     expect(parseRecipients('a@example.com,1\na@example.com;2').rows).toHaveLength(2);
+  });
+});
+
+describe('the CSV path creates campaigns.main end to end', () => {
+  it('pasted CSV -> rows -> salts -> root, leaf list, and the ft_transfer_call for the full total', async () => {
+    const c = campaigns.main;
+    const { rows, rejected, total } = parseRecipients(csvOf(c.recipients));
+    expect(rejected).toEqual([]);
+    const draft = await buildDraft(rows, saltsOf(c.recipients));
+    expect(draft.merkleRoot).toBe(c.merkle_root);
+    expect(draft.total).toBe(total.toString());
+    expect(leafList(c.campaign_id, draft).leaves).toEqual(c.recipients.map(({ commitment, amount }) => ({ commitment, amount })));
+    const [transfer] = fundingTxs({
+      sender: 'alice.testnet', contractId: 'zarf-near.testnet', tokenId: 'usdc.testnet', merkleRoot: draft.merkleRoot,
+      deadlineNs: vectors.context.deadline_ns, leafCount: draft.recipients.length, total: draft.total, shortfall: 0n,
+    });
+    const args = transfer.actions[0].params.args as { amount: string; msg: string };
+    expect(args.amount).toBe(((1n << 128n) - 1n).toString());
+    expect(JSON.parse(args.msg)).toMatchObject({ merkle_root: c.merkle_root, leaf_count: c.recipients.length });
   });
 });
 
