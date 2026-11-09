@@ -1,6 +1,7 @@
 // spec/claim.md merkle tree, built in the browser from the published leaf list to get a proof.
 
 import { hex } from './claim';
+import { ClaimError, type LeafList } from './services';
 
 export interface Leaf {
   commitment: string; // hex32
@@ -49,4 +50,12 @@ export async function proofFor(leaves: Leaf[], commitment: string): Promise<{ am
     index >>= 1;
   }
   return { amount, proof, root: hex(level[0]) };
+}
+
+/** Proof for `commitment` from a published list, refused unless the list rebuilds the root the contract holds. */
+export async function checkedProof(list: LeafList, chainRoot: string, commitment: string): Promise<{ amount: string; proof: string[] }> {
+  const found = await proofFor(list.leaves, commitment);
+  if (!found) throw new ClaimError('NOT_IN_LIST');
+  if (found.root !== chainRoot || list.merkle_root !== chainRoot) throw new ClaimError('LEAVES_ROOT_MISMATCH');
+  return { amount: found.amount, proof: found.proof };
 }

@@ -27,14 +27,22 @@ describe('getCampaign (NEAR RPC view)', () => {
 });
 
 describe('fetchLeaves', () => {
-  it('accepts a well-formed list', async () => {
-    const leaves = vectors.campaigns.main.recipients.map(({ commitment, amount }) => ({ commitment, amount }));
-    vi.stubGlobal('fetch', reply(leaves));
-    expect(await fetchLeaves('https://leaves.test', '7')).toEqual(leaves);
+  const main = vectors.campaigns.main;
+  const file = { campaign_id: main.campaign_id, merkle_root: main.merkle_root, leaves: main.recipients.map(({ commitment, amount }) => ({ commitment, amount })) };
+  it('accepts the spec file shape', async () => {
+    vi.stubGlobal('fetch', reply(file));
+    expect(await fetchLeaves('https://leaves.test', main.campaign_id)).toEqual(file);
   });
-  it.each([[{}], [[{ commitment: 'AB', amount: '1' }]], [[{ commitment: '00'.repeat(32), amount: '0' }]]])('rejects %j', async (body) => {
+  it.each([
+    ['a bare array', file.leaves],
+    ['another campaign id', { ...file, campaign_id: '8' }],
+    ['a bad root', { ...file, merkle_root: 'AB' }],
+    ['no leaves', { ...file, leaves: [] }],
+    ['an uppercase commitment', { ...file, leaves: [{ commitment: 'AB'.repeat(32), amount: '1' }] }],
+    ['a zero amount', { ...file, leaves: [{ commitment: '00'.repeat(32), amount: '0' }] }],
+  ])('rejects %s', async (_, body) => {
     vi.stubGlobal('fetch', reply(body));
-    expect(await code(fetchLeaves('https://leaves.test', '7'))).toBe('LEAVES_INVALID');
+    expect(await code(fetchLeaves('https://leaves.test', main.campaign_id))).toBe('LEAVES_INVALID');
   });
 });
 

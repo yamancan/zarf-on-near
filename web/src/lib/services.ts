@@ -56,20 +56,31 @@ export async function nearView<T>(rpcUrl: string, contractId: string, method: st
 export const getCampaign = async (rpcUrl: string | undefined, contractId: string | undefined, campaignId: string) =>
   nearView<Campaign | null>(need(rpcUrl, 'PUBLIC_NEAR_RPC_URL'), need(contractId, 'PUBLIC_CONTRACT_ID'), 'get_campaign', { campaign_id: campaignId });
 
-// shortcut: the leaf-list location is not in the spec yet (T7 publishes it); assumed <PUBLIC_LEAVES_URL>/<campaign_id>.json.
-export async function fetchLeaves(baseUrl: string | undefined, campaignId: string): Promise<{ commitment: string; amount: string }[]> {
+/** spec/claim.md "Leaf list": `<PUBLIC_LEAVES_URL>/<campaign_id>.json`, published by the create app. */
+export interface LeafList {
+  campaign_id: string;
+  merkle_root: string;
+  leaves: { commitment: string; amount: string }[];
+}
+
+export async function fetchLeaves(baseUrl: string | undefined, campaignId: string): Promise<LeafList> {
   const res = await fetch(`${need(baseUrl, 'PUBLIC_LEAVES_URL')}/${campaignId}.json`);
   if (!res.ok) throw new ClaimError('LEAVES_UNAVAILABLE');
-  const leaves = await res.json();
-  const ok = Array.isArray(leaves) && leaves.every((l) => /^[0-9a-f]{64}$/.test(l?.commitment) && /^[1-9]\d{0,38}$/.test(l?.amount));
+  const f = await res.json().catch(() => null);
+  const ok =
+    f?.campaign_id === campaignId &&
+    /^[0-9a-f]{64}$/.test(f.merkle_root) &&
+    Array.isArray(f.leaves) &&
+    f.leaves.length > 0 &&
+    f.leaves.every((l: { commitment?: unknown; amount?: unknown }) => /^[0-9a-f]{64}$/.test(String(l?.commitment)) && /^[1-9]\d{0,38}$/.test(String(l?.amount)));
   if (!ok) throw new ClaimError('LEAVES_INVALID');
-  return leaves;
+  return f;
 }
 
 export const requestSignature = async (verifierUrl: string | undefined, body: Record<string, unknown>) =>
   postJson<ClaimArgs>(`${need(verifierUrl, 'PUBLIC_VERIFIER_URL')}/claim`, body);
 
-// shortcut: T5 has not fixed the relayer API; assumed POST <PUBLIC_RELAYER_URL>/claim with the claim args → { tx_hash }.
+/** spec/claim.md "Relayer": POST /claim with exactly the verifier's 200 body → { tx_hash }. */
 export async function submitClaim(relayerUrl: string | undefined, args: ClaimArgs): Promise<string> {
   const { tx_hash } = await postJson<{ tx_hash?: string }>(`${need(relayerUrl, 'PUBLIC_RELAYER_URL')}/claim`, args);
   if (!tx_hash) throw new ClaimError('RELAYER_NO_TX');
@@ -87,6 +98,7 @@ const MESSAGES: Record<string, string> = {
   BAD_NONCE: 'This sign-in was for a different destination. Open your claim link and start again.',
   EMAIL_NOT_VERIFIED: 'Google says this email is not verified.',
   NOT_IN_LIST: 'This claim is not in the published campaign list.',
+  LEAVES_ROOT_MISMATCH: 'The published campaign list does not match the contract. Nothing was sent.',
 };
 
 export function describeError(e: unknown): string {

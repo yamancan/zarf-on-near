@@ -3,8 +3,8 @@
   import { page } from '$app/state';
   import { env } from '$env/dynamic/public';
   import { clearAttempt, isImplicitAccount, loadAttempt, signedIn } from '$lib/claim';
-  import { proofFor } from '$lib/merkle';
-  import { ClaimError, describeError, fetchLeaves, requestSignature, submitClaim } from '$lib/services';
+  import { checkedProof } from '$lib/merkle';
+  import { ClaimError, describeError, fetchLeaves, getCampaign, requestSignature, submitClaim } from '$lib/services';
 
   const attempt = loadAttempt();
   const idToken = signedIn.idToken;
@@ -19,8 +19,12 @@
     if (!ok || !attempt) return;
     signedIn.idToken = null; // single use from here on
     try {
-      const found = await proofFor(await fetchLeaves(env.PUBLIC_LEAVES_URL, attempt.campaign), attempt.commitment);
-      if (!found) throw new ClaimError('NOT_IN_LIST');
+      const [list, campaign] = await Promise.all([
+        fetchLeaves(env.PUBLIC_LEAVES_URL, attempt.campaign),
+        getCampaign(env.PUBLIC_NEAR_RPC_URL, env.PUBLIC_CONTRACT_ID, attempt.campaign),
+      ]);
+      if (!campaign) throw new ClaimError('E110_UNKNOWN_CAMPAIGN');
+      const found = await checkedProof(list, campaign.merkle_root, attempt.commitment);
       const args = await requestSignature(env.PUBLIC_VERIFIER_URL, {
         id_token: idToken,
         campaign_id: attempt.campaign,
