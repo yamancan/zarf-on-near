@@ -12,11 +12,13 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
   },
   "devDependencies": {
+    "@near-js/transactions": "2.5.1",
     "@near-wallet-selector/core": "10.1.4",
     "@near-wallet-selector/my-near-wallet": "10.1.4",
     "@sveltejs/adapter-cloudflare": "^7.2.8",
     "@sveltejs/kit": "^2.61.1",
     "@sveltejs/vite-plugin-svelte": "^6.2.4",
+    "buffer": "6.0.3",
     "svelte": "^5.55.9",
     "svelte-check": "^4.4.8",
     "typescript": "^5.9.3",

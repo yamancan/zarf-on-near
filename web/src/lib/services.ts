@@ -28,7 +28,7 @@ const need = (value: string | undefined, name: string): string => {
   return value;
 };
 
-async function postJson<T>(url: string, body: unknown): Promise<T> {
+export async function postJson<T>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const out = (await res.json().catch(() => ({}))) as { error?: string };
   if (!res.ok) throw new ClaimError(out.error ?? `HTTP_${res.status}`);

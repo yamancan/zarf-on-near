@@ -60,11 +60,15 @@ export function parseRecipients(text: string): { rows: Row[]; rejected: Rejected
     if (!SHAPE.test(email)) return reject('not an email address');
     // Google never puts a +tag Gmail alias in the id_token, so such a row could never be claimed.
     if (/^[^@]*\+[^@]*@(gmail|googlemail)\.com$/.test(email)) return reject('Gmail +aliases cannot sign in; use the account address');
+    let amount: bigint;
     try {
-      rows.push({ line, email, amount: parseAmount(cells[1]) });
+      amount = parseAmount(cells[1]);
     } catch (e) {
-      reject((e as Error).message);
+      return reject((e as Error).message);
     }
+    // ft_transfer_call sends the sum as one u128.
+    if ((rows.reduce((t, r) => t + r.amount, 0n) + amount) >> 128n) return reject('the total would exceed the token maximum');
+    rows.push({ line, email, amount });
   });
   if (rows.length > MAX_LEAVES) {
     for (const r of rows.splice(MAX_LEAVES)) rejected.push({ line: r.line, raw: r.email, reason: `over the ${MAX_LEAVES} recipient limit` });

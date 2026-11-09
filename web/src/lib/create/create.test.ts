@@ -2,13 +2,15 @@ import { describe, expect, it } from 'vitest';
 import vectors from '../../../../spec/vectors.json';
 import { proofFor } from '../merkle';
 import { buildDraft, claimLink, commitment, leafList, newSalt, recoveryFile } from './campaign';
-import { campaignIdFrom, fundingTxs, minDeadlineMs, prepayShortfall } from './funding';
+import { campaignIdFrom, failedWith, fundCampaign, fundingTxs, minDeadlineMs, ownerKeySlack, prepayShortfall, type FundDeps, type Outcome } from './funding';
 import { formatAmount, parseAmount, parseRecipients } from './recipients';
 
 const { campaigns } = vectors;
 // CSV as a sender would paste it: USDC amounts, Windows line endings, the vector emails as given.
 const csvOf = (rs: typeof campaigns.main.recipients) =>
   'email,amount\r\n' + rs.map((r) => `${r.email.replace(/[\r\n]+$/, '')},${formatAmount(BigInt(r.amount))}`).join('\r\n');
+// Rows straight from the vectors (the tree is defined per leaf; CSV parsing is tested separately).
+const rowsOf = (rs: typeof campaigns.main.recipients) => rs.map((r, i) => ({ line: i + 1, email: r.canonical_email, amount: BigInt(r.amount) }));
 const saltsOf = (rs: { salt: string }[]) => {
   let i = 0;
   return () => rs[i++].salt;
@@ -32,11 +34,17 @@ describe('parseAmount / formatAmount (USDC, 6 decimals)', () => {
 });
 
 describe('parseRecipients', () => {
-  it('reads the vector campaign, skipping the header, with the total', () => {
-    const { rows, rejected, total } = parseRecipients(csvOf(campaigns.main.recipients));
+  it('reads the vector emails (canonical) and amounts, skipping the header, with the total', () => {
+    const fits = campaigns.main.recipients.filter((r) => BigInt(r.amount) < 1n << 64n);
+    const { rows, rejected, total } = parseRecipients(csvOf(fits));
     expect(rejected).toEqual([]);
-    expect(rows.map((r) => r.email)).toEqual(campaigns.main.recipients.map((r) => r.canonical_email));
-    expect(total).toBe(campaigns.main.recipients.reduce((t, r) => t + BigInt(r.amount), 0n));
+    expect(rows.map((r) => r.email)).toEqual(fits.map((r) => r.canonical_email));
+    expect(rows.map((r) => r.amount.toString())).toEqual(fits.map((r) => r.amount));
+    expect(total).toBe(fits.reduce((t, r) => t + BigInt(r.amount), 0n));
+  });
+  it('the full vector campaign does not fit one ft_transfer_call: its u128::MAX row is refused', () => {
+    const { rejected } = parseRecipients(csvOf(campaigns.main.recipients));
+    expect(rejected).toEqual([expect.objectContaining({ reason: expect.stringContaining('token maximum') })]);
   });
   it.each(vectors.rejected_emails)('rejects %j as non-ASCII with its line number', (e) => {
     const { rows, rejected } = parseRecipients(`ok@example.com,1\n${e},1`);
@@ -52,6 +60,12 @@ describe('parseRecipients', () => {
   ])('rejects %j with a reason', (line, reason) => {
     expect(parseRecipients(line).rejected[0].reason).toContain(reason);
   });
+  it('refuses a row that would push the total past u128', () => {
+    const max = formatAmount((1n << 128n) - 1n);
+    const { rows, rejected } = parseRecipients(`a@example.com,${max}\nb@example.com,0.000001`);
+    expect(rows).toHaveLength(1);
+    expect(rejected[0]).toMatchObject({ line: 2, reason: expect.stringContaining('token maximum') });
+  });
   it('keeps duplicate emails as separate allocations', () => {
     expect(parseRecipients('a@example.com,1\na@example.com;2').rows).toHaveLength(2);
   });
@@ -59,7 +73,7 @@ describe('parseRecipients', () => {
 
 describe('buildDraft reproduces the spec campaigns', () => {
   it.each(Object.entries(campaigns))('%s: commitments and merkle root', async (_, c) => {
-    const draft = await buildDraft(parseRecipients(csvOf(c.recipients)).rows, saltsOf(c.recipients));
+    const draft = await buildDraft(rowsOf(c.recipients), saltsOf(c.recipients));
     expect(draft.recipients.map((r) => r.commitment)).toEqual(c.recipients.map((r) => r.commitment));
     expect(draft.merkleRoot).toBe(c.merkle_root);
   });
@@ -80,7 +94,7 @@ describe('buildDraft reproduces the spec campaigns', () => {
 describe('outputs', () => {
   it('leaf list per spec: no emails, no salts, and the claim app can prove every leaf from it', async () => {
     const c = campaigns.main;
-    const draft = await buildDraft(parseRecipients(csvOf(c.recipients)).rows, saltsOf(c.recipients));
+    const draft = await buildDraft(rowsOf(c.recipients), saltsOf(c.recipients));
     const file = leafList(c.campaign_id, draft);
     expect(Object.keys(file)).toEqual(['campaign_id', 'merkle_root', 'leaves']);
     expect(JSON.stringify(file)).not.toMatch(/@|salt/);
@@ -107,13 +121,18 @@ describe('outputs', () => {
 describe('funding', () => {
   const costs = { ft_storage_deposit: '1250000000000000000000', claim_entry_cost: '500', per_claim_storage: '1250000000000000000500', campaign_bytes_cost: '3000' };
   it('deposits only the shortfall', () => {
-    expect(prepayShortfall(costs, 5, '0')).toBe(3000n + 5n * 1250000000000000000500n);
-    expect(prepayShortfall(costs, 5, '1000')).toBe(3000n + 5n * 1250000000000000000500n - 1000n);
-    expect(prepayShortfall(costs, 5, (10n ** 25n).toString())).toBe(0n);
+    const need = 3000n + 5n * 1250000000000000000500n;
+    expect(prepayShortfall(costs, 5, '0', 0n)).toBe(need);
+    expect(prepayShortfall(costs, 5, '1000', 0n)).toBe(need - 1000n);
+    expect(prepayShortfall(costs, 5, (10n ** 25n).toString(), 0n)).toBe(0n);
+  });
+  it('adds one owner key of slack: 32 B at the contract-reported byte price', () => {
+    expect(ownerKeySlack('10000000000000000000')).toBe(320_000_000_000_000_000_000n); // 0.00032 NEAR at 10^19
+    expect(prepayShortfall(costs, 5, '0', ownerKeySlack('7'))).toBe(3000n + 5n * 1250000000000000000500n + 224n);
   });
   it('refuses to guess when campaign_bytes_cost is missing', () => {
     const { campaign_bytes_cost: _, ...old } = costs;
-    expect(() => prepayShortfall(old as typeof costs, 1, '0')).toThrow('campaign_bytes_cost');
+    expect(() => prepayShortfall(old as typeof costs, 1, '0', 0n)).toThrow('campaign_bytes_cost');
   });
   const base = { sender: 'alice.testnet', contractId: 'zarf-near.testnet', tokenId: 'usdc.testnet', merkleRoot: campaigns.main.merkle_root, deadlineNs: '1794488400000000000', leafCount: 5, total: '12500043' };
   it('prepay_deposit then one ft_transfer_call with the spec msg', () => {
@@ -138,7 +157,58 @@ describe('funding', () => {
     expect(campaignIdFrom({ receipts_outcome: [ev('zarf-near.testnet', 'x')] }, 'zarf-near.testnet')).toBeNull();
     expect(campaignIdFrom({}, 'zarf-near.testnet')).toBeNull();
   });
+  it('detects E128 inside the refunded ft_on_transfer receipt', () => {
+    const failed = { receipts_outcome: [{ outcome: { status: { Failure: { ActionError: { kind: { FunctionCallError: { ExecutionError: 'Smart contract panicked: E128_INSUFFICIENT_STORAGE' } } } } } } }] };
+    expect(failedWith(failed, 'E128')).toBe(true);
+    expect(failedWith({ receipts_outcome: [{ outcome: { logs: ['E128 in a log is not a failure'] } }] }, 'E128')).toBe(false);
+  });
   it('earliest deadline = now + min_lifetime_ns', () => {
     expect(minDeadlineMs(1000, '600000000000')).toBe(601_000);
+  });
+});
+
+describe('fundCampaign', () => {
+  const created = (id: string): Outcome => ({ receipts_outcome: [{ outcome: { executor_id: 'zarf-near.testnet', logs: [`EVENT_JSON:${JSON.stringify({ standard: 'zarf-near', version: '1.0.0', event: 'campaign_created', data: [{ campaign_id: id }] })}`] } }] });
+  const panicked = (code: string): Outcome => ({ receipts_outcome: [{ outcome: { executor_id: 'zarf-near.testnet', status: { Failure: { ActionError: { kind: { FunctionCallError: { ExecutionError: `Smart contract panicked: ${code}` } } } } } } }] });
+  const costs = { ft_storage_deposit: '1', claim_entry_cost: '1', per_claim_storage: '10', campaign_bytes_cost: '100' };
+  const p = { merkleRoot: 'ab'.repeat(32), deadlineNs: '1', leafCount: 3, total: '42' };
+  const fake = (outcomes: Outcome[], free = '0') => {
+    const sent: string[][] = [];
+    let costReads = 0;
+    const d: FundDeps = {
+      sender: 'alice.testnet', contractId: 'zarf-near.testnet', tokenId: 'usdc.testnet', storageByteCost: '2',
+      costs: async () => (costReads++, costs),
+      freePrepay: async () => free,
+      send: async (txs) => (sent.push(txs.map((t) => t.actions[0].params.methodName)), txs.map((_, i) => `h${sent.length}-${i}`)),
+      outcome: async () => outcomes.shift()!,
+    };
+    return { d, sent, costReads: () => costReads };
+  };
+
+  it('pre-pays the shortfall (with slack), sends the tokens and returns the campaign id', async () => {
+    const f = fake([created('9')]);
+    expect(await fundCampaign(f.d, p)).toEqual({ campaignId: '9', txHash: 'h1-1' });
+    expect(f.sent).toEqual([['prepay_deposit', 'ft_transfer_call']]);
+  });
+  it('on E128 re-reads the costs and retries once', async () => {
+    const f = fake([panicked('E128_INSUFFICIENT_STORAGE'), created('10')]);
+    expect(await fundCampaign(f.d, p)).toEqual({ campaignId: '10', txHash: 'h2-1' });
+    expect(f.costReads()).toBe(2);
+  });
+  it('gives up after a second E128', async () => {
+    await expect(fundCampaign(fake([panicked('E128_INSUFFICIENT_STORAGE'), panicked('E128_INSUFFICIENT_STORAGE')]).d, p)).rejects.toThrow('E128');
+  });
+  it('reports other contract errors without retrying', async () => {
+    const f = fake([panicked('E119_INVALID_DEADLINE')]);
+    await expect(fundCampaign(f.d, p)).rejects.toThrow('E119_INVALID_DEADLINE');
+    expect(f.sent).toHaveLength(1);
+  });
+  it('skips the deposit when the free pre-pay covers it', async () => {
+    const f = fake([created('11')], '1000000');
+    await fundCampaign(f.d, p);
+    expect(f.sent).toEqual([['ft_transfer_call']]);
+  });
+  it('refuses an outcome without our campaign_created event', async () => {
+    await expect(fundCampaign(fake([{ receipts_outcome: [] }]).d, p)).rejects.toThrow('CAMPAIGN_NOT_CREATED');
   });
 });
