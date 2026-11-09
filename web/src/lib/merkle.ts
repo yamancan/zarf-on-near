@@ -52,10 +52,14 @@ export async function proofFor(leaves: Leaf[], commitment: string): Promise<{ am
   return { amount, proof, root: hex(level[0]) };
 }
 
+/** Root of a non-empty leaf list (the tree from the first leaf's proof walk). */
+export const treeRoot = async (leaves: Leaf[]): Promise<string> => (await proofFor(leaves, leaves[0].commitment))!.root;
+
 /** Proof for `commitment` from a published list, refused unless the list rebuilds the root the contract holds. */
 export async function checkedProof(list: LeafList, chainRoot: string, commitment: string): Promise<{ amount: string; proof: string[] }> {
+  // Whole-list check first: a stale or edited list is LEAVES_MISMATCH, whatever it contains.
+  if (list.merkle_root !== chainRoot || (await treeRoot(list.leaves)) !== chainRoot) throw new ClaimError('LEAVES_MISMATCH');
   const found = await proofFor(list.leaves, commitment);
   if (!found) throw new ClaimError('NOT_IN_LIST');
-  if (found.root !== chainRoot || list.merkle_root !== chainRoot) throw new ClaimError('LEAVES_MISMATCH');
   return { amount: found.amount, proof: found.proof };
 }

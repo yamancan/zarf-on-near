@@ -108,6 +108,7 @@ const MESSAGES: Record<string, string> = {
   E129_INSUFFICIENT_BALANCE: 'This campaign is underfunded; contact the sender.',
   BAD_DESTINATION: 'That is not a valid NEAR account. Open your claim link and start again.',
   RATE_LIMITED: 'Too many attempts. Wait a minute and try again.',
+  E115_TOKEN_TRANSFER_FAILED: 'The transfer failed and your claim is open again. Open your claim link to try again.',
 };
 
 export function describeError(e: unknown): string {

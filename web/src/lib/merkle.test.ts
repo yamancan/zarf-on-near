@@ -37,6 +37,11 @@ describe('checkedProof (list vs on-chain root)', () => {
   it('refuses a file whose declared root differs from the chain', async () => {
     expect(await code(checkedProof({ ...list(), merkle_root: '00'.repeat(32) }, main.merkle_root, c.commitment))).toBe('LEAVES_MISMATCH');
   });
+  it('a stale list (another campaign version) is LEAVES_MISMATCH even for a commitment it lacks', async () => {
+    const stale = { ...list(), leaves: leavesOf('main').slice(0, 3) };
+    stale.merkle_root = main.merkle_root; // claims the current root, but its leaves rebuild an older tree
+    expect(await code(checkedProof(stale, main.merkle_root, main.recipients[4].commitment))).toBe('LEAVES_MISMATCH');
+  });
   it('refuses a commitment not in the list', async () => {
     expect(await code(checkedProof(list(), main.merkle_root, '11'.repeat(32)))).toBe('NOT_IN_LIST');
   });

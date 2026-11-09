@@ -64,6 +64,15 @@ describe('verifier and relayer', () => {
     expect(await submitClaim('https://r.test', args)).toBe(HASH);
     expect((fetchMock.mock.calls[0] as unknown as [string])[0]).toBe('https://r.test/claim');
   });
+  it('a 202 "submitted" from the relayer still yields the hash, so the receipt polls claim_state', async () => {
+    vi.stubGlobal('fetch', reply({ tx_hash: HASH, status: 'submitted' }, 202));
+    expect(await submitClaim('https://r.test', vectors.claims.valid[0].call_args)).toBe(HASH);
+  });
+  it('a 409 E115 from the relayer is the reopened-claim error', async () => {
+    vi.stubGlobal('fetch', reply({ error: 'E115_TOKEN_TRANSFER_FAILED', tx_hash: HASH }, 409));
+    const err = await submitClaim('https://r.test', vectors.claims.valid[0].call_args).catch((e) => e);
+    expect(describeError(err)).toMatch(/open again/);
+  });
   it.each([[{}], [{ tx_hash: 'H' }], [{ tx_hash: `${HASH}"><script>` }], [{ tx_hash: 'O0Il'.repeat(11) }]])('refuses relayer reply %j', async (body) => {
     vi.stubGlobal('fetch', reply(body));
     expect(await code(submitClaim('https://r.test', vectors.claims.valid[0].call_args))).toBe('RELAYER_NO_TX');
