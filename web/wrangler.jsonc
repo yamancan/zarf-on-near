@@ -1,0 +1,12 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "zarf-near-claim",
+  "main": ".svelte-kit/cloudflare/_worker.js",
+  "compatibility_date": "2026-06-01",
+  "assets": { "directory": ".svelte-kit/cloudflare", "binding": "ASSETS" },
+  "vars": {
+    // The OAuth web client id (docs/spikes/S4.md). The redirect URI is <origin>/auth/google,
+    // so the claim host itself needs no config here, only an entry in the Google client.
+    "PUBLIC_GOOGLE_CLIENT_ID": ""
+  }
+}
