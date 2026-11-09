@@ -1,4 +1,5 @@
-# Pinned for shade-attestation 0.2.0 (Mode T, T11); NEAR needs wasm32-unknown-unknown.
+# Exact pin: the deployed wasm (code hash 5GdxDSB4…) is rebuilt byte-for-byte only with this toolchain,
+# and Rust 1.87+ turns on wasm features by default (bulk memory etc.) that the NEAR runtime rejects.
 [toolchain]
 channel = "1.86.0"
 components = ["rustfmt", "clippy"]
