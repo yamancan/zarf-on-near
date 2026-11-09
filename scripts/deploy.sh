@@ -49,7 +49,7 @@ case $NETWORK in
     MIN_LIFETIME_NS=2592000000000000 ;;      # 30 days (spec)
   *) echo "NETWORK must be testnet or mainnet" >&2; exit 64 ;;
 esac
-AGENT_TTL_NS=604800000000000      # 7 days, the Shade CLI re-registration period (spec)
+AGENT_TTL_NS=604800000000000      # 7 days: how long an attested agent's registration lasts (spec, Mode T roadmap)
 RESOLVE_DELAY_NS=3600000000000    # 1 h before resolve_pending may act (spec)
 # Public delay before a proposed upgrade or owner change takes effect.
 # testnet default 10 min; mainnet default 1 h (the contract allows 10 min .. 1 h there)
