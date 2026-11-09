@@ -3,7 +3,10 @@
   import { env } from '$env/dynamic/public';
   import { buildDraft, claimLink, leafList, recoveryFile, type Draft } from '$lib/create/campaign';
   import { getCampaignByRoot, getCampaignView, getConfig, getPrepayBalance, getStorageCosts, txOutcome, type ContractConfig } from '$lib/create/chain';
-  import { checkCreation, fundCampaign, LookupPending, minDeadlineMs, NotCreated, NotSent, OutcomeUnclear, resolveByRoot, settleAfterUncertain } from '$lib/create/funding';
+  import {
+    checkCreation, fundCampaign, LookupPending, mayCreate, minDeadlineMs, NotCreated, NotSent, OutcomeUnclear, readMarker, resolveByRoot,
+    settleAfterUncertain, type UnresolvedMarker,
+  } from '$lib/create/funding';
   import { downloadPublisher, saveFile } from '$lib/create/publish';
   import { formatAmount, parseRecipients } from '$lib/create/recipients';
   import { myNearWallet, type SenderWallet } from '$lib/create/wallet';
@@ -37,8 +40,9 @@
   let hadUncertain = false;
   // Other tabs: an unresolved send there means a new draft here could fund twice.
   const MARKER_KEY = 'zarf-near:unresolved';
-  let otherTab = $state<{ root: string; sender: string } | null>(null);
-  const setMarker = (m: { root: string; sender: string } | null) => {
+  let otherTab = $state<UnresolvedMarker | null>(null);
+  let otherTabNote = $state('');
+  const setMarker = (m: UnresolvedMarker | null) => {
     try {
       if (m) localStorage.setItem(MARKER_KEY, JSON.stringify(m));
       else localStorage.removeItem(MARKER_KEY);
@@ -48,6 +52,8 @@
   };
   let sentFrom = $state<string | null>(null); // the sender of sentTx (the tx lookup needs it)
   /** Pinned to a sender: only that account may send this draft (a second account would fund it twice). */
+  const sendable = $derived(mayCreate({ pinned, sentFrom, account }));
+  // Display only (Create itself goes through mayCreate): pinned to someone else, or to nobody connected.
   const wrongAccount = $derived(pinned && !!sentFrom && account !== sentFrom);
 
   const FUNDING_KEY = 'zarf-near:create-funding';
@@ -111,7 +117,7 @@
       const f = loadFunding();
       if (!f) {
         try {
-          otherTab = JSON.parse(localStorage.getItem(MARKER_KEY) ?? 'null');
+          otherTab = readMarker(localStorage, MARKER_KEY, Date.now());
         } catch {
           otherTab = null;
         }
@@ -270,8 +276,8 @@
 
   async function create() {
     error = '';
-    if (wrongAccount) {
-      error = `This draft belongs to ${sentFrom}: reconnect ${sentFrom} to continue.`;
+    if (!sendable.ok) {
+      error = sendable.reason;
       return;
     }
     busy = 'Waiting for your wallet…';
@@ -290,7 +296,7 @@
               if (!saveFunding({ txHash: null, sender: account!, draft: d, deadline, uncertain: hadUncertain })) throw new Error('session storage unavailable');
               sentFrom = account;
               pinned = true;
-              setMarker({ root: d.merkleRoot, sender: account! });
+              setMarker({ root: d.merkleRoot, sender: account!, total: d.total, at: Date.now() });
             },
             onSent: (txHash) => {
               sentTx = txHash;
@@ -307,6 +313,27 @@
       failed(e);
     } finally {
       busy = '';
+    }
+  }
+
+  /** "Check it" for another tab's unresolved send: clear the marker once its (sender, root) has a campaign. */
+  async function checkOtherTab() {
+    const m = otherTab!;
+    otherTabNote = 'Checking…';
+    try {
+      const id = await resolveByRoot(
+        { sender: m.sender, campaignByRoot: (s, r) => getCampaignByRoot(rpc!, contract!, s, r), campaign: (i) => getCampaignView(rpc!, contract!, i) },
+        { merkleRoot: m.root, total: m.total },
+      );
+      if (id) {
+        setMarker(null);
+        otherTab = null;
+        otherTabNote = `That campaign was created (campaign ${id}). You can start a new one here.`;
+      } else {
+        otherTabNote = 'It has not been created yet. Finish it in its tab, or wait and check again.';
+      }
+    } catch {
+      otherTabNote = 'Could not check right now. Try again in a minute.';
     }
   }
 
@@ -337,7 +364,9 @@
     Another tab has a campaign from <code>{otherTab.sender}</code> whose send has not resolved yet. Finish it there
     before creating a new one here, or the same tokens could be sent twice.
   </p>
+  <p><button onclick={checkOtherTab} disabled={!config}>Check it</button></p>
 {/if}
+{#if otherTabNote}<p role="status">{otherTabNote}</p>{/if}
 
 {#if setupError}
   <p class="error" role="alert">{setupError}</p>
@@ -429,7 +458,7 @@
       </p>
       {#if env.PUBLIC_EXPLORER_TX_URL && sentTx}<p><a href="{env.PUBLIC_EXPLORER_TX_URL}{sentTx}" target="_blank" rel="noopener noreferrer">View it on the explorer</a></p>{/if}
     {:else}
-      <button class="primary" disabled={!recoveryAck || !!busy || !!sentTx || wrongAccount} onclick={create}>{busy || 'Create campaign'}</button>
+      <button class="primary" disabled={!recoveryAck || !!busy || !!sentTx || !sendable.ok} onclick={create}>{busy || 'Create campaign'}</button>
       {#if !pinned}<p><button onclick={() => (draft = null)} disabled={!!busy}>Edit recipients</button></p>{/if}
     {/if}
   {/if}

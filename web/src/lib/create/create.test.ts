@@ -4,7 +4,7 @@ import { proofFor } from '../merkle';
 import { buildDraft, claimLink, commitment, leafList, newSalt, recoveryFile } from './campaign';
 import {
   campaignIdFrom, checkCreation, failedWith, fundCampaign, fundingTxs, LookupPending, minDeadlineMs, NotCreated, OutcomeUnclear, ownerKeySlack,
-  NotSent, prepayShortfall, resolveByRoot, SendUncertain, settleAfterUncertain, type FundDeps, type Outcome,
+  NotSent, prepayShortfall, resolveByRoot, SendUncertain, settleAfterUncertain, mayCreate, readMarker, MARKER_TTL_MS, type FundDeps, type Outcome,
 } from './funding';
 import { formatAmount, parseAmount, parseRecipients } from './recipients';
 
@@ -372,4 +372,41 @@ describe('fundCampaign', () => {
     expect(f.sent).toEqual([['ft_transfer_call']]);
   });
 
+});
+
+describe('mayCreate (a pinned draft belongs to its sender)', () => {
+  it('refuses another account while pinned', () => {
+    const r = mayCreate({ pinned: true, sentFrom: 'x.testnet', account: 'y.testnet' });
+    expect(r).toEqual({ ok: false, reason: 'This draft belongs to x.testnet: reconnect x.testnet to continue.' });
+  });
+  it('allows the sender, and any account before anything was sent', () => {
+    expect(mayCreate({ pinned: true, sentFrom: 'x.testnet', account: 'x.testnet' })).toEqual({ ok: true });
+    expect(mayCreate({ pinned: false, sentFrom: null, account: 'y.testnet' })).toEqual({ ok: true });
+  });
+  it('allows again after reconnecting the sender (reload as another account, then back)', () => {
+    const pin = { pinned: true, sentFrom: 'x.testnet' };
+    expect(mayCreate({ ...pin, account: 'y.testnet' }).ok).toBe(false);
+    expect(mayCreate({ ...pin, account: null }).ok).toBe(false);
+    expect(mayCreate({ ...pin, account: 'x.testnet' }).ok).toBe(true);
+  });
+});
+
+describe('readMarker (unresolved send seen from another tab)', () => {
+  const store = (v: string | null) => {
+    const m = new Map<string, string>(v === null ? [] : [['k', v]]);
+    return { getItem: (k: string) => m.get(k) ?? null, removeItem: (k: string) => void m.delete(k), has: () => m.has('k') };
+  };
+  const marker = { root: 'ab'.repeat(32), sender: 'x.testnet', total: '42', at: 1_000 };
+  it('returns a fresh marker', () => expect(readMarker(store(JSON.stringify(marker)), 'k', 1_000 + 60_000)).toEqual(marker));
+  it('expires after 24 h and removes it', () => {
+    const s = store(JSON.stringify(marker));
+    expect(readMarker(s, 'k', 1_000 + MARKER_TTL_MS + 1)).toBeNull();
+    expect(s.has()).toBe(false);
+  });
+  it('drops a broken or old-format marker', () => {
+    const s = store(JSON.stringify({ root: 'r', sender: 's' }));
+    expect(readMarker(s, 'k', 2_000)).toBeNull();
+    expect(s.has()).toBe(false);
+    expect(readMarker(store('{'), 'k', 2_000)).toBeNull();
+  });
 });

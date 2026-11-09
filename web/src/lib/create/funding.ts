@@ -285,3 +285,39 @@ export async function settleAfterUncertain(
   await sleep(waitMs);
   return resolveByRoot(d, expect);
 }
+
+/**
+ * Whether the connected account may send this draft. Once a draft is pinned (a send may have gone
+ * out), only the account that sent it may send it again: another account would fund it twice.
+ */
+export function mayCreate(o: { pinned: boolean; sentFrom: string | null; account: string | null }): { ok: true } | { ok: false; reason: string } {
+  if (!o.account) return { ok: false, reason: 'Connect a wallet first.' };
+  if (o.pinned && o.sentFrom && o.account !== o.sentFrom) return { ok: false, reason: `This draft belongs to ${o.sentFrom}: reconnect ${o.sentFrom} to continue.` };
+  return { ok: true };
+}
+
+/** A send in some tab whose outcome is not resolved yet (mirrored to localStorage for other tabs). */
+export interface UnresolvedMarker {
+  root: string;
+  sender: string;
+  total: string;
+  at: number; // ms
+}
+
+export const MARKER_TTL_MS = 24 * 60 * 60 * 1000;
+
+/** The marker if present, well-formed and younger than 24 h; an expired or broken one is removed. */
+export function readMarker(store: Pick<Storage, 'getItem' | 'removeItem'>, key: string, nowMs: number): UnresolvedMarker | null {
+  let m: UnresolvedMarker | null = null;
+  try {
+    m = JSON.parse(store.getItem(key) ?? 'null');
+  } catch {
+    m = null;
+  }
+  const ok = !!m && typeof m.root === 'string' && typeof m.sender === 'string' && typeof m.total === 'string' && typeof m.at === 'number';
+  if (!ok || nowMs - m!.at > MARKER_TTL_MS) {
+    if (store.getItem(key) !== null) store.removeItem(key);
+    return null;
+  }
+  return m;
+}
