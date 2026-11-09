@@ -21,7 +21,7 @@ export default {
       if (e instanceof TokenError) return json({ error: e.code }, 401);
       throw e;
     }
-    // Next: read merkle_root + sealed_salt from the contract's campaign view (T2), unseal, recompute the commitment, sign.
+    // T4b: read get_network + get_campaign, check the deadline, recompute HMAC(salt, email), verify the proof, sign.
     return json({ error: 'NOT_IMPLEMENTED' }, 501);
   },
 };

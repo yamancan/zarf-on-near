@@ -1,4 +1,4 @@
-// Byte formats from spec/claim.md v1. Every function here is pinned by spec/vectors.json.
+// Byte formats from spec/claim.md v2. Every function here is pinned by spec/vectors.json.
 
 const enc = new TextEncoder();
 
@@ -37,8 +37,16 @@ function lenPrefixed(s: string): Uint8Array {
 
 const sha256 = async (b: BufferSource) => new Uint8Array(await crypto.subtle.digest('SHA-256', b));
 
-/** Lowercase + trim only: the commitment must match Google's literal `email` claim, so no dot/plus folding. */
-export const canonicalizeEmail = (email: string): string => email.toLowerCase().trim();
+/**
+ * spec v2: trim ASCII whitespace, require printable ASCII, then lowercase. No dot/plus folding: the
+ * commitment must match Google's literal `email` claim. The ASCII check runs before lowercasing
+ * because U+212A (Kelvin sign) lowercases to an ASCII 'k'.
+ */
+export function canonicalizeEmail(email: string): string {
+  const t = email.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, '');
+  if (!/^[\x21-\x7e]+$/.test(t)) throw new Error('email must be printable ASCII');
+  return t.toLowerCase();
+}
 
 export const destinationNonce = async (destination: string): Promise<string> => hex(await sha256(enc.encode(destination)));
 
@@ -72,39 +80,18 @@ export const claimPayload = (a: ClaimArgs): Uint8Array<ArrayBuffer> =>
 // Fixed PKCS#8 headers turn a raw 32-byte seed into an importable private key.
 const pkcs8 = (prefix: string, seed: Uint8Array) => concat(unhex(prefix), seed);
 
-export const importVerifierKey = (seedHex: string): Promise<CryptoKey> =>
-  crypto.subtle.importKey('pkcs8', pkcs8('302e020100300506032b657004220420', unhex(seedHex, 32)), 'Ed25519', false, ['sign']);
+export interface Signer {
+  key: CryptoKey;
+  signer: string; // hex of the ed25519 public key, as the contract's registry names it
+}
+
+export async function importSigner(seedHex: string): Promise<Signer> {
+  const der = pkcs8('302e020100300506032b657004220420', unhex(seedHex, 32));
+  // Extractable once, only to read the public half (JWK `x`).
+  const { x } = await crypto.subtle.exportKey('jwk', await crypto.subtle.importKey('pkcs8', der, 'Ed25519', true, ['sign']));
+  const pub = Uint8Array.from(atob(x!.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+  return { key: await crypto.subtle.importKey('pkcs8', der, 'Ed25519', false, ['sign']), signer: hex(pub) };
+}
 
 export const signClaim = async (key: CryptoKey, args: ClaimArgs): Promise<string> =>
   hex(await crypto.subtle.sign('Ed25519', key, claimPayload(args)));
-
-export interface SealKey {
-  privateKey: CryptoKey;
-  publicKey: Uint8Array;
-}
-
-export async function importSealKey(seedHex: string): Promise<SealKey> {
-  const der = pkcs8('302e020100300506032b656e04220420', unhex(seedHex, 32));
-  // Extractable only to read the public half (JWK `x`), which the HKDF salt needs.
-  const jwk = await crypto.subtle.exportKey('jwk', await crypto.subtle.importKey('pkcs8', der, 'X25519', true, ['deriveBits']));
-  const publicKey = Uint8Array.from(atob(jwk.x!.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
-  return { privateKey: await crypto.subtle.importKey('pkcs8', der, 'X25519', false, ['deriveBits']), publicKey };
-}
-
-/** Throws if the sealed salt was not made for this key and this merkle root (GCM auth). */
-export async function unsealSalt(sealedHex: string, key: SealKey, merkleRootHex: string): Promise<Uint8Array> {
-  const sealed = unhex(sealedHex, 92);
-  const ephPub = sealed.subarray(0, 32), iv = sealed.subarray(32, 44), ctTag = sealed.subarray(44);
-  const eph = await crypto.subtle.importKey('raw', ephPub, 'X25519', false, []);
-  const shared = await crypto.subtle.deriveBits({ name: 'X25519', public: eph }, key.privateKey, 256);
-  const ikm = await crypto.subtle.importKey('raw', shared, 'HKDF', false, ['deriveKey']);
-  const aes = await crypto.subtle.deriveKey(
-    { name: 'HKDF', hash: 'SHA-256', salt: concat(ephPub, key.publicKey), info: enc.encode('ZARF-NEAR-SALT-V1') },
-    ikm,
-    { name: 'AES-GCM', length: 256 },
-    false,
-    ['decrypt'],
-  );
-  const aad = unhex(merkleRootHex, 32);
-  return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv, additionalData: aad }, aes, ctTag));
-}

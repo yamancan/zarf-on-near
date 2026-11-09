@@ -54,5 +54,9 @@ export async function verifyGoogleIdToken(token: string, opts: VerifyOptions): P
   if (typeof payload.email !== 'string') fail('NO_EMAIL');
   if (payload.nonce !== (await destinationNonce(opts.destination))) fail('BAD_NONCE');
 
-  return { email: canonicalizeEmail(payload.email as string) };
+  try {
+    return { email: canonicalizeEmail(payload.email as string) };
+  } catch {
+    return fail('BAD_EMAIL'); // non-ASCII: no allocation can exist for it (spec v2)
+  }
 }

@@ -1,19 +1,23 @@
-// Test-only Worker: runs the spec vectors inside workerd, whose Ed25519/X25519 support differs from Node's.
+// Test-only Worker: runs the spec vectors inside workerd, whose Ed25519 support differs from Node's.
 import v from '../../../spec/vectors.json';
-import { commitment, destinationNonce, hex, importSealKey, importVerifierKey, signClaim, unhex, unsealSalt } from '../../src/claim';
+import { claimPayload, commitment, destinationNonce, hex, importSigner, signClaim, unhex } from '../../src/claim';
 
 export default {
   async fetch(): Promise<Response> {
     const fails: string[] = [];
-    for (const r of v.campaign.recipients)
-      if (hex(await commitment(unhex(v.campaign.salt), r.email)) !== r.commitment) fails.push(`commitment ${r.email}`);
-    const key = await importVerifierKey(v.keys.verifier_seed);
-    for (const c of v.claims.valid) {
-      if ((await signClaim(key, c.args)) !== c.signature) fails.push(`signature ${c.name}`);
-      if ((await destinationNonce(c.args.destination)) !== c.nonce) fails.push(`nonce ${c.name}`);
+    let checked = 0;
+    for (const r of Object.values(v.campaigns).flatMap((c) => c.recipients)) {
+      checked++;
+      if (hex(await commitment(unhex(r.salt), r.email)) !== r.commitment) fails.push(`commitment ${r.email}`);
     }
-    const seal = await importSealKey(v.keys.seal_seed);
-    if (hex(await unsealSalt(v.campaign.sealed_salt, seal, v.campaign.merkle_root)) !== v.campaign.salt) fails.push('unseal');
-    return Response.json({ checked: v.campaign.recipients.length + 2 * v.claims.valid.length + 1, fails });
+    const { key, signer } = await importSigner(v.keys.signer_seed);
+    if (signer !== v.keys.signer) fails.push('signer');
+    for (const c of v.claims.valid) {
+      checked += 2;
+      const args = { network: v.context.network, contract_id: v.context.contract_id, ...c.call_args };
+      if (hex(claimPayload(args)) !== c.payload || (await signClaim(key, args)) !== c.call_args.signature) fails.push(`signature ${c.name}`);
+      if ((await destinationNonce(c.call_args.destination)) !== c.nonce) fails.push(`nonce ${c.name}`);
+    }
+    return Response.json({ checked, fails });
   },
 };

@@ -79,6 +79,7 @@ describe('verifyGoogleIdToken', () => {
     ['EMAIL_NOT_VERIFIED', 'email_verified false', () => sign(google, { ...claims, email_verified: false })],
     ['EMAIL_NOT_VERIFIED', 'email_verified "true" string', () => sign(google, { ...claims, email_verified: 'true' })],
     ['NO_EMAIL', 'email missing', () => sign(google, { ...claims, email: undefined })],
+    ['BAD_EMAIL', 'non-ASCII email (Kelvin sign)', () => sign(google, { ...claims, email: '\u212Aelvin@example.com' })],
     ['BAD_NONCE', 'nonce for another destination', async () => sign(google, { ...claims, nonce: await destinationNonce('bob.testnet') })],
     ['BAD_NONCE', 'uppercase nonce', async () => sign(google, { ...claims, nonce: (await destinationNonce(DEST)).toUpperCase() })],
     ['BAD_NONCE', 'nonce missing', () => sign(google, { ...claims, nonce: undefined })],

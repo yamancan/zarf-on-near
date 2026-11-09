@@ -1,47 +1,50 @@
 import { describe, expect, it } from 'vitest';
 import vectors from '../../spec/vectors.json';
-import {
-  canonicalizeEmail, claimPayload, commitment, destinationNonce, hex, importSealKey, importVerifierKey,
-  signClaim, unhex, unsealSalt,
-} from '../src/claim';
+import { canonicalizeEmail, claimPayload, commitment, destinationNonce, hex, importSigner, signClaim, unhex } from '../src/claim';
 
-const { keys, campaign, claims } = vectors;
+const { keys, context, campaigns, claims } = vectors;
+const recipients = Object.values(campaigns).flatMap((c) => c.recipients);
+const argsOf = (c: (typeof claims.valid)[number]) => ({
+  network: context.network,
+  contract_id: context.contract_id,
+  ...c.call_args,
+});
 
-describe('spec/vectors.json', () => {
+describe('spec/vectors.json (v2)', () => {
   it('is not empty', () => {
-    expect(campaign.recipients.length).toBeGreaterThanOrEqual(1);
+    expect(recipients.length).toBeGreaterThanOrEqual(1);
     expect(claims.valid.length).toBeGreaterThanOrEqual(3);
     expect(claims.invalid.length).toBeGreaterThanOrEqual(1);
+    expect(vectors.rejected_emails.length).toBeGreaterThanOrEqual(1);
   });
 
-  it.each(campaign.recipients)('commitment for $email', async (r) => {
+  it.each(recipients)('commitment for $email', async (r) => {
     expect(canonicalizeEmail(r.email)).toBe(r.canonical_email);
-    expect(hex(await commitment(unhex(campaign.salt), r.email))).toBe(r.commitment);
+    expect(hex(await commitment(unhex(r.salt), r.email))).toBe(r.commitment);
+  });
+
+  it.each(vectors.rejected_emails)('refuses email %j', (e) => {
+    expect(() => canonicalizeEmail(e)).toThrow('ASCII');
+  });
+
+  it('derives the registered signer from its seed', async () => {
+    expect((await importSigner(keys.signer_seed)).signer).toBe(keys.signer);
   });
 
   it.each(claims.valid)('nonce, payload and signature: $name', async (c) => {
-    expect(await destinationNonce(c.args.destination)).toBe(c.nonce);
-    expect(hex(claimPayload(c.args))).toBe(c.payload);
-    expect(await signClaim(await importVerifierKey(keys.verifier_seed), c.args)).toBe(c.signature);
+    const { key, signer } = await importSigner(keys.signer_seed);
+    expect(await destinationNonce(c.call_args.destination)).toBe(c.nonce);
+    expect(hex(claimPayload(argsOf(c)))).toBe(c.payload);
+    expect(c.call_args.signer).toBe(signer);
+    expect(await signClaim(key, argsOf(c))).toBe(c.call_args.signature);
   });
 
-  // E101 vectors carry a signature over other bytes; E102 ones are honestly signed and fail only the merkle check.
+  // E101 vectors carry a signature over other bytes or from another key; E102 ones are honestly signed.
   it.each(claims.invalid)('invalid vector $name ($expect)', async (c) => {
-    expect(hex(claimPayload(c.args))).toBe(c.payload);
-    const ours = await signClaim(await importVerifierKey(keys.verifier_seed), c.args);
-    if (c.expect === 'E101_INVALID_SIGNATURE') expect(ours).not.toBe(c.signature);
-    else expect(ours).toBe(c.signature);
-  });
-
-  it('unseals the campaign salt', async () => {
-    const seal = await importSealKey(keys.seal_seed);
-    expect(hex(seal.publicKey)).toBe(keys.seal_pubkey);
-    expect(hex(await unsealSalt(campaign.sealed_salt, seal, campaign.merkle_root))).toBe(campaign.salt);
-  });
-
-  it('refuses a sealed salt presented with another merkle root', async () => {
-    const seal = await importSealKey(keys.seal_seed);
-    await expect(unsealSalt(campaign.sealed_salt, seal, '00'.repeat(32))).rejects.toThrow();
+    expect(hex(claimPayload(argsOf(c)))).toBe(c.payload);
+    const ours = await signClaim((await importSigner(keys.signer_seed)).key, argsOf(c));
+    if (c.expect === 'E101_INVALID_SIGNATURE') expect(ours === c.call_args.signature && c.call_args.signer === keys.signer).toBe(false);
+    else expect(ours).toBe(c.call_args.signature);
   });
 
   it('nonce known answer: sha256("abc")', async () => {
@@ -50,7 +53,7 @@ describe('spec/vectors.json', () => {
 });
 
 describe('payload encoding guards', () => {
-  const args = claims.valid[0].args;
+  const args = argsOf(claims.valid[0]);
   it.each([
     ['amount above u128', { amount: (1n << 128n).toString() }],
     ['negative campaign id', { campaign_id: '-1' }],
