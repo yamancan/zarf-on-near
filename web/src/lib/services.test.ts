@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import vectors from '../../../spec/vectors.json';
-import { ClaimError, describeError, fetchLeaves, getCampaign, getClaimState, requestSignature, settleClaim, submitClaim, type ClaimState } from './services';
+import { ClaimError, describeError, fetchLeaves, getCampaign, getClaimState, outcomeAfterRelay, requestSignature, settleClaim, submitClaim, type ClaimState } from './services';
 
 const reply = (body: unknown, status = 200) => vi.fn(async () => new Response(JSON.stringify(body), { status }));
 afterEach(() => vi.unstubAllGlobals());
@@ -58,15 +58,15 @@ describe('verifier and relayer', () => {
   });
   const HASH = '6zgh2u9DqHHiXzdy9ouTP7oGky2T4nugqzqt9wJZwNFm';
   it('posts the signed args to the relayer and returns the tx hash', async () => {
-    const fetchMock = reply({ tx_hash: HASH });
+    const fetchMock = reply({ tx_hash: HASH, status: 'paid' });
     vi.stubGlobal('fetch', fetchMock);
     const args = vectors.claims.valid[0].call_args;
-    expect(await submitClaim('https://r.test', args)).toBe(HASH);
+    expect(await submitClaim('https://r.test', args)).toEqual({ txHash: HASH, paid: true });
     expect((fetchMock.mock.calls[0] as unknown as [string])[0]).toBe('https://r.test/claim');
   });
   it('a 202 "submitted" from the relayer still yields the hash, so the receipt polls claim_state', async () => {
     vi.stubGlobal('fetch', reply({ tx_hash: HASH, status: 'submitted' }, 202));
-    expect(await submitClaim('https://r.test', vectors.claims.valid[0].call_args)).toBe(HASH);
+    expect(await submitClaim('https://r.test', vectors.claims.valid[0].call_args)).toEqual({ txHash: HASH, paid: false });
   });
   it('a 409 E115 from the relayer is the reopened-claim error', async () => {
     vi.stubGlobal('fetch', reply({ error: 'E115_TOKEN_TRANSFER_FAILED', tx_hash: HASH }, 409));
@@ -106,8 +106,17 @@ describe('settleClaim (after the relayer returns a hash)', () => {
     expect(await settleClaim(reads('pending', 'pending', 'claimed'), c)).toBe('claimed');
     expect(c.elapsed()).toBe(3000); // 1 s + 2 s backoff
   });
-  it('unclaimed: the transfer failed and the claim reopened', async () => {
+  it('unclaimed after pending: the transfer failed and the claim reopened', async () => {
     expect(await settleClaim(reads('pending', 'unclaimed'), clock())).toBe('unclaimed');
+  });
+  it('a lagging node that still says unclaimed is not believed within the grace period', async () => {
+    const c = clock();
+    expect(await settleClaim(reads('unclaimed', 'unclaimed', 'pending', 'claimed'), c)).toBe('claimed');
+  });
+  it('unclaimed with no pending ever seen becomes final after the 20 s grace', async () => {
+    const c = clock();
+    expect(await settleClaim(reads('unclaimed'), c)).toBe('unclaimed');
+    expect(c.elapsed()).toBeGreaterThanOrEqual(19_000);
   });
   it('still pending after ~60 s: gives up without claiming success or failure', async () => {
     const c = clock();
@@ -122,12 +131,21 @@ describe('settleClaim (after the relayer returns a hash)', () => {
     expect(await settleClaim(reads(new Error('rpc'), 'claimed'), clock())).toBe('claimed');
     expect(await settleClaim(reads(new Error('rpc')), clock())).toBe('pending');
   });
-  it('reads claim_state from the contract', async () => {
+  it('a relayer "paid" (claim_paid event) is claimed at once, even if a lagging node says unclaimed', async () => {
+    const read = vi.fn(reads('unclaimed'));
+    expect(await outcomeAfterRelay({ paid: true }, read, clock())).toBe('claimed');
+    expect(read).not.toHaveBeenCalled();
+  });
+  it('a relayer 202 polls: pending -> claimed', async () => {
+    expect(await outcomeAfterRelay({ paid: false }, reads('pending', 'claimed'), clock())).toBe('claimed');
+  });
+  it('reads claim_state from the contract at optimistic finality', async () => {
     const fetchMock = reply({ result: { result: [...new TextEncoder().encode('"claimed"')] } });
     vi.stubGlobal('fetch', fetchMock);
     expect(await getClaimState('https://rpc.test', 'zarf-near.testnet', '7', 'ab'.repeat(32))).toBe('claimed');
     const sent = JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
     expect(sent.params.method_name).toBe('claim_state');
+    expect(sent.params.finality).toBe('optimistic');
     expect(JSON.parse(atob(sent.params.args_base64))).toEqual({ campaign_id: '7', commitment: 'ab'.repeat(32) });
   });
 });

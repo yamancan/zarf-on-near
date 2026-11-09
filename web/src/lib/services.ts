@@ -36,14 +36,14 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
 }
 
 /** NEAR RPC view call (`query` / `call_function`). */
-export async function nearView<T>(rpcUrl: string, contractId: string, method: string, args: object): Promise<T> {
+export async function nearView<T>(rpcUrl: string, contractId: string, method: string, args: object, finality: 'final' | 'optimistic' = 'final'): Promise<T> {
   const res = await postJson<{ result?: { result?: number[]; error?: string }; error?: unknown }>(rpcUrl, {
     jsonrpc: '2.0',
     id: 'zarf',
     method: 'query',
     params: {
       request_type: 'call_function',
-      finality: 'final',
+      finality,
       account_id: contractId,
       method_name: method,
       args_base64: btoa(JSON.stringify(args)),
@@ -81,12 +81,16 @@ export async function fetchLeaves(baseUrl: string | undefined, campaignId: strin
 export const requestSignature = async (verifierUrl: string | undefined, body: Record<string, unknown>) =>
   postJson<ClaimArgs>(`${need(verifierUrl, 'PUBLIC_VERIFIER_URL')}/claim`, body);
 
-/** spec/claim.md "Relayer": POST /claim with exactly the verifier's 200 body → { tx_hash }. */
-export async function submitClaim(relayerUrl: string | undefined, args: ClaimArgs): Promise<string> {
-  const { tx_hash } = await postJson<{ tx_hash?: string }>(`${need(relayerUrl, 'PUBLIC_RELAYER_URL')}/claim`, args);
+/**
+ * spec/claim.md "Relayer": POST /claim with exactly the verifier's 200 body. 200 `paid` comes from our
+ * contract's claim_paid event in the executed receipt; 202 `submitted` means the outcome is not known
+ * yet; 409 E115 (claim_reverted) throws.
+ */
+export async function submitClaim(relayerUrl: string | undefined, args: ClaimArgs): Promise<{ txHash: string; paid: boolean }> {
+  const { tx_hash, status } = await postJson<{ tx_hash?: string; status?: string }>(`${need(relayerUrl, 'PUBLIC_RELAYER_URL')}/claim`, args);
   // A NEAR tx hash is base58 of 32 bytes; anything else would end up in the explorer link.
   if (typeof tx_hash !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(tx_hash)) throw new ClaimError('RELAYER_NO_TX');
-  return tx_hash;
+  return { txHash: tx_hash, paid: status === 'paid' };
 }
 
 const MESSAGES: Record<string, string> = {
@@ -119,26 +123,35 @@ export function describeError(e: unknown): string {
 
 export type ClaimState = 'unclaimed' | 'pending' | 'claimed';
 
+// Optimistic: the freshest state; a lagging `final` read right after the tx would say "unclaimed".
 export const getClaimState = async (rpcUrl: string | undefined, contractId: string | undefined, campaignId: string, commitment: string) =>
-  nearView<ClaimState>(need(rpcUrl, 'PUBLIC_NEAR_RPC_URL'), need(contractId, 'PUBLIC_CONTRACT_ID'), 'claim_state', { campaign_id: campaignId, commitment });
+  nearView<ClaimState>(need(rpcUrl, 'PUBLIC_NEAR_RPC_URL'), need(contractId, 'PUBLIC_CONTRACT_ID'), 'claim_state', { campaign_id: campaignId, commitment }, 'optimistic');
 
 const BACKOFF_MS = [1000, 2000, 3000, 5000, 8000];
 
 /**
- * The relayer's 200 only means the tx ran; the token transfer can still fail and reopen the claim.
- * Polls claim_state until it is no longer pending, or `timeoutMs` passes. A failed read counts as
- * still pending, so an RPC hiccup never turns into a false success or a false failure.
+ * For a relayer 202: polls claim_state until it settles, or `timeoutMs` passes. A node that has not
+ * seen the tx yet still says "unclaimed", so that is final only once "pending" was seen or after
+ * `graceMs`. A failed read or an unexpected value counts as pending: never a false success or failure.
  */
 export async function settleClaim(
   read: () => Promise<ClaimState>,
-  { timeoutMs = 60_000, sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms)), now = Date.now } = {},
+  { timeoutMs = 60_000, graceMs = 20_000, sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms)), now = Date.now } = {},
 ): Promise<ClaimState> {
-  const end = now() + timeoutMs;
+  const start = now();
+  const end = start + timeoutMs;
+  let sawPending = false;
   for (let i = 0; ; i++) {
     const state = await read().catch(() => 'pending' as const);
-    if (state === 'claimed' || state === 'unclaimed') return state; // anything unexpected counts as pending
+    if (state === 'claimed') return state;
+    if (state === 'unclaimed' && (sawPending || now() - start >= graceMs)) return state;
+    if (state === 'pending') sawPending = true;
     const wait = BACKOFF_MS[Math.min(i, BACKOFF_MS.length - 1)];
     if (now() + wait > end) return 'pending';
     await sleep(wait);
   }
 }
+
+/** After the relayer: its event-based "paid" is final; otherwise poll the chain. */
+export const outcomeAfterRelay = (relay: { paid: boolean }, read: () => Promise<ClaimState>, opts?: Parameters<typeof settleClaim>[1]) =>
+  relay.paid ? Promise.resolve<ClaimState>('claimed') : settleClaim(read, opts);

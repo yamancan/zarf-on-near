@@ -4,7 +4,7 @@
   import { env } from '$env/dynamic/public';
   import { clearAttempt, isImplicitAccount, loadAttempt, signedIn } from '$lib/claim';
   import { checkedProof } from '$lib/merkle';
-  import { ClaimError, describeError, fetchLeaves, getCampaign, getClaimState, requestSignature, settleClaim, submitClaim } from '$lib/services';
+  import { ClaimError, describeError, fetchLeaves, getCampaign, getClaimState, outcomeAfterRelay, requestSignature, submitClaim } from '$lib/services';
 
   const attempt = loadAttempt();
   const idToken = signedIn.idToken;
@@ -35,9 +35,10 @@
         salt: attempt.salt,
       });
       step = 'paying';
-      txHash = await submitClaim(env.PUBLIC_RELAYER_URL, args);
+      const relay = await submitClaim(env.PUBLIC_RELAYER_URL, args); // a reverted transfer (409 E115) throws
+      txHash = relay.txHash;
       step = 'settling';
-      const state = await settleClaim(() => getClaimState(env.PUBLIC_NEAR_RPC_URL, env.PUBLIC_CONTRACT_ID, attempt.campaign, attempt.commitment));
+      const state = await outcomeAfterRelay(relay, () => getClaimState(env.PUBLIC_NEAR_RPC_URL, env.PUBLIC_CONTRACT_ID, attempt.campaign, attempt.commitment));
       if (state === 'claimed') {
         step = 'done';
         clearAttempt(); // salt and destination are no longer needed in this tab
@@ -45,8 +46,12 @@
         step = state === 'unclaimed' ? 'reverted' : 'unsettled'; // the attempt stays, so a retry keeps the salt
       }
     } catch (e) {
-      error = describeError(e);
-      step = 'failed';
+      // The relayer saw claim_reverted: same state as a reopened claim, with the retry link.
+      if (e instanceof ClaimError && e.code === 'E115_TOKEN_TRANSFER_FAILED') step = 'reverted';
+      else {
+        error = describeError(e);
+        step = 'failed';
+      }
     }
   });
 </script>
