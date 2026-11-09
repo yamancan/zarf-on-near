@@ -155,3 +155,9 @@ export async function settleClaim(
 /** After the relayer: its event-based "paid" is final; otherwise poll the chain. */
 export const outcomeAfterRelay = (relay: { paid: boolean }, read: () => Promise<ClaimState>, opts?: Parameters<typeof settleClaim>[1]) =>
   relay.paid ? Promise.resolve<ClaimState>('claimed') : settleClaim(read, opts);
+
+// Codes where opening the link again cannot help: the claim is paid, the campaign ended, or it does not exist.
+const FINAL = new Set(['E105_ALREADY_CLAIMED', 'E125_CAMPAIGN_ENDED', 'E110_UNKNOWN_CAMPAIGN']);
+
+/** Whether to suggest opening the claim link again after this failure. */
+export const canRetry = (e: unknown): boolean => !(e instanceof ClaimError && FINAL.has(e.code));

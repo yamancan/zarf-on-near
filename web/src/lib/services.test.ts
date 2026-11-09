@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import vectors from '../../../spec/vectors.json';
-import { ClaimError, describeError, fetchLeaves, getCampaign, getClaimState, outcomeAfterRelay, requestSignature, settleClaim, submitClaim, type ClaimState } from './services';
+import { canRetry, ClaimError, describeError, fetchLeaves, getCampaign, getClaimState, outcomeAfterRelay, requestSignature, settleClaim, submitClaim, type ClaimState } from './services';
 
 const reply = (body: unknown, status = 200) => vi.fn(async () => new Response(JSON.stringify(body), { status }));
 afterEach(() => vi.unstubAllGlobals());
@@ -148,4 +148,14 @@ describe('settleClaim (after the relayer returns a hash)', () => {
     expect(sent.params.finality).toBe('optimistic');
     expect(JSON.parse(atob(sent.params.args_base64))).toEqual({ campaign_id: '7', commitment: 'ab'.repeat(32) });
   });
+});
+
+describe('canRetry (no "try again" when it cannot help)', () => {
+  it.each(['E105_ALREADY_CLAIMED', 'E125_CAMPAIGN_ENDED', 'E110_UNKNOWN_CAMPAIGN'])('%s: no retry hint', (c) => {
+    expect(canRetry(new ClaimError(c))).toBe(false);
+  });
+  it.each(['UPSTREAM_UNAVAILABLE', 'EXPIRED', 'BAD_NONCE', 'E115_TOKEN_TRANSFER_FAILED', 'RATE_LIMITED'])('%s: retry hint', (c) => {
+    expect(canRetry(new ClaimError(c))).toBe(true);
+  });
+  it('an unexpected error keeps the hint', () => expect(canRetry(new Error('x'))).toBe(true));
 });

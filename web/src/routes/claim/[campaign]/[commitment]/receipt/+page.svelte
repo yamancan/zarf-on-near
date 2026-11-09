@@ -4,7 +4,7 @@
   import { env } from '$env/dynamic/public';
   import { clearAttempt, isImplicitAccount, loadAttempt, signedIn } from '$lib/claim';
   import { checkedProof } from '$lib/merkle';
-  import { ClaimError, describeError, fetchLeaves, getCampaign, getClaimState, outcomeAfterRelay, requestSignature, submitClaim } from '$lib/services';
+  import { canRetry, ClaimError, describeError, fetchLeaves, getCampaign, getClaimState, outcomeAfterRelay, requestSignature, submitClaim } from '$lib/services';
 
   const attempt = loadAttempt();
   const idToken = signedIn.idToken;
@@ -12,6 +12,7 @@
 
   let step = $state<'checking' | 'paying' | 'settling' | 'done' | 'reverted' | 'unsettled' | 'failed'>('checking');
   let error = $state('');
+  let retryable = $state(true);
   let txHash = $state('');
   const explorer = $derived(env.PUBLIC_EXPLORER_TX_URL ? `${env.PUBLIC_EXPLORER_TX_URL}${txHash}` : '');
 
@@ -50,6 +51,7 @@
       if (e instanceof ClaimError && e.code === 'E115_TOKEN_TRANSFER_FAILED') step = 'reverted';
       else {
         error = describeError(e);
+        retryable = canRetry(e);
         step = 'failed';
       }
     }
@@ -81,6 +83,6 @@
     {#if explorer}<p><a href={explorer} target="_blank" rel="noopener noreferrer">View the transaction</a></p>{/if}
   {:else if step === 'failed'}
     <p class="error" role="alert">{error}</p>
-    <p class="muted">Open your claim link to try again.</p>
+    {#if retryable}<p class="muted">Open your claim link to try again.</p>{/if}
   {/if}
 {/if}
