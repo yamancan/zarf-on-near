@@ -3,7 +3,8 @@
 **Pay any email, on any chain.** A sender funds a campaign with USDC for a list of email
 addresses. Each recipient opens their claim link, signs in with Google, and receives the tokens
 at a NEAR account they choose, without holding NEAR or a wallet beforehand. The chain stores
-only salted commitments and amounts, never an email. Built for the NEAR Hackathon
+salted commitments, amounts, each campaign's merkle root and sender, and each claim's destination;
+never an email. Built for the NEAR Hackathon
 (build window ends 2026-11-14 23:59 UTC).
 
 > Status: work in progress. Sections marked **TODO** are filled in before submission.
@@ -28,13 +29,17 @@ Read this before using it with real money.
 - **The owner's emergency exit can affect one claim.** `resolve_pending` settles a claim stuck in
   `pending` after an hour. A wrong answer can double-pay or block that **one** claim; it cannot
   touch any other allocation.
-- **The salt travels only in the claim link**, in the URL fragment (`#s=`), which never reaches a
-  server. A leaked link lets its holder test one guessed email against one commitment; it does
-  not let anyone claim without that Google account.
+- **The salt is in the claim link's fragment** (`#s=`), which the claim site's server never
+  receives. At claim time it goes only to the verifier, which never logs it. The sender's recovery
+  file and link list hold every salt. A leaked link lets its holder test one guessed email against
+  one commitment; it does not let anyone claim without that Google account.
 - **The relayer pays gas and nothing else.** It signs with a NEAR function-call key limited to the
   contract's `claim` method and attaches no deposit. It refuses claims that our verifier did not
   sign. The destination is inside the verifier's signature, so the relayer cannot redirect funds.
 - **Unclaimed funds go back to the sender** with `reclaim` after the campaign deadline.
+- **Storage is pre-paid by the sender** in NEAR (`prepay_deposit`): the campaign entry plus storage
+  for each claim. The unused reservation returns to the sender's free pre-pay on `reclaim`, and
+  `prepay_withdraw` sends free pre-pay back to the sender.
 
 Known limit: an account created in the browser ("Create one for me") receives the USDC but needs a
 little NEAR for gas before it can move it. **TODO:** the owner decides whether claims include a
@@ -62,11 +67,12 @@ small NEAR drip.
 | Verifier | `verifier/` | Cloudflare Worker: Google ID token (RS256, JWKS, aud/iss/exp/email_verified, nonce = destination), HMAC commitment, merkle proof, chain checks, ed25519 signature |
 | Relayer | `relayer/` | Cloudflare Worker: submits verifier-signed `claim` calls with a claim-only function-call key; payout status from the contract's events |
 | Create app | `web/src/routes/create` | CSV → salts, commitments, tree; storage pre-pay + one `ft_transfer_call`; claim links and the public leaf list |
-| Claim app | `web/src/routes/claim` | Destination (existing account or an in-browser implicit account), Google sign-in, verifier → relayer, receipt from on-chain state |
+| Claim app | `web/src/routes/claim` | Destination (existing account or an in-browser implicit account), Google sign-in, verifier → relayer; the receipt trusts the relayer's event-based 200 (`claim_paid`) and polls `claim_state` only on a 202 |
 
 ## Run the tests
 
-No secrets and no Google login are needed. Node 24 and pnpm:
+No secrets and no Google login are needed. Node 24 and pnpm 10.30.3 (pinned in each
+`package.json` as `packageManager`); `pnpm install` needs network access:
 
 ```sh
 (cd verifier && pnpm install && pnpm test && pnpm typecheck)
@@ -85,11 +91,11 @@ full flow in a local sandbox with a test-only OIDC issuer.
 | The verifier also produces the same signatures inside Cloudflare's runtime | `verifier/test/workerd.test.ts` |
 | A Google sign-in only pays the destination chosen before it | `verifier/test/googleIdToken.test.ts` (`BAD_NONCE`), `web/src/lib/claim.test.ts` (nonce vectors) |
 | Another person's Google account or claim link cannot claim | `verifier/test/claimFlow.test.ts` (`COMMITMENT_MISMATCH`) |
-| The verifier signs nothing the contract would refuse (deadline, claimed, pending, snapshot, balance, its own registry entry) | `verifier/test/claimFlow.test.ts` |
+| Before signing, the verifier checks: the Google token and the destination; that the campaign exists and its deadline has not passed; that the commitment is neither claimed nor pending; HMAC(salt, email) = commitment; the merkle proof against the on-chain root; that its key is in the campaign snapshot and its registry entry outlives the signature; that the balance covers the amount. It does not pre-check the contract's storage (E128) or gas (E130) checks | `verifier/test/claimFlow.test.ts` |
 | No email or salt goes on chain or into the public leaf list | `web/src/lib/create/create.test.ts` (leaf list test); `spec/claim.md` |
 | The relayer can only call `claim`, never with a deposit, and refuses claims our verifier did not sign | `relayer/test/relay.test.ts`, `relayer/test/near.test.ts` (transaction bytes checked against `@near-js/transactions`) |
 | A reverted transfer is never shown as paid | `relayer/test/relay.test.ts` (`claim_reverted`), `web/src/lib/services.test.ts` (`settleClaim`) |
-| The create app never funds a campaign twice when an outcome is lost | `web/src/lib/create/create.test.ts` (`fundCampaign`) |
+| A draft can be funded at most once: (sender, merkle_root) is an idempotency key (E132), and after a lost wallet response the app checks `campaign_by_root` before any resend | `web/src/lib/create/create.test.ts` (`fundCampaign`, `resolveByRoot`); contract test `duplicate_root_is_e132_and_changes_nothing` (**TODO**: path once `contract/` lands) |
 | Funds never stay stuck in `pending`; reclaim excludes in-flight funds | **TODO (T3)** contract tests |
 | A real claim on testnet | **TODO:** tx hash |
 | A cross-chain claim through NEAR Intents lands on Base | **TODO (T9):** tx hashes |
