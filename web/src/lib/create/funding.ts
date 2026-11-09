@@ -79,16 +79,23 @@ export interface Outcome {
 export const failedWith = (o: Outcome, code: string): boolean =>
   (o.receipts_outcome ?? []).some((r) => r.outcome?.status?.Failure !== undefined && JSON.stringify(r.outcome.status.Failure).includes(code));
 
-/** campaign_id from the contract's `campaign_created` event (NEP-297) in an executed tx. */
-export function campaignIdFrom(outcome: Outcome, contractId: string): string | null {
+/**
+ * campaign_id from our contract's `campaign_created` event (NEP-297), only if the event's merkle_root
+ * and amount are the ones we sent: a mismatched event is not our campaign.
+ */
+export function campaignIdFrom(outcome: Outcome, contractId: string, expect: { merkleRoot: string; total: string }): string | null {
   for (const r of outcome.receipts_outcome ?? []) {
     if (r.outcome?.executor_id !== contractId) continue;
     for (const log of r.outcome.logs ?? []) {
       if (!log.startsWith('EVENT_JSON:')) continue;
       try {
         const e = JSON.parse(log.slice('EVENT_JSON:'.length));
-        if (e.standard === 'zarf-near' && e.event === 'campaign_created' && /^\d+$/.test(String(e.data?.[0]?.campaign_id))) {
-          return String(e.data[0].campaign_id);
+        const data = e.data?.[0];
+        if (
+          e.standard === 'zarf-near' && e.event === 'campaign_created' && /^\d+$/.test(String(data?.campaign_id)) &&
+          data.merkle_root === expect.merkleRoot && String(data.amount) === expect.total
+        ) {
+          return String(data.campaign_id);
         }
       } catch {
         // not our event
@@ -110,6 +117,11 @@ export interface FundDeps {
   freePrepay(): Promise<string>;
   send(txs: Tx[]): Promise<string[]>;
   outcome(hash: string): Promise<Outcome>;
+  /** Called as soon as the wallet returns the funding tx hash, before anything else can fail. */
+  onSent?(txHash: string): void;
+  /** Lookup retries before giving up with LookupPending (the tx is never re-sent). */
+  lookupRetries?: number;
+  sleep?(ms: number): Promise<void>;
 }
 
 /** First contract error code (E1xx_*) among the tx's failed receipts, if any. */
@@ -121,10 +133,74 @@ const failureCode = (o: Outcome): string | null => {
   return null;
 };
 
+/** The funding tx was sent but its outcome could not be read yet. Check again; never send again. */
+export class LookupPending extends Error {
+  constructor(readonly txHash: string) {
+    super('LOOKUP_PENDING');
+  }
+}
+
+/** The tx ran but neither created our campaign nor provably returned the tokens: do not send again. */
+export class OutcomeUnclear extends Error {
+  constructor(readonly txHash: string) {
+    super('OUTCOME_UNCLEAR');
+  }
+}
+
+/** The tokens did not stay with the contract (refunded or never moved); safe to try again. */
+export class NotCreated extends Error {
+  constructor(readonly code: string, readonly txHash: string) {
+    super(code);
+  }
+}
+
+export type Creation =
+  | { kind: 'created'; campaignId: string; txHash: string }
+  | { kind: 'refunded'; code: string; txHash: string }
+  | { kind: 'unclear'; txHash: string };
+
+/**
+ * What a funding tx did. "refunded" needs proof: our contract's ft_on_transfer receipt failed (NEP-141
+ * then returns the full amount), or the token refused ft_transfer_call before calling the contract.
+ */
+export function classifyCreation(o: Outcome, txHash: string, d: Pick<FundDeps, 'contractId' | 'tokenId'>, expect: { merkleRoot: string; total: string }): Creation {
+  const campaignId = campaignIdFrom(o, d.contractId, expect);
+  if (campaignId) return { kind: 'created', campaignId, txHash };
+  const receipts = o.receipts_outcome ?? [];
+  const failed = (by: string) => receipts.some((r) => r.outcome?.executor_id === by && r.outcome.status?.Failure !== undefined);
+  const contractRan = receipts.some((r) => r.outcome?.executor_id === d.contractId);
+  if (failed(d.contractId) || (!contractRan && failed(d.tokenId))) {
+    return { kind: 'refunded', code: failureCode(o) ?? 'CAMPAIGN_NOT_CREATED', txHash };
+  }
+  return { kind: 'unclear', txHash };
+}
+
+const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** Reads the executed tx, retrying the lookup only (1, 2, 4, 8, 15 s...). */
+export async function lookupOutcome(d: Pick<FundDeps, 'outcome' | 'lookupRetries' | 'sleep'>, txHash: string): Promise<Outcome> {
+  for (let i = 0; ; i++) {
+    try {
+      return await d.outcome(txHash);
+    } catch {
+      if (i >= (d.lookupRetries ?? 6)) throw new LookupPending(txHash);
+      await (d.sleep ?? defaultSleep)(Math.min(1000 * 2 ** i, 15_000));
+    }
+  }
+}
+
+/** For a funding tx already sent (e.g. after a reload): look it up and classify it. Never sends. */
+export const checkCreation = async (
+  d: Pick<FundDeps, 'outcome' | 'lookupRetries' | 'sleep' | 'contractId' | 'tokenId'>,
+  txHash: string,
+  expect: { merkleRoot: string; total: string },
+): Promise<Creation> => classifyCreation(await lookupOutcome(d, txHash), txHash, d, expect);
+
 /**
  * Pre-pays the storage shortfall and sends the tokens; returns the new campaign id.
- * On E128 (the snapshot grew after our read; NEP-141 already refunded the tokens) it re-reads
- * the costs and tries once more.
+ * - After send, only the lookup is retried; a lost outcome throws LookupPending, never a re-send.
+ * - On a proven E128 refund (the snapshot grew after our read) it re-reads the costs and sends once more.
+ * - Another proven refund throws NotCreated; an unproven one throws OutcomeUnclear.
  */
 export async function fundCampaign(
   d: FundDeps,
@@ -136,10 +212,11 @@ export async function fundCampaign(
     const hashes = await d.send(fundingTxs({ ...p, sender: d.sender, contractId: d.contractId, tokenId: d.tokenId, shortfall }));
     const txHash = hashes[hashes.length - 1]; // ft_transfer_call is always last
     if (!txHash) throw new Error('the wallet returned no transaction');
-    const outcome = await d.outcome(txHash);
-    const campaignId = campaignIdFrom(outcome, d.contractId);
-    if (campaignId) return { campaignId, txHash };
-    if (attempt === 0 && failedWith(outcome, 'E128')) continue;
-    throw new Error(failureCode(outcome) ?? 'CAMPAIGN_NOT_CREATED');
+    d.onSent?.(txHash);
+    const c = await checkCreation(d, txHash, { merkleRoot: p.merkleRoot, total: p.total });
+    if (c.kind === 'created') return { campaignId: c.campaignId, txHash };
+    if (c.kind === 'unclear') throw new OutcomeUnclear(txHash);
+    if (attempt === 0 && c.code.startsWith('E128')) continue;
+    throw new NotCreated(c.code, txHash);
   }
 }

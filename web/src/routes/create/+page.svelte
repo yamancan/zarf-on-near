@@ -3,7 +3,7 @@
   import { env } from '$env/dynamic/public';
   import { buildDraft, claimLink, leafList, recoveryFile, type Draft } from '$lib/create/campaign';
   import { getConfig, getPrepayBalance, getStorageCosts, txOutcome, type ContractConfig } from '$lib/create/chain';
-  import { fundCampaign, minDeadlineMs } from '$lib/create/funding';
+  import { checkCreation, fundCampaign, LookupPending, minDeadlineMs, NotCreated, OutcomeUnclear } from '$lib/create/funding';
   import { downloadPublisher, saveFile } from '$lib/create/publish';
   import { formatAmount, parseRecipients } from '$lib/create/recipients';
   import { myNearWallet, type SenderWallet } from '$lib/create/wallet';
@@ -27,6 +27,40 @@
   let result = $state<{ campaignId: string; txHash: string } | null>(null);
   let publishTodo = $state<string | null>(null);
   let copied = $state(false);
+  // A funding tx that was sent: while set, Create stays off until its outcome is known.
+  let sentTx = $state<string | null>(null);
+  let txState = $state<'checking' | 'unclear' | null>(null);
+  let sentFrom = $state<string | null>(null); // the sender of sentTx (the tx lookup needs it)
+
+  const FUNDING_KEY = 'zarf-near:create-funding';
+  interface Funding {
+    txHash: string;
+    sender: string;
+    draft: Draft;
+    deadline: string;
+    campaignId?: string;
+  }
+  const saveFunding = (f: Funding) => {
+    try {
+      sessionStorage.setItem(FUNDING_KEY, JSON.stringify(f));
+    } catch {
+      // storage off: the recovery file still holds everything
+    }
+  };
+  const loadFunding = (): Funding | null => {
+    try {
+      return JSON.parse(sessionStorage.getItem(FUNDING_KEY) ?? 'null');
+    } catch {
+      return null;
+    }
+  };
+  const clearFunding = () => {
+    try {
+      sessionStorage.removeItem(FUNDING_KEY);
+    } catch {
+      // nothing to clear
+    }
+  };
 
   const toLocalInput = (ms: number) => new Date(ms - new Date(ms).getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
   const minMs = $derived(config ? minDeadlineMs(Date.now(), config.min_lifetime_ns) : null);
@@ -51,6 +85,16 @@
       deadline = toLocalInput(Math.max(Date.now() + 7 * 86_400_000, minDeadlineMs(Date.now(), config.min_lifetime_ns) + 3_600_000));
       wallet = await myNearWallet(config.network, rpc);
       account = wallet.accountId();
+      // A funding tx from before a reload: resume checking it instead of offering Create again.
+      const f = loadFunding();
+      if (f) {
+        draft = f.draft;
+        deadline = f.deadline;
+        recoverySaved = recoveryAck = true;
+        sentFrom = f.sender;
+        if (f.campaignId) result = { campaignId: f.campaignId, txHash: f.txHash };
+        else await check(f.txHash);
+      }
     } catch {
       setupError = 'Could not read the contract. Try again in a minute.';
     }
@@ -77,7 +121,8 @@
   }
 
   function saveRecovery() {
-    saveFile(`zarf-recovery-${draft!.merkleRoot.slice(0, 8)}.json`, recoveryFile(draft!, (BigInt(deadlineMs) * 1_000_000n).toString()));
+    const ctx = { contractId: contract!, network: config!.network, claimOrigin };
+    saveFile(`zarf-recovery-${draft!.merkleRoot.slice(0, 8)}.json`, recoveryFile(draft!, (BigInt(deadlineMs) * 1_000_000n).toString(), ctx));
     recoverySaved = true;
   }
 
@@ -88,25 +133,74 @@
     E128_INSUFFICIENT_STORAGE: 'The storage pre-pay was too low twice in a row. Your tokens were refunded; try again.',
   };
 
+  const lookup = { outcome: (hash: string) => txOutcome(rpc!, hash, sentFrom ?? account!), contractId: contract!, tokenId: token! };
+
+  async function created(r: { campaignId: string; txHash: string }) {
+    result = r;
+    txState = null;
+    saveFunding({ txHash: r.txHash, sender: sentFrom ?? account!, draft: draft!, deadline, campaignId: r.campaignId });
+    publishTodo = (await downloadPublisher(env.PUBLIC_LEAVES_URL).publish(leafList(r.campaignId, draft!))).todo;
+  }
+
+  function failed(e: unknown) {
+    if (e instanceof LookupPending) {
+      txState = 'checking'; // sent, outcome unknown: Create stays off
+    } else if (e instanceof OutcomeUnclear) {
+      txState = 'unclear';
+    } else if (e instanceof NotCreated) {
+      // Proven: the tokens are back (or never left). Only now may the sender try again.
+      sentTx = txState = null;
+      clearFunding();
+      error = ERRORS[e.code] ?? `The campaign was not created (${e.code}). Your tokens were returned.`;
+    } else if (!sentTx) {
+      error = `Nothing was sent (${(e as Error).message}).`; // the wallet failed or was closed before sending
+    } else {
+      txState = 'checking';
+    }
+  }
+
+  /** Looks up a funding tx that was already sent. Never sends anything. */
+  async function check(txHash: string) {
+    sentTx = txHash;
+    txState = 'checking';
+    busy = 'Checking the transaction…';
+    try {
+      const c = await checkCreation(lookup, txHash, { merkleRoot: draft!.merkleRoot, total: draft!.total });
+      if (c.kind === 'created') await created(c);
+      else if (c.kind === 'refunded') failed(new NotCreated(c.code, txHash));
+      else txState = 'unclear';
+    } catch (e) {
+      failed(e);
+    } finally {
+      busy = '';
+    }
+  }
+
   async function create() {
     error = '';
     busy = 'Waiting for your wallet…';
     try {
       const d = draft!;
-      result = await fundCampaign(
-        {
-          sender: account!, contractId: contract!, tokenId: token!, storageByteCost: config!.storage_byte_cost,
-          costs: () => getStorageCosts(rpc!, contract!, token!),
-          freePrepay: () => getPrepayBalance(rpc!, contract!, account!),
-          send: (txs) => wallet!.send(txs),
-          outcome: (hash) => ((busy = 'Waiting for the transaction…'), txOutcome(rpc!, hash, account!)),
-        },
-        { merkleRoot: d.merkleRoot, deadlineNs: (BigInt(deadlineMs) * 1_000_000n).toString(), leafCount: d.recipients.length, total: d.total },
+      await created(
+        await fundCampaign(
+          {
+            sender: account!, contractId: contract!, tokenId: token!, storageByteCost: config!.storage_byte_cost,
+            costs: () => getStorageCosts(rpc!, contract!, token!),
+            freePrepay: () => getPrepayBalance(rpc!, contract!, account!),
+            send: (txs) => wallet!.send(txs),
+            onSent: (txHash) => {
+              sentTx = txHash;
+              sentFrom = account;
+              busy = 'Checking the transaction…';
+              saveFunding({ txHash, sender: account!, draft: d, deadline });
+            },
+            outcome: lookup.outcome,
+          },
+          { merkleRoot: d.merkleRoot, deadlineNs: (BigInt(deadlineMs) * 1_000_000n).toString(), leafCount: d.recipients.length, total: d.total },
+        ),
       );
-      publishTodo = (await downloadPublisher(env.PUBLIC_LEAVES_URL).publish(leafList(result.campaignId, d))).todo;
     } catch (e) {
-      const msg = (e as Error).message;
-      error = ERRORS[msg] ?? `The campaign was not created (${msg}). If tokens left your wallet, the contract refunded them.`;
+      failed(e);
     } finally {
       busy = '';
     }
@@ -119,7 +213,10 @@
 </script>
 
 <h1>Send tokens to emails</h1>
-<p class="muted">Each recipient claims with their Google account. The chain never sees an email.</p>
+<p class="muted">
+  Each recipient claims with their Google account. Emails never go on chain; when someone claims, our verifier sees
+  their email to check it matches the claim.
+</p>
 
 {#if setupError}
   <p class="error" role="alert">{setupError}</p>
@@ -179,8 +276,22 @@
     <p><button onclick={saveRecovery}>Download recovery file</button></p>
     <label><input type="checkbox" bind:checked={recoveryAck} disabled={!recoverySaved} /> I stored the recovery file somewhere private</label>
     <p>You send {formatAmount(BigInt(draft.total))} USDC to {draft.recipients.length} recipients, plus a small NEAR storage pre-pay that your wallet shows before you sign.</p>
-    <button class="primary" disabled={!recoveryAck || !!busy} onclick={create}>{busy || 'Create campaign'}</button>
-    <p><button onclick={() => (draft = null)} disabled={!!busy}>Edit recipients</button></p>
+    {#if txState === 'checking'}
+      <p role="status">Checking the transaction… It was sent; do not send it again.</p>
+      <p>
+        <button onclick={() => check(sentTx!)} disabled={!!busy}>{busy || 'Check again'}</button>
+        {#if env.PUBLIC_EXPLORER_TX_URL}<a href="{env.PUBLIC_EXPLORER_TX_URL}{sentTx}" target="_blank" rel="noopener noreferrer">View it on the explorer</a>{/if}
+      </p>
+    {:else if txState === 'unclear'}
+      <p class="error" role="alert">
+        The transaction ran but did not create this campaign, and we could not confirm your tokens came back. Do not
+        send again; check it on the explorer first.
+      </p>
+      {#if env.PUBLIC_EXPLORER_TX_URL}<p><a href="{env.PUBLIC_EXPLORER_TX_URL}{sentTx}" target="_blank" rel="noopener noreferrer">View it on the explorer</a></p>{/if}
+    {:else}
+      <button class="primary" disabled={!recoveryAck || !!busy || !!sentTx} onclick={create}>{busy || 'Create campaign'}</button>
+      <p><button onclick={() => (draft = null)} disabled={!!busy || !!sentTx}>Edit recipients</button></p>
+    {/if}
   {/if}
 {/if}
 

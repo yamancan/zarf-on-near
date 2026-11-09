@@ -52,5 +52,20 @@ export const claimLink = (claimOrigin: string, campaignId: string, r: Recipient)
   `${claimOrigin}/claim/${campaignId}/${r.commitment}#s=${r.salt}`;
 
 /** Everything needed to rebuild the links if the page is lost. It holds the salts: keep it private. */
-export const recoveryFile = (d: Draft, deadlineNs: string) =>
-  JSON.stringify({ kind: 'zarf-near-recovery-v1', merkle_root: d.merkleRoot, deadline_ns: deadlineNs, recipients: d.recipients }, null, 2);
+export const recoveryFile = (d: Draft, deadlineNs: string, ctx: { contractId: string; network: string; claimOrigin: string }) =>
+  JSON.stringify(
+    {
+      kind: 'zarf-near-recovery-v1',
+      contract_id: ctx.contractId,
+      network: ctx.network,
+      merkle_root: d.merkleRoot,
+      deadline_ns: deadlineNs,
+      how_to_recover:
+        `On a ${ctx.network} explorer, find the campaign_created event logged by ${ctx.contractId} with merkle_root ` +
+        `${d.merkleRoot}; its campaign_id completes each link: ${ctx.claimOrigin}/claim/<campaign_id>/<commitment>#s=<salt>. ` +
+        'If there is no such event, no campaign was created and the tokens stayed with you.',
+      recipients: d.recipients,
+    },
+    null,
+    2,
+  );

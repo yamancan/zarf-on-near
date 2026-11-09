@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import vectors from '../../../../spec/vectors.json';
 import { proofFor } from '../merkle';
 import { buildDraft, claimLink, commitment, leafList, newSalt, recoveryFile } from './campaign';
-import { campaignIdFrom, failedWith, fundCampaign, fundingTxs, minDeadlineMs, ownerKeySlack, prepayShortfall, type FundDeps, type Outcome } from './funding';
+import {
+  campaignIdFrom, checkCreation, failedWith, fundCampaign, fundingTxs, LookupPending, minDeadlineMs, NotCreated, OutcomeUnclear, ownerKeySlack,
+  prepayShortfall, type FundDeps, type Outcome,
+} from './funding';
 import { formatAmount, parseAmount, parseRecipients } from './recipients';
 
 const { campaigns } = vectors;
@@ -64,6 +67,36 @@ describe('parseRecipients', () => {
     const { rows, rejected } = parseRecipients(`a@example.com,${max}\nb@example.com,0.000001`);
     expect(rows).toHaveLength(1);
     expect(rejected[0]).toMatchObject({ line: 2, reason: expect.stringContaining('token maximum') });
+  });
+  it.each([
+    ['"alice@example.com",10', 'alice@example.com'],
+    ['"Alice@Example.com","2.5"', 'alice@example.com'],
+    ['  "bob@example.com" ; 1', 'bob@example.com'],
+  ])('strips one pair of quotes per cell: %j', (line, email) => {
+    const { rows, rejected } = parseRecipients(line);
+    expect(rejected).toEqual([]);
+    expect(rows[0].email).toBe(email);
+  });
+  it('a quoted amount parses', () => {
+    expect(parseRecipients('a@example.com,"10"').rows[0].amount).toBe(10_000_000n);
+  });
+  it.each([
+    ['<alice@example.com>,10', 'mailto: or <>'],
+    ['mailto:alice@example.com,10', 'mailto: or <>'],
+    ['"<alice@example.com>",10', 'mailto: or <>'],
+    ['""alice@example.com"",10', 'not an email address'],
+    ['alice@example,10', 'not an email address'],
+    ['alice@exa_mple.com,10', 'not an email address'],
+    ['Alice <alice@example.com>,10', 'ASCII'],
+  ])('refuses wrapped or malformed address %j', (line, reason) => {
+    const { rows, rejected } = parseRecipients(line);
+    expect(rows).toEqual([]);
+    expect(rejected[0].reason).toContain(reason);
+  });
+  it('strips one BOM at the start of the paste, but a BOM inside a cell is refused', () => {
+    expect(parseRecipients('\uFEFFemail,amount\na@example.com,1').rows).toHaveLength(1);
+    expect(parseRecipients('\uFEFFa@example.com,1').rows).toHaveLength(1);
+    expect(parseRecipients('a@example.com,1\n\uFEFFb@example.com,1').rejected[0].reason).toContain('ASCII');
   });
   it('keeps duplicate emails as separate allocations', () => {
     expect(parseRecipients('a@example.com,1\na@example.com;2').rows).toHaveLength(2);
@@ -130,8 +163,10 @@ describe('outputs', () => {
   it('recovery file holds what rebuilding the links needs', async () => {
     const c = campaigns.single;
     const draft = await buildDraft(parseRecipients(csvOf(c.recipients)).rows, saltsOf(c.recipients));
-    const f = JSON.parse(recoveryFile(draft, '123'));
-    expect(f).toMatchObject({ kind: 'zarf-near-recovery-v1', merkle_root: c.merkle_root, deadline_ns: '123' });
+    const f = JSON.parse(recoveryFile(draft, '123', { contractId: 'zarf-near.testnet', network: 'testnet', claimOrigin: 'https://claim.example' }));
+    expect(f).toMatchObject({ kind: 'zarf-near-recovery-v1', contract_id: 'zarf-near.testnet', network: 'testnet', merkle_root: c.merkle_root, deadline_ns: '123' });
+    expect(f.how_to_recover).toContain(`campaign_created event logged by zarf-near.testnet with merkle_root ${c.merkle_root}`);
+    expect(f.how_to_recover).toContain('https://claim.example/claim/<campaign_id>/<commitment>#s=<salt>');
     expect(f.recipients[0]).toMatchObject({ salt: c.recipients[0].salt, commitment: c.recipients[0].commitment });
   });
 });
@@ -165,15 +200,19 @@ describe('funding', () => {
   it('skips prepay_deposit when the free pre-pay already covers it', () => {
     expect(fundingTxs({ ...base, shortfall: 0n }).map((t) => t.actions[0].params.methodName)).toEqual(['ft_transfer_call']);
   });
-  it('reads campaign_id from the campaign_created event of our contract only', () => {
-    const ev = (contract: string, id: unknown, event = 'campaign_created') => ({
-      outcome: { executor_id: contract, logs: ['noise', `EVENT_JSON:${JSON.stringify({ standard: 'zarf-near', version: '1.0.0', event, data: [{ campaign_id: id }] })}`] },
+  it('reads campaign_id from the campaign_created event of our contract, only for our root and amount', () => {
+    const want = { merkleRoot: 'ab'.repeat(32), total: '42' };
+    const ev = (contract: string, id: unknown, event = 'campaign_created', data: object = { merkle_root: want.merkleRoot, amount: want.total }) => ({
+      outcome: { executor_id: contract, logs: ['noise', `EVENT_JSON:${JSON.stringify({ standard: 'zarf-near', version: '1.0.0', event, data: [{ campaign_id: id, ...data }] })}`] },
     });
-    expect(campaignIdFrom({ receipts_outcome: [ev('usdc.testnet', '1'), ev('zarf-near.testnet', '9')] }, 'zarf-near.testnet')).toBe('9');
-    expect(campaignIdFrom({ receipts_outcome: [ev('evil.testnet', '9')] }, 'zarf-near.testnet')).toBeNull();
-    expect(campaignIdFrom({ receipts_outcome: [ev('zarf-near.testnet', '9', 'reclaimed')] }, 'zarf-near.testnet')).toBeNull();
-    expect(campaignIdFrom({ receipts_outcome: [ev('zarf-near.testnet', 'x')] }, 'zarf-near.testnet')).toBeNull();
-    expect(campaignIdFrom({}, 'zarf-near.testnet')).toBeNull();
+    const id = (...r: ReturnType<typeof ev>[]) => campaignIdFrom({ receipts_outcome: r }, 'zarf-near.testnet', want);
+    expect(id(ev('usdc.testnet', '1'), ev('zarf-near.testnet', '9'))).toBe('9');
+    expect(id(ev('evil.testnet', '9'))).toBeNull();
+    expect(id(ev('zarf-near.testnet', '9', 'reclaimed'))).toBeNull();
+    expect(id(ev('zarf-near.testnet', 'x'))).toBeNull();
+    expect(id(ev('zarf-near.testnet', '9', 'campaign_created', { merkle_root: 'cd'.repeat(32), amount: '42' }))).toBeNull();
+    expect(id(ev('zarf-near.testnet', '9', 'campaign_created', { merkle_root: want.merkleRoot, amount: '41' }))).toBeNull();
+    expect(campaignIdFrom({}, 'zarf-near.testnet', want)).toBeNull();
   });
   it('detects E128 inside the refunded ft_on_transfer receipt', () => {
     const failed = { receipts_outcome: [{ outcome: { status: { Failure: { ActionError: { kind: { FunctionCallError: { ExecutionError: 'Smart contract panicked: E128_INSUFFICIENT_STORAGE' } } } } } } }] };
@@ -186,21 +225,32 @@ describe('funding', () => {
 });
 
 describe('fundCampaign', () => {
-  const created = (id: string): Outcome => ({ receipts_outcome: [{ outcome: { executor_id: 'zarf-near.testnet', logs: [`EVENT_JSON:${JSON.stringify({ standard: 'zarf-near', version: '1.0.0', event: 'campaign_created', data: [{ campaign_id: id }] })}`] } }] });
+  const created = (id: string): Outcome => ({ receipts_outcome: [{ outcome: { executor_id: 'zarf-near.testnet', logs: [`EVENT_JSON:${JSON.stringify({ standard: 'zarf-near', version: '1.0.0', event: 'campaign_created', data: [{ campaign_id: id, merkle_root: 'ab'.repeat(32), amount: '42' }] })}`] } }] });
   const panicked = (code: string): Outcome => ({ receipts_outcome: [{ outcome: { executor_id: 'zarf-near.testnet', status: { Failure: { ActionError: { kind: { FunctionCallError: { ExecutionError: `Smart contract panicked: ${code}` } } } } } } }] });
   const costs = { ft_storage_deposit: '1', claim_entry_cost: '1', per_claim_storage: '10', campaign_bytes_cost: '100' };
   const p = { merkleRoot: 'ab'.repeat(32), deadlineNs: '1', leafCount: 3, total: '42' };
-  const fake = (outcomes: Outcome[], free = '0') => {
+  // Each queued item is one lookup result: an Outcome, or an Error the lookup throws.
+  const fake = (outcomes: (Outcome | Error)[], free = '0') => {
     const sent: string[][] = [];
+    const persisted: string[] = [];
     let costReads = 0;
+    let lookups = 0;
     const d: FundDeps = {
       sender: 'alice.testnet', contractId: 'zarf-near.testnet', tokenId: 'usdc.testnet', storageByteCost: '2',
       costs: async () => (costReads++, costs),
       freePrepay: async () => free,
       send: async (txs) => (sent.push(txs.map((t) => t.actions[0].params.methodName)), txs.map((_, i) => `h${sent.length}-${i}`)),
-      outcome: async () => outcomes.shift()!,
+      outcome: async () => {
+        lookups++;
+        const o = outcomes.shift() ?? new Error('rpc timeout');
+        if (o instanceof Error) throw o;
+        return o;
+      },
+      onSent: (h) => persisted.push(h),
+      lookupRetries: 3,
+      sleep: async () => {},
     };
-    return { d, sent, costReads: () => costReads };
+    return { d, sent, persisted, costReads: () => costReads, lookups: () => lookups };
   };
 
   it('pre-pays the shortfall (with slack), sends the tokens and returns the campaign id', async () => {
@@ -213,12 +263,49 @@ describe('fundCampaign', () => {
     expect(await fundCampaign(f.d, p)).toEqual({ campaignId: '10', txHash: 'h2-1' });
     expect(f.costReads()).toBe(2);
   });
-  it('gives up after a second E128', async () => {
-    await expect(fundCampaign(fake([panicked('E128_INSUFFICIENT_STORAGE'), panicked('E128_INSUFFICIENT_STORAGE')]).d, p)).rejects.toThrow('E128');
+  it('gives up after a second E128 with a proven refund (Create may be re-enabled)', async () => {
+    const err = await fundCampaign(fake([panicked('E128_INSUFFICIENT_STORAGE'), panicked('E128_INSUFFICIENT_STORAGE')]).d, p).catch((e) => e);
+    expect(err).toBeInstanceOf(NotCreated);
+    expect(err.code).toMatch(/^E128/);
   });
-  it('reports other contract errors without retrying', async () => {
+  it('persists the hash as soon as the wallet returns it, before the lookup', async () => {
+    const f = fake([created('9')]);
+    await fundCampaign(f.d, p);
+    expect(f.persisted).toEqual(['h1-1']);
+  });
+  it('a lookup timeout is retried as a lookup, never as a second send', async () => {
+    const f = fake([new Error('timeout'), new Error('timeout'), created('9')]);
+    expect(await fundCampaign(f.d, p)).toEqual({ campaignId: '9', txHash: 'h1-1' });
+    expect(f.sent).toHaveLength(1);
+    expect(f.lookups()).toBe(3);
+  });
+  it('a lookup that keeps failing ends in LookupPending with the hash, and nothing was re-sent', async () => {
+    const f = fake([]);
+    const err = await fundCampaign(f.d, p).catch((e) => e);
+    expect(err).toBeInstanceOf(LookupPending);
+    expect(err.txHash).toBe('h1-1');
+    expect(f.sent).toHaveLength(1);
+  });
+  it('checkCreation later proves the refund (Create re-enabled) or finds the campaign', async () => {
+    const want = { merkleRoot: p.merkleRoot, total: p.total };
+    expect(await checkCreation(fake([panicked('E119_INVALID_DEADLINE')]).d, 'h1-1', want)).toEqual({ kind: 'refunded', code: 'E119_INVALID_DEADLINE', txHash: 'h1-1' });
+    expect(await checkCreation(fake([new Error('timeout'), created('9')]).d, 'h1-1', want)).toEqual({ kind: 'created', campaignId: '9', txHash: 'h1-1' });
+  });
+  it('the token refusing ft_transfer_call before the contract ran also proves the tokens never moved', async () => {
+    const tokenFailed: Outcome = { receipts_outcome: [{ outcome: { executor_id: 'usdc.testnet', status: { Failure: { ActionError: { kind: { FunctionCallError: { ExecutionError: 'The account does not have enough balance' } } } } } } }] };
+    expect((await checkCreation(fake([tokenFailed]).d, 'h', { merkleRoot: p.merkleRoot, total: p.total })).kind).toBe('refunded');
+  });
+  it('no campaign_created and no proven refund is OutcomeUnclear: Create stays off', async () => {
+    const quiet: Outcome = { receipts_outcome: [{ outcome: { executor_id: 'zarf-near.testnet', logs: [] } }] };
+    expect(await fundCampaign(fake([quiet]).d, p).catch((e) => e)).toBeInstanceOf(OutcomeUnclear);
+    const otherRoot: Outcome = { receipts_outcome: [{ outcome: { executor_id: 'zarf-near.testnet', logs: [`EVENT_JSON:${JSON.stringify({ standard: 'zarf-near', event: 'campaign_created', data: [{ campaign_id: '9', merkle_root: 'cd'.repeat(32), amount: '42' }] })}`] } }] };
+    expect(await fundCampaign(fake([otherRoot]).d, p).catch((e) => e)).toBeInstanceOf(OutcomeUnclear);
+  });
+  it('reports other contract errors (proven refund) without retrying', async () => {
     const f = fake([panicked('E119_INVALID_DEADLINE')]);
-    await expect(fundCampaign(f.d, p)).rejects.toThrow('E119_INVALID_DEADLINE');
+    const err = await fundCampaign(f.d, p).catch((e) => e);
+    expect(err).toBeInstanceOf(NotCreated);
+    expect(err.code).toBe('E119_INVALID_DEADLINE');
     expect(f.sent).toHaveLength(1);
   });
   it('skips the deposit when the free pre-pay covers it', async () => {
@@ -226,7 +313,5 @@ describe('fundCampaign', () => {
     await fundCampaign(f.d, p);
     expect(f.sent).toEqual([['ft_transfer_call']]);
   });
-  it('refuses an outcome without our campaign_created event', async () => {
-    await expect(fundCampaign(fake([{ receipts_outcome: [] }]).d, p)).rejects.toThrow('CAMPAIGN_NOT_CREATED');
-  });
+
 });
