@@ -11,7 +11,8 @@
 //   RELAYER_KEY          that key, ed25519:<base58>
 //   DEMO_CAMPAIGN_ID     campaign created from spec/vectors.json campaigns.<DEMO_VECTOR_CAMPAIGN>
 //                        (same leaves and merkle_root), with keys.signer registered (add_owner_key)
-//   DEMO_VECTOR_CAMPAIGN "main" (alice@example.com, default) or "single" (solo@example.com)
+//   DEMO_VECTOR_CAMPAIGN "single" (solo@example.com, 5 USDC; the sandbox default) or "main"
+//                        (alice@example.com; total u128::MAX, so it needs a mintable token). --dry uses "main".
 //   DEMO_DESTINATION     account that receives the tokens (default alice.testnet)
 // The demo verifier signs with spec/vectors.json keys.signer_seed: a public test key, sandbox only.
 
@@ -34,7 +35,7 @@ const fail = (msg) => {
 };
 
 // ---- which claim ------------------------------------------------------------------------------
-const which = process.env.DEMO_VECTOR_CAMPAIGN ?? 'main';
+const which = process.env.DEMO_VECTOR_CAMPAIGN ?? (dry ? 'main' : 'single');
 const campaign = vectors.campaigns[which];
 const claimVector = vectors.claims.valid.find((c) => c.campaign === which);
 if (!campaign || !claimVector) throw new Error(`no vector campaign "${which}"`);

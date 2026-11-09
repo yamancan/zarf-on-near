@@ -20,11 +20,12 @@ relayer:
 web:
 	cd web && $(PNPM_INSTALL) && pnpm test && pnpm check && pnpm build
 
-# The contract's own tests (Rust); skipped with a reason when they cannot run here.
+# The contract's own tests (contract/Makefile: unit = cargo test, integration = wasm + near-workspaces);
+# skipped with a reason when they cannot run here.
 contract:
 	@if [ ! -d contract ]; then echo "SKIP contract: contract/ is not in this tree yet"; \
 	elif ! command -v cargo >/dev/null 2>&1; then echo "SKIP contract: cargo is not installed (see contract/README for the toolchain)"; \
-	else cd contract && cargo test; fi
+	else $(MAKE) -C contract test; fi
 
 # The claim flow end to end. With NEAR_RPC_URL (+ the seam in scripts/demo.mjs) it runs against a
 # NEAR sandbox; without it, against a mocked NEAR RPC so the TypeScript path still runs.
