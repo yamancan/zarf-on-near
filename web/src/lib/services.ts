@@ -115,3 +115,29 @@ export function describeError(e: unknown): string {
   if (code.startsWith('NOT_CONFIGURED:')) return `This site is not fully set up yet (${code.slice(15)}).`;
   return MESSAGES[code] ?? `The claim did not go through (${code}).`;
 }
+
+export type ClaimState = 'unclaimed' | 'pending' | 'claimed';
+
+export const getClaimState = async (rpcUrl: string | undefined, contractId: string | undefined, campaignId: string, commitment: string) =>
+  nearView<ClaimState>(need(rpcUrl, 'PUBLIC_NEAR_RPC_URL'), need(contractId, 'PUBLIC_CONTRACT_ID'), 'claim_state', { campaign_id: campaignId, commitment });
+
+const BACKOFF_MS = [1000, 2000, 3000, 5000, 8000];
+
+/**
+ * The relayer's 200 only means the tx ran; the token transfer can still fail and reopen the claim.
+ * Polls claim_state until it is no longer pending, or `timeoutMs` passes. A failed read counts as
+ * still pending, so an RPC hiccup never turns into a false success or a false failure.
+ */
+export async function settleClaim(
+  read: () => Promise<ClaimState>,
+  { timeoutMs = 60_000, sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms)), now = Date.now } = {},
+): Promise<ClaimState> {
+  const end = now() + timeoutMs;
+  for (let i = 0; ; i++) {
+    const state = await read().catch(() => 'pending' as const);
+    if (state === 'claimed' || state === 'unclaimed') return state; // anything unexpected counts as pending
+    const wait = BACKOFF_MS[Math.min(i, BACKOFF_MS.length - 1)];
+    if (now() + wait > end) return 'pending';
+    await sleep(wait);
+  }
+}

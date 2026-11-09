@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import vectors from '../../../spec/vectors.json';
-import { ClaimError, describeError, fetchLeaves, getCampaign, requestSignature, submitClaim } from './services';
+import { ClaimError, describeError, fetchLeaves, getCampaign, getClaimState, requestSignature, settleClaim, submitClaim, type ClaimState } from './services';
 
 const reply = (body: unknown, status = 200) => vi.fn(async () => new Response(JSON.stringify(body), { status }));
 afterEach(() => vi.unstubAllGlobals());
@@ -74,5 +74,51 @@ describe('verifier and relayer', () => {
   it('explains missing config and unknown codes', () => {
     expect(describeError(new ClaimError('NOT_CONFIGURED:PUBLIC_VERIFIER_URL'))).toMatch(/PUBLIC_VERIFIER_URL/);
     expect(describeError(new ClaimError('E999'))).toMatch(/E999/);
+  });
+});
+
+describe('settleClaim (after the relayer returns a hash)', () => {
+  // A fake clock: sleep advances time instead of waiting.
+  const clock = () => {
+    let t = 0;
+    return { now: () => t, sleep: async (ms: number) => void (t += ms), elapsed: () => t };
+  };
+  const reads = (...states: (ClaimState | Error)[]) => {
+    let i = 0;
+    return async () => {
+      const s = states[Math.min(i++, states.length - 1)];
+      if (s instanceof Error) throw s;
+      return s;
+    };
+  };
+
+  it('claimed: returns as soon as the chain says so', async () => {
+    const c = clock();
+    expect(await settleClaim(reads('pending', 'pending', 'claimed'), c)).toBe('claimed');
+    expect(c.elapsed()).toBe(3000); // 1 s + 2 s backoff
+  });
+  it('unclaimed: the transfer failed and the claim reopened', async () => {
+    expect(await settleClaim(reads('pending', 'unclaimed'), clock())).toBe('unclaimed');
+  });
+  it('still pending after ~60 s: gives up without claiming success or failure', async () => {
+    const c = clock();
+    expect(await settleClaim(reads('pending'), c)).toBe('pending');
+    expect(c.elapsed()).toBeLessThanOrEqual(60_000);
+    expect(c.elapsed()).toBeGreaterThan(50_000);
+  });
+  it('treats an unexpected value as still pending', async () => {
+    expect(await settleClaim(reads('weird' as ClaimState, 'unclaimed'), clock())).toBe('unclaimed');
+  });
+  it('treats a failed read as still pending', async () => {
+    expect(await settleClaim(reads(new Error('rpc'), 'claimed'), clock())).toBe('claimed');
+    expect(await settleClaim(reads(new Error('rpc')), clock())).toBe('pending');
+  });
+  it('reads claim_state from the contract', async () => {
+    const fetchMock = reply({ result: { result: [...new TextEncoder().encode('"claimed"')] } });
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await getClaimState('https://rpc.test', 'zarf-near.testnet', '7', 'ab'.repeat(32))).toBe('claimed');
+    const sent = JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
+    expect(sent.params.method_name).toBe('claim_state');
+    expect(JSON.parse(atob(sent.params.args_base64))).toEqual({ campaign_id: '7', commitment: 'ab'.repeat(32) });
   });
 });
