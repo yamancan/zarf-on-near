@@ -3,7 +3,7 @@
   import { env } from '$env/dynamic/public';
   import { buildDraft, claimLink, leafList, recoveryFile, type Draft } from '$lib/create/campaign';
   import { getCampaignByRoot, getCampaignView, getConfig, getPrepayBalance, getStorageCosts, txOutcome, type ContractConfig } from '$lib/create/chain';
-  import { checkCreation, fundCampaign, LookupPending, minDeadlineMs, NotCreated, OutcomeUnclear, resolveByRoot } from '$lib/create/funding';
+  import { checkCreation, fundCampaign, LookupPending, minDeadlineMs, NotCreated, NotSent, OutcomeUnclear, resolveByRoot } from '$lib/create/funding';
   import { downloadPublisher, saveFile } from '$lib/create/publish';
   import { formatAmount, parseRecipients } from '$lib/create/recipients';
   import { myNearWallet, type SenderWallet } from '$lib/create/wallet';
@@ -30,7 +30,10 @@
   let copied = $state(false);
   // A funding tx that was sent: while set, Create stays off until its outcome is known.
   let sentTx = $state<string | null>(null);
-  let txState = $state<'checking' | 'unclear' | null>(null);
+  let txState = $state<'checking' | 'unclear' | 'mismatch' | null>(null);
+  // Once a send may have gone out, this draft (its merkle_root) is pinned: re-sending the same root is
+  // safe (E132 refunds a duplicate), a new draft is not. Unpinned only by a campaign or a proven refund.
+  let pinned = $state(false);
   let sentFrom = $state<string | null>(null); // the sender of sentTx (the tx lookup needs it)
 
   const FUNDING_KEY = 'zarf-near:create-funding';
@@ -41,11 +44,13 @@
     deadline: string;
     campaignId?: string;
   }
-  const saveFunding = (f: Funding) => {
+  /** True if persisted. Before a send it must succeed (see beforeSend); later writes are best effort. */
+  const saveFunding = (f: Funding): boolean => {
     try {
       sessionStorage.setItem(FUNDING_KEY, JSON.stringify(f));
+      return true;
     } catch {
-      // storage off: the recovery file still holds everything
+      return false;
     }
   };
   const loadFunding = (): Funding | null => {
@@ -94,6 +99,7 @@
         deadline = f.deadline;
         recoverySaved = recoveryAck = true;
         sentFrom = f.sender;
+        pinned = true;
         if (f.campaignId) result = { campaignId: f.campaignId, txHash: f.txHash ?? '' };
         else if (f.txHash) await check(f.txHash);
         else await checkByRoot(); // reloaded while the wallet popup was open
@@ -147,7 +153,7 @@
 
   const byRoot = () => ({
     sender: sentFrom ?? account!,
-    campaignByRoot: (root: string) => getCampaignByRoot(rpc!, contract!, root),
+    campaignByRoot: (sender: string, root: string) => getCampaignByRoot(rpc!, contract!, sender, root),
     campaign: (id: string) => getCampaignView(rpc!, contract!, id),
   });
 
@@ -163,14 +169,15 @@
       if (id) {
         await created({ campaignId: id, txHash: sentTx ?? '' });
       } else {
+        // Not landed (yet). Keep the draft pinned: only the same root may be sent again.
         sentTx = txState = null;
-        clearFunding();
         error =
-          'Your wallet did not confirm, and no campaign exists for these links yet. You can create it again: ' +
-          'if the earlier transaction still lands, the contract refunds the duplicate.';
+          'Your wallet did not confirm, and no campaign exists for these links yet. You can send the same campaign ' +
+          'again: if the earlier transaction still lands, the contract refunds the duplicate. These links stay as they are.';
       }
-    } catch {
-      txState = 'checking'; // could not read the contract: keep Create off, offer Check again
+    } catch (e) {
+      // A campaign under our (sender, root) that does not match is terminal; an unreadable contract is not.
+      txState = (e as Error).message === 'CAMPAIGN_MISMATCH' ? 'mismatch' : 'checking';
     } finally {
       busy = '';
     }
@@ -183,9 +190,12 @@
       txState = 'checking'; // sent, outcome unknown: Create stays off
     } else if (e instanceof OutcomeUnclear) {
       txState = 'unclear';
+    } else if (e instanceof NotSent) {
+      error = 'This browser would not store the campaign before sending, so nothing was sent. Allow site storage and try again.';
     } else if (e instanceof NotCreated) {
-      // Proven: the tokens are back (or never left). Only now may the sender try again.
+      // Proven: the tokens are back (or never left). Only now may the sender change the draft.
       sentTx = txState = null;
+      pinned = false;
       clearFunding();
       error = ERRORS[e.code] ?? `The campaign was not created (${e.code}). Your tokens were returned.`;
     } else if (sentTx) {
@@ -227,8 +237,9 @@
             campaignByRoot: byRoot().campaignByRoot,
             campaign: byRoot().campaign,
             beforeSend: () => {
+              if (!saveFunding({ txHash: null, sender: account!, draft: d, deadline })) throw new Error('session storage unavailable');
               sentFrom = account;
-              saveFunding({ txHash: null, sender: account!, draft: d, deadline });
+              pinned = true;
             },
             onSent: (txHash) => {
               sentTx = txHash;
@@ -246,6 +257,15 @@
     } finally {
       busy = '';
     }
+  }
+
+  /** After a finished (or mismatched) campaign: forget it in this tab and begin a new draft. */
+  function startOver() {
+    clearFunding();
+    draft = result = null;
+    sentTx = sentFrom = txState = publishTodo = null;
+    pinned = recoverySaved = recoveryAck = copied = false;
+    csv = error = '';
   }
 
   async function copyAll() {
@@ -279,6 +299,9 @@
   <p>
     <button onclick={copyAll}>{copied ? 'Copied' : 'Copy all'}</button>
     <button onclick={() => saveFile(`zarf-links-${result!.campaignId}.csv`, `email,amount,link\n${links.join('\n')}\n`, 'text/csv')}>Download as CSV</button>
+  </p>
+  <p>
+    <button onclick={startOver}>Start a new campaign</button>
   </p>
 {:else}
   <h2>1. Recipients</h2>
@@ -324,6 +347,11 @@
         <button onclick={recheck} disabled={!!busy}>{busy || 'Check again'}</button>
         {#if env.PUBLIC_EXPLORER_TX_URL && sentTx}<a href="{env.PUBLIC_EXPLORER_TX_URL}{sentTx}" target="_blank" rel="noopener noreferrer">View it on the explorer</a>{/if}
       </p>
+    {:else if txState === 'mismatch'}
+      <p class="error" role="alert">
+        The contract holds a campaign for these links that does not match this draft. It is not used. Generate new links.
+      </p>
+      <p><button onclick={startOver}>Generate new links</button></p>
     {:else if txState === 'unclear'}
       <p class="error" role="alert">
         The transaction ran but did not create this campaign, and we could not confirm your tokens came back. Do not
@@ -332,7 +360,7 @@
       {#if env.PUBLIC_EXPLORER_TX_URL && sentTx}<p><a href="{env.PUBLIC_EXPLORER_TX_URL}{sentTx}" target="_blank" rel="noopener noreferrer">View it on the explorer</a></p>{/if}
     {:else}
       <button class="primary" disabled={!recoveryAck || !!busy || !!sentTx} onclick={create}>{busy || 'Create campaign'}</button>
-      <p><button onclick={() => (draft = null)} disabled={!!busy || !!sentTx}>Edit recipients</button></p>
+      {#if !pinned}<p><button onclick={() => (draft = null)} disabled={!!busy}>Edit recipients</button></p>{/if}
     {/if}
   {/if}
 {/if}

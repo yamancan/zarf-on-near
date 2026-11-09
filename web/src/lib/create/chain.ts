@@ -17,9 +17,9 @@ export const getStorageCosts = (rpcUrl: string, contractId: string, tokenId: str
 export const getPrepayBalance = (rpcUrl: string, contractId: string, accountId: string) =>
   nearView<string>(rpcUrl, contractId, 'prepay_balance_of', { account_id: accountId });
 
-/** spec: merkle_root is an idempotency key; this finds the campaign a root already funded. */
-export const getCampaignByRoot = (rpcUrl: string, contractId: string, merkleRoot: string) =>
-  nearView<string | null>(rpcUrl, contractId, 'campaign_by_root', { merkle_root: merkleRoot });
+/** spec: (sender, merkle_root) is an idempotency key; this finds the campaign that sender already funded with the root. */
+export const getCampaignByRoot = (rpcUrl: string, contractId: string, sender: string, merkleRoot: string) =>
+  nearView<string | null>(rpcUrl, contractId, 'campaign_by_root', { sender, merkle_root: merkleRoot });
 
 export const getCampaignView = (rpcUrl: string, contractId: string, campaignId: string) =>
   nearView<{ merkle_root: string; amount: string; sender: string } | null>(rpcUrl, contractId, 'get_campaign', { campaign_id: campaignId });

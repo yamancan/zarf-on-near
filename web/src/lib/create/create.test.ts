@@ -4,7 +4,7 @@ import { proofFor } from '../merkle';
 import { buildDraft, claimLink, commitment, leafList, newSalt, recoveryFile } from './campaign';
 import {
   campaignIdFrom, checkCreation, failedWith, fundCampaign, fundingTxs, LookupPending, minDeadlineMs, NotCreated, OutcomeUnclear, ownerKeySlack,
-  prepayShortfall, resolveByRoot, SendUncertain, type FundDeps, type Outcome,
+  NotSent, prepayShortfall, resolveByRoot, SendUncertain, type FundDeps, type Outcome,
 } from './funding';
 import { formatAmount, parseAmount, parseRecipients } from './recipients';
 
@@ -234,6 +234,7 @@ describe('fundCampaign', () => {
     const sent: string[][] = [];
     const persisted: string[] = [];
     const events: string[] = [];
+    const byRootCalls: [string, string][] = [];
     let costReads = 0;
     let lookups = 0;
     const d: FundDeps = {
@@ -247,7 +248,7 @@ describe('fundCampaign', () => {
         return txs.map((_, i) => `h${sent.length}-${i}`);
       },
       beforeSend: () => events.push('persist-draft'),
-      campaignByRoot: async () => o.byRoot ?? null,
+      campaignByRoot: async (sender, root) => (byRootCalls.push([sender, root]), o.byRoot ?? null),
       campaign: async (id) => (id === o.byRoot ? { merkle_root: p.merkleRoot, amount: p.total, sender: 'alice.testnet' } : null),
       outcome: async () => {
         lookups++;
@@ -259,7 +260,7 @@ describe('fundCampaign', () => {
       lookupRetries: 3,
       sleep: async () => {},
     };
-    return { d, sent, persisted, events, costReads: () => costReads, lookups: () => lookups };
+    return { d, sent, persisted, events, byRootCalls, costReads: () => costReads, lookups: () => lookups };
   };
 
   it('pre-pays the shortfall (with slack), sends the tokens and returns the campaign id', async () => {
@@ -282,6 +283,12 @@ describe('fundCampaign', () => {
     await fundCampaign(f.d, p);
     expect(f.events).toEqual(['persist-draft', 'send']);
   });
+  it('if the draft cannot be persisted, nothing is sent (NotSent)', async () => {
+    const f = fake([created('9')]);
+    const err = await fundCampaign({ ...f.d, beforeSend: () => { throw new Error('QuotaExceededError'); } }, p).catch((e) => e);
+    expect(err).toBeInstanceOf(NotSent);
+    expect(f.sent).toHaveLength(0);
+  });
   it('a wallet error is SendUncertain, never "nothing was sent"', async () => {
     const f = fake([], '0', { sendFails: true });
     expect(await fundCampaign(f.d, p).catch((e) => e)).toBeInstanceOf(SendUncertain);
@@ -289,11 +296,15 @@ describe('fundCampaign', () => {
   });
   it('resolveByRoot after a lost send: the campaign exists (verified against get_campaign) or it does not', async () => {
     const want = { merkleRoot: p.merkleRoot, total: p.total };
-    expect(await resolveByRoot(fake([], '0', { byRoot: '33' }).d, want)).toBe('33');
+    const found = fake([], '0', { byRoot: '33' });
+    expect(await resolveByRoot(found.d, want)).toBe('33');
+    expect(found.byRootCalls).toEqual([['alice.testnet', p.merkleRoot]]); // keyed by our sender and root
     expect(await resolveByRoot(fake([], '0', { byRoot: null }).d, want)).toBeNull();
     const wrong = fake([], '0', { byRoot: '33' }).d;
     await expect(resolveByRoot({ ...wrong, campaign: async () => ({ merkle_root: p.merkleRoot, amount: '1', sender: 'alice.testnet' }) }, want)).rejects.toThrow('CAMPAIGN_MISMATCH');
     await expect(resolveByRoot({ ...wrong, campaign: async () => ({ merkle_root: p.merkleRoot, amount: p.total, sender: 'mallory.testnet' }) }, want)).rejects.toThrow('CAMPAIGN_MISMATCH');
+    await expect(resolveByRoot({ ...wrong, campaign: async () => ({ merkle_root: 'cd'.repeat(32), amount: p.total, sender: 'alice.testnet' }) }, want)).rejects.toThrow('CAMPAIGN_MISMATCH');
+    await expect(resolveByRoot({ ...wrong, campaign: async () => null }, want)).rejects.toThrow('CAMPAIGN_MISMATCH');
   });
   it('E132 (this root already funded a campaign) resolves to the existing campaign', async () => {
     const f = fake([panicked('E132_DUPLICATE_CAMPAIGN')], '0', { byRoot: '33' });
