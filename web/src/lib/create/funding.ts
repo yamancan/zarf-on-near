@@ -117,8 +117,12 @@ export interface FundDeps {
   freePrepay(): Promise<string>;
   send(txs: Tx[]): Promise<string[]>;
   outcome(hash: string): Promise<Outcome>;
+  /** Called right before the wallet is asked to send: persist the draft, since the send may land unseen. */
+  beforeSend?(): void;
   /** Called as soon as the wallet returns the funding tx hash, before anything else can fail. */
   onSent?(txHash: string): void;
+  campaignByRoot(merkleRoot: string): Promise<string | null>;
+  campaign(campaignId: string): Promise<{ merkle_root: string; amount: string; sender: string } | null>;
   /** Lookup retries before giving up with LookupPending (the tx is never re-sent). */
   lookupRetries?: number;
   sleep?(ms: number): Promise<void>;
@@ -145,6 +149,29 @@ export class OutcomeUnclear extends Error {
   constructor(readonly txHash: string) {
     super('OUTCOME_UNCLEAR');
   }
+}
+
+/** The wallet call failed, so we do not know whether it broadcast. Resolve with resolveByRoot; never assume nothing was sent. */
+export class SendUncertain extends Error {
+  constructor() {
+    super('SEND_UNCERTAIN');
+  }
+}
+
+/**
+ * The campaign this draft's merkle_root already funded, if any, checked against the contract's own
+ * record (root, amount, sender). null: no campaign exists for these links, so sending is safe; if an
+ * earlier tx lands later after all, the contract refunds the duplicate (E132).
+ */
+export async function resolveByRoot(
+  d: Pick<FundDeps, 'campaignByRoot' | 'campaign' | 'sender'>,
+  expect: { merkleRoot: string; total: string },
+): Promise<string | null> {
+  const id = await d.campaignByRoot(expect.merkleRoot);
+  if (id === null) return null;
+  const c = await d.campaign(id);
+  if (!c || c.merkle_root !== expect.merkleRoot || c.amount !== expect.total || c.sender !== d.sender) throw new Error('CAMPAIGN_MISMATCH');
+  return id;
 }
 
 /** The tokens did not stay with the contract (refunded or never moved); safe to try again. */
@@ -209,13 +236,26 @@ export async function fundCampaign(
   for (let attempt = 0; ; attempt++) {
     const [costs, free] = await Promise.all([d.costs(), d.freePrepay()]);
     const shortfall = prepayShortfall(costs, p.leafCount, free, ownerKeySlack(d.storageByteCost));
-    const hashes = await d.send(fundingTxs({ ...p, sender: d.sender, contractId: d.contractId, tokenId: d.tokenId, shortfall }));
+    d.beforeSend?.();
+    let hashes: string[];
+    try {
+      hashes = await d.send(fundingTxs({ ...p, sender: d.sender, contractId: d.contractId, tokenId: d.tokenId, shortfall }));
+    } catch {
+      throw new SendUncertain(); // the wallet may have broadcast before failing
+    }
     const txHash = hashes[hashes.length - 1]; // ft_transfer_call is always last
-    if (!txHash) throw new Error('the wallet returned no transaction');
+    if (!txHash) throw new SendUncertain();
     d.onSent?.(txHash);
-    const c = await checkCreation(d, txHash, { merkleRoot: p.merkleRoot, total: p.total });
+    const expect = { merkleRoot: p.merkleRoot, total: p.total };
+    const c = await checkCreation(d, txHash, expect);
     if (c.kind === 'created') return { campaignId: c.campaignId, txHash };
     if (c.kind === 'unclear') throw new OutcomeUnclear(txHash);
+    if (c.code.startsWith('E132')) {
+      // This root already funded a campaign (an earlier send landed): that one is ours.
+      const existing = await resolveByRoot(d, expect);
+      if (existing) return { campaignId: existing, txHash };
+      throw new OutcomeUnclear(txHash);
+    }
     if (attempt === 0 && c.code.startsWith('E128')) continue;
     throw new NotCreated(c.code, txHash);
   }

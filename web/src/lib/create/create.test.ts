@@ -4,7 +4,7 @@ import { proofFor } from '../merkle';
 import { buildDraft, claimLink, commitment, leafList, newSalt, recoveryFile } from './campaign';
 import {
   campaignIdFrom, checkCreation, failedWith, fundCampaign, fundingTxs, LookupPending, minDeadlineMs, NotCreated, OutcomeUnclear, ownerKeySlack,
-  prepayShortfall, type FundDeps, type Outcome,
+  prepayShortfall, resolveByRoot, SendUncertain, type FundDeps, type Outcome,
 } from './funding';
 import { formatAmount, parseAmount, parseRecipients } from './recipients';
 
@@ -230,16 +230,25 @@ describe('fundCampaign', () => {
   const costs = { ft_storage_deposit: '1', claim_entry_cost: '1', per_claim_storage: '10', campaign_bytes_cost: '100' };
   const p = { merkleRoot: 'ab'.repeat(32), deadlineNs: '1', leafCount: 3, total: '42' };
   // Each queued item is one lookup result: an Outcome, or an Error the lookup throws.
-  const fake = (outcomes: (Outcome | Error)[], free = '0') => {
+  const fake = (outcomes: (Outcome | Error)[], free = '0', o: { byRoot?: string | null; sendFails?: boolean } = {}) => {
     const sent: string[][] = [];
     const persisted: string[] = [];
+    const events: string[] = [];
     let costReads = 0;
     let lookups = 0;
     const d: FundDeps = {
       sender: 'alice.testnet', contractId: 'zarf-near.testnet', tokenId: 'usdc.testnet', storageByteCost: '2',
       costs: async () => (costReads++, costs),
       freePrepay: async () => free,
-      send: async (txs) => (sent.push(txs.map((t) => t.actions[0].params.methodName)), txs.map((_, i) => `h${sent.length}-${i}`)),
+      send: async (txs) => {
+        events.push('send');
+        sent.push(txs.map((t) => t.actions[0].params.methodName));
+        if (o.sendFails) throw new Error('User closed the window');
+        return txs.map((_, i) => `h${sent.length}-${i}`);
+      },
+      beforeSend: () => events.push('persist-draft'),
+      campaignByRoot: async () => o.byRoot ?? null,
+      campaign: async (id) => (id === o.byRoot ? { merkle_root: p.merkleRoot, amount: p.total, sender: 'alice.testnet' } : null),
       outcome: async () => {
         lookups++;
         const o = outcomes.shift() ?? new Error('rpc timeout');
@@ -250,7 +259,7 @@ describe('fundCampaign', () => {
       lookupRetries: 3,
       sleep: async () => {},
     };
-    return { d, sent, persisted, costReads: () => costReads, lookups: () => lookups };
+    return { d, sent, persisted, events, costReads: () => costReads, lookups: () => lookups };
   };
 
   it('pre-pays the shortfall (with slack), sends the tokens and returns the campaign id', async () => {
@@ -267,6 +276,36 @@ describe('fundCampaign', () => {
     const err = await fundCampaign(fake([panicked('E128_INSUFFICIENT_STORAGE'), panicked('E128_INSUFFICIENT_STORAGE')]).d, p).catch((e) => e);
     expect(err).toBeInstanceOf(NotCreated);
     expect(err.code).toMatch(/^E128/);
+  });
+  it('persists the draft before asking the wallet, so a reload with the popup open loses nothing', async () => {
+    const f = fake([created('9')]);
+    await fundCampaign(f.d, p);
+    expect(f.events).toEqual(['persist-draft', 'send']);
+  });
+  it('a wallet error is SendUncertain, never "nothing was sent"', async () => {
+    const f = fake([], '0', { sendFails: true });
+    expect(await fundCampaign(f.d, p).catch((e) => e)).toBeInstanceOf(SendUncertain);
+    expect(f.lookups()).toBe(0);
+  });
+  it('resolveByRoot after a lost send: the campaign exists (verified against get_campaign) or it does not', async () => {
+    const want = { merkleRoot: p.merkleRoot, total: p.total };
+    expect(await resolveByRoot(fake([], '0', { byRoot: '33' }).d, want)).toBe('33');
+    expect(await resolveByRoot(fake([], '0', { byRoot: null }).d, want)).toBeNull();
+    const wrong = fake([], '0', { byRoot: '33' }).d;
+    await expect(resolveByRoot({ ...wrong, campaign: async () => ({ merkle_root: p.merkleRoot, amount: '1', sender: 'alice.testnet' }) }, want)).rejects.toThrow('CAMPAIGN_MISMATCH');
+    await expect(resolveByRoot({ ...wrong, campaign: async () => ({ merkle_root: p.merkleRoot, amount: p.total, sender: 'mallory.testnet' }) }, want)).rejects.toThrow('CAMPAIGN_MISMATCH');
+  });
+  it('E132 (this root already funded a campaign) resolves to the existing campaign', async () => {
+    const f = fake([panicked('E132_DUPLICATE_CAMPAIGN')], '0', { byRoot: '33' });
+    expect(await fundCampaign(f.d, p)).toEqual({ campaignId: '33', txHash: 'h1-1' });
+    expect(f.sent).toHaveLength(1);
+  });
+  it('our contract ran and succeeded but a token receipt failed: unclear, not refunded', async () => {
+    const mixed: Outcome = { receipts_outcome: [
+      { outcome: { executor_id: 'zarf-near.testnet', logs: [] } },
+      { outcome: { executor_id: 'usdc.testnet', status: { Failure: { ActionError: { kind: { FunctionCallError: { ExecutionError: 'resolve failed' } } } } } } },
+    ] };
+    expect((await checkCreation(fake([mixed]).d, 'h', { merkleRoot: p.merkleRoot, total: p.total })).kind).toBe('unclear');
   });
   it('persists the hash as soon as the wallet returns it, before the lookup', async () => {
     const f = fake([created('9')]);

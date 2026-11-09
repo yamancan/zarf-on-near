@@ -2,8 +2,8 @@
   import { onMount } from 'svelte';
   import { env } from '$env/dynamic/public';
   import { buildDraft, claimLink, leafList, recoveryFile, type Draft } from '$lib/create/campaign';
-  import { getConfig, getPrepayBalance, getStorageCosts, txOutcome, type ContractConfig } from '$lib/create/chain';
-  import { checkCreation, fundCampaign, LookupPending, minDeadlineMs, NotCreated, OutcomeUnclear } from '$lib/create/funding';
+  import { getCampaignByRoot, getCampaignView, getConfig, getPrepayBalance, getStorageCosts, txOutcome, type ContractConfig } from '$lib/create/chain';
+  import { checkCreation, fundCampaign, LookupPending, minDeadlineMs, NotCreated, OutcomeUnclear, resolveByRoot } from '$lib/create/funding';
   import { downloadPublisher, saveFile } from '$lib/create/publish';
   import { formatAmount, parseRecipients } from '$lib/create/recipients';
   import { myNearWallet, type SenderWallet } from '$lib/create/wallet';
@@ -18,6 +18,7 @@
   let setupError = $state('');
   let deadline = $state(''); // datetime-local, the sender's time zone
   let wallet: SenderWallet | null = null;
+  let walletReady = $state(false); // the wallet module loads after the config; Connect waits for it
   let account = $state<string | null>(null);
   let draft = $state<Draft | null>(null);
   let recoverySaved = $state(false);
@@ -34,7 +35,7 @@
 
   const FUNDING_KEY = 'zarf-near:create-funding';
   interface Funding {
-    txHash: string;
+    txHash: string | null; // null: the wallet was asked but no hash came back (yet)
     sender: string;
     draft: Draft;
     deadline: string;
@@ -84,6 +85,7 @@
       if (!config.token_ids.includes(token)) setupError = `${token} is not accepted by this contract.`;
       deadline = toLocalInput(Math.max(Date.now() + 7 * 86_400_000, minDeadlineMs(Date.now(), config.min_lifetime_ns) + 3_600_000));
       wallet = await myNearWallet(config.network, rpc);
+      walletReady = true;
       account = wallet.accountId();
       // A funding tx from before a reload: resume checking it instead of offering Create again.
       const f = loadFunding();
@@ -92,8 +94,9 @@
         deadline = f.deadline;
         recoverySaved = recoveryAck = true;
         sentFrom = f.sender;
-        if (f.campaignId) result = { campaignId: f.campaignId, txHash: f.txHash };
-        else await check(f.txHash);
+        if (f.campaignId) result = { campaignId: f.campaignId, txHash: f.txHash ?? '' };
+        else if (f.txHash) await check(f.txHash);
+        else await checkByRoot(); // reloaded while the wallet popup was open
       }
     } catch {
       setupError = 'Could not read the contract. Try again in a minute.';
@@ -142,6 +145,39 @@
     publishTodo = (await downloadPublisher(env.PUBLIC_LEAVES_URL).publish(leafList(r.campaignId, draft!))).todo;
   }
 
+  const byRoot = () => ({
+    sender: sentFrom ?? account!,
+    campaignByRoot: (root: string) => getCampaignByRoot(rpc!, contract!, root),
+    campaign: (id: string) => getCampaignView(rpc!, contract!, id),
+  });
+
+  /**
+   * The wallet failed or the page reloaded before a hash came back: the tx may have landed anyway.
+   * The draft's merkle_root is an idempotency key, so ask the contract. Never assume nothing was sent.
+   */
+  async function checkByRoot() {
+    txState = 'checking';
+    busy = 'Checking whether the campaign exists…';
+    try {
+      const id = await resolveByRoot(byRoot(), { merkleRoot: draft!.merkleRoot, total: draft!.total });
+      if (id) {
+        await created({ campaignId: id, txHash: sentTx ?? '' });
+      } else {
+        sentTx = txState = null;
+        clearFunding();
+        error =
+          'Your wallet did not confirm, and no campaign exists for these links yet. You can create it again: ' +
+          'if the earlier transaction still lands, the contract refunds the duplicate.';
+      }
+    } catch {
+      txState = 'checking'; // could not read the contract: keep Create off, offer Check again
+    } finally {
+      busy = '';
+    }
+  }
+
+  const recheck = () => (sentTx ? check(sentTx) : checkByRoot());
+
   function failed(e: unknown) {
     if (e instanceof LookupPending) {
       txState = 'checking'; // sent, outcome unknown: Create stays off
@@ -152,10 +188,10 @@
       sentTx = txState = null;
       clearFunding();
       error = ERRORS[e.code] ?? `The campaign was not created (${e.code}). Your tokens were returned.`;
-    } else if (!sentTx) {
-      error = `Nothing was sent (${(e as Error).message}).`; // the wallet failed or was closed before sending
-    } else {
+    } else if (sentTx) {
       txState = 'checking';
+    } else {
+      void checkByRoot(); // SendUncertain or any other failure without a hash
     }
   }
 
@@ -188,6 +224,12 @@
             costs: () => getStorageCosts(rpc!, contract!, token!),
             freePrepay: () => getPrepayBalance(rpc!, contract!, account!),
             send: (txs) => wallet!.send(txs),
+            campaignByRoot: byRoot().campaignByRoot,
+            campaign: byRoot().campaign,
+            beforeSend: () => {
+              sentFrom = account;
+              saveFunding({ txHash: null, sender: account!, draft: d, deadline });
+            },
             onSent: (txHash) => {
               sentTx = txHash;
               sentFrom = account;
@@ -222,7 +264,7 @@
   <p class="error" role="alert">{setupError}</p>
 {:else if result && draft}
   <h2>Campaign {result.campaignId} is live</h2>
-  {#if env.PUBLIC_EXPLORER_TX_URL}
+  {#if env.PUBLIC_EXPLORER_TX_URL && result.txHash}
     <p><a href="{env.PUBLIC_EXPLORER_TX_URL}{result.txHash}" target="_blank" rel="noopener noreferrer">View the transaction</a></p>
   {/if}
   {#if publishTodo}<p><strong>One more step:</strong> {publishTodo}</p>{/if}
@@ -265,7 +307,7 @@
   {#if account}
     <p>Sending from <code>{account}</code> <button onclick={disconnect} disabled={!!busy}>Disconnect</button></p>
   {:else}
-    <button onclick={connect} disabled={!config}>Connect MyNearWallet</button>
+    <button onclick={connect} disabled={!walletReady}>Connect MyNearWallet</button>
   {/if}
 
   <h2>4. Create</h2>
@@ -277,17 +319,17 @@
     <label><input type="checkbox" bind:checked={recoveryAck} disabled={!recoverySaved} /> I stored the recovery file somewhere private</label>
     <p>You send {formatAmount(BigInt(draft.total))} USDC to {draft.recipients.length} recipients, plus a small NEAR storage pre-pay that your wallet shows before you sign.</p>
     {#if txState === 'checking'}
-      <p role="status">Checking the transaction… It was sent; do not send it again.</p>
+      <p role="status">Checking whether your campaign was created… Do not send again until this finishes.</p>
       <p>
-        <button onclick={() => check(sentTx!)} disabled={!!busy}>{busy || 'Check again'}</button>
-        {#if env.PUBLIC_EXPLORER_TX_URL}<a href="{env.PUBLIC_EXPLORER_TX_URL}{sentTx}" target="_blank" rel="noopener noreferrer">View it on the explorer</a>{/if}
+        <button onclick={recheck} disabled={!!busy}>{busy || 'Check again'}</button>
+        {#if env.PUBLIC_EXPLORER_TX_URL && sentTx}<a href="{env.PUBLIC_EXPLORER_TX_URL}{sentTx}" target="_blank" rel="noopener noreferrer">View it on the explorer</a>{/if}
       </p>
     {:else if txState === 'unclear'}
       <p class="error" role="alert">
         The transaction ran but did not create this campaign, and we could not confirm your tokens came back. Do not
         send again; check it on the explorer first.
       </p>
-      {#if env.PUBLIC_EXPLORER_TX_URL}<p><a href="{env.PUBLIC_EXPLORER_TX_URL}{sentTx}" target="_blank" rel="noopener noreferrer">View it on the explorer</a></p>{/if}
+      {#if env.PUBLIC_EXPLORER_TX_URL && sentTx}<p><a href="{env.PUBLIC_EXPLORER_TX_URL}{sentTx}" target="_blank" rel="noopener noreferrer">View it on the explorer</a></p>{/if}
     {:else}
       <button class="primary" disabled={!recoveryAck || !!busy || !!sentTx} onclick={create}>{busy || 'Create campaign'}</button>
       <p><button onclick={() => (draft = null)} disabled={!!busy || !!sentTx}>Edit recipients</button></p>
