@@ -3,7 +3,7 @@
   import { env } from '$env/dynamic/public';
   import { buildDraft, claimLink, leafList, recoveryFile, type Draft } from '$lib/create/campaign';
   import { getCampaignByRoot, getCampaignView, getConfig, getPrepayBalance, getStorageCosts, txOutcome, type ContractConfig } from '$lib/create/chain';
-  import { checkCreation, fundCampaign, LookupPending, minDeadlineMs, NotCreated, NotSent, OutcomeUnclear, resolveByRoot } from '$lib/create/funding';
+  import { checkCreation, fundCampaign, LookupPending, minDeadlineMs, NotCreated, NotSent, OutcomeUnclear, resolveByRoot, settleAfterUncertain } from '$lib/create/funding';
   import { downloadPublisher, saveFile } from '$lib/create/publish';
   import { formatAmount, parseRecipients } from '$lib/create/recipients';
   import { myNearWallet, type SenderWallet } from '$lib/create/wallet';
@@ -30,11 +30,25 @@
   let copied = $state(false);
   // A funding tx that was sent: while set, Create stays off until its outcome is known.
   let sentTx = $state<string | null>(null);
-  let txState = $state<'checking' | 'unclear' | 'mismatch' | null>(null);
+  let txState = $state<'checking' | 'settling' | 'unclear' | 'mismatch' | null>(null);
   // Once a send may have gone out, this draft (its merkle_root) is pinned: re-sending the same root is
   // safe (E132 refunds a duplicate), a new draft is not. Unpinned only by a campaign or a proven refund.
   let pinned = $state(false);
+  let hadUncertain = false;
+  // Other tabs: an unresolved send there means a new draft here could fund twice.
+  const MARKER_KEY = 'zarf-near:unresolved';
+  let otherTab = $state<{ root: string; sender: string } | null>(null);
+  const setMarker = (m: { root: string; sender: string } | null) => {
+    try {
+      if (m) localStorage.setItem(MARKER_KEY, JSON.stringify(m));
+      else localStorage.removeItem(MARKER_KEY);
+    } catch {
+      // best effort: this tab's own pin still holds
+    }
+  };
   let sentFrom = $state<string | null>(null); // the sender of sentTx (the tx lookup needs it)
+  /** Pinned to a sender: only that account may send this draft (a second account would fund it twice). */
+  const wrongAccount = $derived(pinned && !!sentFrom && account !== sentFrom);
 
   const FUNDING_KEY = 'zarf-near:create-funding';
   interface Funding {
@@ -43,6 +57,7 @@
     draft: Draft;
     deadline: string;
     campaignId?: string;
+    uncertain?: boolean; // a send whose outcome was lost happened for this draft
   }
   /** True if persisted. Before a send it must succeed (see beforeSend); later writes are best effort. */
   const saveFunding = (f: Funding): boolean => {
@@ -94,12 +109,20 @@
       account = wallet.accountId();
       // A funding tx from before a reload: resume checking it instead of offering Create again.
       const f = loadFunding();
+      if (!f) {
+        try {
+          otherTab = JSON.parse(localStorage.getItem(MARKER_KEY) ?? 'null');
+        } catch {
+          otherTab = null;
+        }
+      }
       if (f) {
         draft = f.draft;
         deadline = f.deadline;
         recoverySaved = recoveryAck = true;
         sentFrom = f.sender;
         pinned = true;
+        hadUncertain = !!f.uncertain;
         if (f.campaignId) result = { campaignId: f.campaignId, txHash: f.txHash ?? '' };
         else if (f.txHash) await check(f.txHash);
         else await checkByRoot(); // reloaded while the wallet popup was open
@@ -147,6 +170,7 @@
   async function created(r: { campaignId: string; txHash: string }) {
     result = r;
     txState = null;
+    setMarker(null);
     saveFunding({ txHash: r.txHash, sender: sentFrom ?? account!, draft: draft!, deadline, campaignId: r.campaignId });
     publishTodo = (await downloadPublisher(env.PUBLIC_LEAVES_URL).publish(leafList(r.campaignId, draft!))).todo;
   }
@@ -193,15 +217,37 @@
     } else if (e instanceof NotSent) {
       error = 'This browser would not store the campaign before sending, so nothing was sent. Allow site storage and try again.';
     } else if (e instanceof NotCreated) {
-      // Proven: the tokens are back (or never left). Only now may the sender change the draft.
-      sentTx = txState = null;
-      pinned = false;
-      clearFunding();
-      error = ERRORS[e.code] ?? `The campaign was not created (${e.code}). Your tokens were returned.`;
+      // Proven for this tx: the tokens are back (or never left).
+      const msg = ERRORS[e.code] ?? `The campaign was not created (${e.code}). Your tokens were returned.`;
+      if (hadUncertain) void unpinAfterSecondLook(msg);
+      else unpin(msg);
     } else if (sentTx) {
       txState = 'checking';
     } else {
-      void checkByRoot(); // SendUncertain or any other failure without a hash
+      // SendUncertain or any other failure without a hash: remember it, then ask the contract.
+      hadUncertain = true;
+      if (draft && sentFrom) saveFunding({ txHash: null, sender: sentFrom, draft, deadline, uncertain: true });
+      void checkByRoot();
+    }
+  }
+
+  function unpin(msg: string) {
+    sentTx = txState = null;
+    pinned = hadUncertain = false;
+    clearFunding();
+    setMarker(null);
+    error = msg;
+  }
+
+  /** An earlier send's outcome was lost, so it may still land: look by root once more before unpinning. */
+  async function unpinAfterSecondLook(msg: string) {
+    txState = 'settling'; // its own state: create()'s finally clears `busy` while this runs
+    try {
+      const id = await settleAfterUncertain(byRoot(), { merkleRoot: draft!.merkleRoot, total: draft!.total });
+      if (id) await created({ campaignId: id, txHash: sentTx ?? '' });
+      else unpin(msg);
+    } catch (e) {
+      txState = (e as Error).message === 'CAMPAIGN_MISMATCH' ? 'mismatch' : 'checking';
     }
   }
 
@@ -224,6 +270,10 @@
 
   async function create() {
     error = '';
+    if (wrongAccount) {
+      error = `This draft belongs to ${sentFrom}: reconnect ${sentFrom} to continue.`;
+      return;
+    }
     busy = 'Waiting for your wallet…';
     try {
       const d = draft!;
@@ -237,9 +287,10 @@
             campaignByRoot: byRoot().campaignByRoot,
             campaign: byRoot().campaign,
             beforeSend: () => {
-              if (!saveFunding({ txHash: null, sender: account!, draft: d, deadline })) throw new Error('session storage unavailable');
+              if (!saveFunding({ txHash: null, sender: account!, draft: d, deadline, uncertain: hadUncertain })) throw new Error('session storage unavailable');
               sentFrom = account;
               pinned = true;
+              setMarker({ root: d.merkleRoot, sender: account! });
             },
             onSent: (txHash) => {
               sentTx = txHash;
@@ -262,6 +313,7 @@
   /** After a finished (or mismatched) campaign: forget it in this tab and begin a new draft. */
   function startOver() {
     clearFunding();
+    setMarker(null);
     draft = result = null;
     sentTx = sentFrom = txState = publishTodo = null;
     pinned = recoverySaved = recoveryAck = copied = false;
@@ -279,6 +331,13 @@
   Each recipient claims with their Google account. Emails never go on chain; when someone claims, our verifier sees
   their email to check it matches the claim.
 </p>
+
+{#if otherTab && !draft}
+  <p class="error" role="alert">
+    Another tab has a campaign from <code>{otherTab.sender}</code> whose send has not resolved yet. Finish it there
+    before creating a new one here, or the same tokens could be sent twice.
+  </p>
+{/if}
 
 {#if setupError}
   <p class="error" role="alert">{setupError}</p>
@@ -327,10 +386,17 @@
   <p class="muted">Recipients can claim until then. After it, you can reclaim whatever is left.</p>
 
   <h2>3. Wallet</h2>
-  {#if account}
-    <p>Sending from <code>{account}</code> <button onclick={disconnect} disabled={!!busy}>Disconnect</button></p>
+  {#if pinned && !wrongAccount}
+    <p>Sending from <code>{account}</code>. This campaign is tied to this account until it resolves.</p>
   {:else}
-    <button onclick={connect} disabled={!walletReady}>Connect MyNearWallet</button>
+    {#if wrongAccount}
+      <p class="error" role="alert">This draft belongs to <code>{sentFrom}</code>: reconnect {sentFrom} to continue.</p>
+    {/if}
+    {#if account}
+      <p>Sending from <code>{account}</code> <button onclick={disconnect} disabled={!!busy}>Disconnect</button></p>
+    {:else}
+      <button onclick={connect} disabled={!walletReady}>Connect MyNearWallet</button>
+    {/if}
   {/if}
 
   <h2>4. Create</h2>
@@ -347,6 +413,10 @@
         <button onclick={recheck} disabled={!!busy}>{busy || 'Check again'}</button>
         {#if env.PUBLIC_EXPLORER_TX_URL && sentTx}<a href="{env.PUBLIC_EXPLORER_TX_URL}{sentTx}" target="_blank" rel="noopener noreferrer">View it on the explorer</a>{/if}
       </p>
+    {:else if txState === 'settling'}
+      <p role="status">
+        That attempt was refunded. Making sure an earlier attempt did not land (about 90 seconds) before these links can change…
+      </p>
     {:else if txState === 'mismatch'}
       <p class="error" role="alert">
         The contract holds a campaign for these links that does not match this draft. It is not used. Generate new links.
@@ -359,7 +429,7 @@
       </p>
       {#if env.PUBLIC_EXPLORER_TX_URL && sentTx}<p><a href="{env.PUBLIC_EXPLORER_TX_URL}{sentTx}" target="_blank" rel="noopener noreferrer">View it on the explorer</a></p>{/if}
     {:else}
-      <button class="primary" disabled={!recoveryAck || !!busy || !!sentTx} onclick={create}>{busy || 'Create campaign'}</button>
+      <button class="primary" disabled={!recoveryAck || !!busy || !!sentTx || wrongAccount} onclick={create}>{busy || 'Create campaign'}</button>
       {#if !pinned}<p><button onclick={() => (draft = null)} disabled={!!busy}>Edit recipients</button></p>{/if}
     {/if}
   {/if}

@@ -4,7 +4,7 @@ import { proofFor } from '../merkle';
 import { buildDraft, claimLink, commitment, leafList, newSalt, recoveryFile } from './campaign';
 import {
   campaignIdFrom, checkCreation, failedWith, fundCampaign, fundingTxs, LookupPending, minDeadlineMs, NotCreated, OutcomeUnclear, ownerKeySlack,
-  NotSent, prepayShortfall, resolveByRoot, SendUncertain, type FundDeps, type Outcome,
+  NotSent, prepayShortfall, resolveByRoot, SendUncertain, settleAfterUncertain, type FundDeps, type Outcome,
 } from './funding';
 import { formatAmount, parseAmount, parseRecipients } from './recipients';
 
@@ -305,6 +305,14 @@ describe('fundCampaign', () => {
     await expect(resolveByRoot({ ...wrong, campaign: async () => ({ merkle_root: p.merkleRoot, amount: p.total, sender: 'mallory.testnet' }) }, want)).rejects.toThrow('CAMPAIGN_MISMATCH');
     await expect(resolveByRoot({ ...wrong, campaign: async () => ({ merkle_root: 'cd'.repeat(32), amount: p.total, sender: 'alice.testnet' }) }, want)).rejects.toThrow('CAMPAIGN_MISMATCH');
     await expect(resolveByRoot({ ...wrong, campaign: async () => null }, want)).rejects.toThrow('CAMPAIGN_MISMATCH');
+  });
+  it('after an uncertain send, waits ~90 s and looks by root again before letting the draft go', async () => {
+    const want = { merkleRoot: p.merkleRoot, total: p.total };
+    const waits: number[] = [];
+    const sleep = async (ms: number) => void waits.push(ms);
+    expect(await settleAfterUncertain(fake([], '0', { byRoot: '33' }).d, want, { sleep })).toBe('33'); // the earlier tx landed
+    expect(await settleAfterUncertain(fake([], '0', { byRoot: null }).d, want, { sleep })).toBeNull();
+    expect(waits).toEqual([90_000, 90_000]);
   });
   it('E132 (this root already funded a campaign) resolves to the existing campaign', async () => {
     const f = fake([panicked('E132_DUPLICATE_CAMPAIGN')], '0', { byRoot: '33' });

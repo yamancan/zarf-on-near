@@ -272,3 +272,16 @@ export async function fundCampaign(
     throw new NotCreated(c.code, txHash);
   }
 }
+
+/**
+ * After a send whose outcome was lost, a later proven refund says nothing about that earlier tx: it
+ * may still land. Look again by (sender, root) after `waitMs` before letting the draft go.
+ */
+export async function settleAfterUncertain(
+  d: Pick<FundDeps, 'campaignByRoot' | 'campaign' | 'sender'>,
+  expect: { merkleRoot: string; total: string },
+  { waitMs = 90_000, sleep = defaultSleep }: { waitMs?: number; sleep?: (ms: number) => Promise<void> } = {},
+): Promise<string | null> {
+  await sleep(waitMs);
+  return resolveByRoot(d, expect);
+}
