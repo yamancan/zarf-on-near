@@ -13,25 +13,39 @@ export function remoteJwks(
   now: () => number = Date.now,
 ): JwksSource {
   let keys = new Map<string, CryptoKey>();
-  let fetchedAt = -Infinity;
+  let fetchedAt = -Infinity; // last successful fetch
+  let attemptedAt = -Infinity; // last fetch, failed or not: MIN_REFRESH_MS also throttles an outage
+  let lastError: unknown = null;
 
   async function refresh(): Promise<void> {
-    const res = await fetchFn(url);
-    if (!res.ok) throw new Error(`JWKS fetch failed: HTTP ${res.status}`);
-    const body = (await res.json()) as { keys?: (JsonWebKey & { kid?: string })[] };
-    const next = new Map<string, CryptoKey>();
-    for (const jwk of body.keys ?? []) {
-      if (jwk.kty !== 'RSA' || !jwk.kid) continue;
-      const alg = { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' };
-      next.set(jwk.kid, await crypto.subtle.importKey('jwk', jwk, alg, false, ['verify']));
+    attemptedAt = now();
+    try {
+      const res = await fetchFn(url);
+      if (!res.ok) throw new Error(`JWKS fetch failed: HTTP ${res.status}`);
+      const body = (await res.json()) as { keys?: (JsonWebKey & { kid?: string; use?: string })[] };
+      const next = new Map<string, CryptoKey>();
+      for (const jwk of body.keys ?? []) {
+        if (jwk.kty !== 'RSA' || !jwk.kid || (jwk.alg && jwk.alg !== 'RS256') || (jwk.use && jwk.use !== 'sig')) continue;
+        try {
+          next.set(jwk.kid, await crypto.subtle.importKey('jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']));
+        } catch {
+          continue; // one odd key must not take down the others
+        }
+      }
+      keys = next;
+      fetchedAt = attemptedAt;
+      lastError = null;
+    } catch (e) {
+      lastError = e;
+      throw e;
     }
-    keys = next;
-    fetchedAt = now();
   }
 
   return async (kid) => {
-    const age = now() - fetchedAt;
-    if (age > MAX_AGE_MS || (!keys.has(kid) && age > MIN_REFRESH_MS)) await refresh();
+    const t = now();
+    const stale = t - fetchedAt > MAX_AGE_MS;
+    if ((stale || !keys.has(kid)) && t - attemptedAt > MIN_REFRESH_MS) await refresh();
+    else if (stale && lastError) throw lastError; // fail closed without re-fetching during an outage
     return keys.get(kid);
   };
 }

@@ -8,6 +8,12 @@ import {
 const { keys, campaign, claims } = vectors;
 
 describe('spec/vectors.json', () => {
+  it('is not empty', () => {
+    expect(campaign.recipients.length).toBeGreaterThanOrEqual(1);
+    expect(claims.valid.length).toBeGreaterThanOrEqual(3);
+    expect(claims.invalid.length).toBeGreaterThanOrEqual(1);
+  });
+
   it.each(campaign.recipients)('commitment for $email', async (r) => {
     expect(canonicalizeEmail(r.email)).toBe(r.canonical_email);
     expect(hex(await commitment(unhex(campaign.salt), r.email))).toBe(r.commitment);

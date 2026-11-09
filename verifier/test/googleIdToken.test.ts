@@ -58,6 +58,7 @@ describe('verifyGoogleIdToken', () => {
 
   it.each<[string, string, () => Promise<string>]>([
     ['MALFORMED', 'two segments', async () => 'a.b'],
+    ['MALFORMED', 'four segments', async () => `${await sign(google, claims)}.x`],
     ['MALFORMED', 'garbage json', async () => 'e30.bm90LWpzb24.AA'],
     ['BAD_ALG', 'alg none', () => sign(google, claims, { alg: 'none', kid: 'k1' })],
     ['BAD_ALG', 'alg HS256', () => sign(google, claims, { alg: 'HS256', kid: 'k1' })],
@@ -120,6 +121,33 @@ describe('remoteJwks', () => {
     served = [other];
     now += 3_600_001;
     expect(await jwks('k1')).toBeUndefined();
+  });
+
+  it('skips foreign or broken keys and keeps the good one', async () => {
+    const jwks = remoteJwks('x', async () => new Response(JSON.stringify({ keys: [
+      { kty: 'EC', crv: 'P-256', kid: 'ec', x: 'AA', y: 'AA' },
+      { ...google.jwk, kid: 'rs512', alg: 'RS512' },
+      { ...google.jwk, kid: 'enc', use: 'enc' },
+      { ...google.jwk, kid: undefined },
+      { kty: 'RSA', kid: 'broken', e: 'AQAB' },
+      google.jwk,
+    ] })), () => NOW);
+    expect(await jwks('k1')).toBeDefined();
+    for (const kid of ['ec', 'rs512', 'enc', 'broken']) expect(await jwks(kid)).toBeUndefined();
+    const t = await sign(google, claims);
+    expect(await verifyGoogleIdToken(t, { clientId: CLIENT_ID, destination: DEST, nowMs: NOW, jwks })).toEqual({ email: 'alice@example.com' });
+  });
+
+  it('throttles refetches during an outage and still fails closed', async () => {
+    let now = NOW;
+    const fetchFn = vi.fn(async () => new Response('down', { status: 503 }));
+    const jwks = remoteJwks('x', fetchFn, () => now);
+    await expect(jwks('k1')).rejects.toThrow('HTTP 503');
+    await expect(jwks('k1')).rejects.toThrow('HTTP 503');
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    now += 31_000;
+    await expect(jwks('k1')).rejects.toThrow('HTTP 503');
+    expect(fetchFn).toHaveBeenCalledTimes(2);
   });
 
   it('fails closed when the JWKS endpoint errors', async () => {
