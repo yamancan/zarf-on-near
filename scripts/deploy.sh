@@ -222,6 +222,7 @@ if [[ -n ${RELAYER_ID:-} ]]; then
     const b = Buffer.from(n.toString(16).padStart(128, "0"), "hex");
     const pub = b.subarray(32), out = []; let m = BigInt("0x" + pub.toString("hex"));
     for (; m > 0n; m /= 58n) out.unshift(A[Number(m % 58n)]);
+    for (const x of pub) { if (x) break; out.unshift("1"); } // base58 keeps leading zero bytes as "1"
     process.stdout.write("ed25519:" + out.join(""));' "$RELAYER_KEY_FILE")
   if [[ ${DRY_RUN:-} != 1 ]] && curl -sSf "$RPC" -H 'content-type: application/json' -d "$(jq -nc \
       --arg a "$RELAYER_ID" --arg k "$relayer_pub" \
