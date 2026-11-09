@@ -95,6 +95,9 @@ scripts/deploy.sh
   Both end up as secrets of their Cloudflare Workers (`wrangler secret put`); after that, the
   plaintext copies on the build host are deleted (`shred -u`), so the only live copy of the
   verifier seed is the Worker secret.
+- If a step after deploy + `new` fails, the script prints the exact rerun command with
+  `SKIP_DEPLOY=1`: it skips the build and deploy and repeats the lock (a no-op once no key is left),
+  the USDC registration, the refresh and the relayer key. Every one of them is safe to repeat.
 - The script refuses: no `LOCK_CONTRACT=1`; a `USDC_ID` other than Circle's mainnet contract;
   accounts not ending in `.near`; the public test keys from `spec/vectors.json`.
 - The script prints `view get_config` at the end. Expect `network` = `mainnet`,
