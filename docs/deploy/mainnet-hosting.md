@@ -46,11 +46,13 @@ Everything else is ready now.
    secrets directory and never overwrites them. It prints only the verifier signer (hex) and the relayer
    public key. They are never the testnet or spec keys, and the contract refuses test keys on
    mainnet anyway.
-3. **On chain (owner):**
-   - `add_owner_key` with the verifier signer;
-   - on the relayer account, add the printed public key as a function-call key: receiver = the
-     contract, methods `["claim"]`, allowance unlimited (near-cli-rs `account add-key …
-grant-function-call-access`, the same as the testnet relayer key in `docs/deploy/testnet.md`).
+3. **On chain: done by `scripts/deploy.sh`** (coding-agent's runbook, `docs/deploy/mainnet.md`).
+   Run it with `SIGNER_PUBKEY=<signer from step 2>`. Its `new` registers that signer as the initial
+   signer, so it is active at once with no `add_owner_key` and no 1 h wait. It also adds the
+   relayer's claim-only key from `mainnet-relayer.key`. Run `mainnet-keys.mjs` **before**
+   `deploy.sh`, even before its dry run: `deploy.sh` creates the two files if they are missing, and
+   `mainnet-keys.mjs` then refuses to overwrite them. Check that the relayer public key `deploy.sh`
+   prints equals the one `mainnet-keys.mjs` printed.
 4. **Fill `env.mainnet`** and commit:
    - verifier: `CONTRACT_ID`, `GOOGLE_CLIENT_ID`;
    - relayer: `CONTRACT_ID`, `RELAYER_ACCOUNT_ID`, `VERIFIER_SIGNERS` (the signer from step 2);
