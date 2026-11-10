@@ -30,7 +30,7 @@
     "testnet": {
       "secrets": { "required": ["SIGNER_SEED"] },
       // Hosted origin only; for a local claim app add it with --var CLAIM_ORIGINS:...
-      "vars": { "GOOGLE_CLIENT_ID": "", "CLAIM_ORIGINS": "https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev", "CONTRACT_ID": "zarf-near-1112.testnet", "NEAR_RPC_URL": "https://rpc.testnet.near.org" },
+      "vars": { "GOOGLE_CLIENT_ID": "", "CLAIM_ORIGINS": "https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev", "CONTRACT_ID": "zarf-near-1112.testnet", "NEAR_RPC_URL": "https://test.rpc.fastnear.com" },
       "ratelimits": [{ "name": "PER_IP", "namespace_id": "2003", "simple": { "limit": 20, "period": 60 } }]
     }
   }

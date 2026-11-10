@@ -2,7 +2,7 @@
 
 **Pay any email, on any chain.** A sender funds a campaign with USDC for a list of email
 addresses. Each recipient opens their claim link, signs in with Google, and receives the tokens
-at a NEAR account they choose, without holding NEAR or a wallet beforehand. The chain stores
+at a NEAR account they already have; they need no NEAR for gas, because a relayer pays it. The chain stores
 salted commitments, amounts, each campaign's merkle root and sender, and each claim's destination;
 never an email. Built for the NEAR Hackathon
 (build window ends 2026-11-14 23:59 UTC).
@@ -21,8 +21,8 @@ Read this before using it with real money.
 - **Mode W (this deployment): owner-registered key.** The verifier runs as a Cloudflare Worker,
   and the contract owner registers its signing key. The verifier operator is trusted. A leaked
   key can claim every allocation of the campaigns that accept it, up to each campaign's tree.
-  **TODO (T11):** Mode T (a Shade Agent in a TEE, key registered through on-chain attestation) is
-  described as "attested" only if it ships.
+  A TEE-attested verifier (key registered through on-chain attestation) is on the roadmap, not
+  built: nothing in this deployment is attested.
 - **Each campaign snapshots its accepted keys at creation.** Removing a snapshotted key
   (`remove_agent`) freezes that campaign's claims until `reclaim`. Revocation costs liveness,
   never funds.
@@ -38,6 +38,10 @@ Read this before using it with real money.
   sign. The destination is inside the verifier's signature, so the relayer cannot redirect funds.
   Gas is spent only after a valid verifier signature; the per-IP rate limits on the verifier and
   relayer only shed noise and are not a security property (Cloudflare's limits are approximate).
+  `claim` is permissionless: anyone holding the verifier's signed arguments can submit them, so
+  the relayer is a convenience, not a trust point. We do not use NEP-366 meta-transactions because
+  they need the recipient to sign a delegate action with their own NEAR key, and a recipient here
+  proves who they are with Google: they may have no NEAR account or key at all.
 - **Unclaimed funds go back to the sender** with `reclaim` after the campaign deadline.
 - **Storage is pre-paid by the sender** in NEAR (`prepay_deposit`): the campaign entry plus storage
   for each claim. The unused reservation returns to the sender's free pre-pay on `reclaim`, and
@@ -167,6 +171,12 @@ AI assistance: this code was written with Claude Code agents (implementation and
 humans deciding design and scope.
 
 **Other entry (Q-015).** **TODO:** link `ad402-near`, which names this project in its README too.
+
+## Roadmap
+
+- TEE-attested verifier: the signing key registered through on-chain attestation, so the
+  verifier operator stops being a trust point.
+- NEAR Auth (FastAuth): give a recipient without a NEAR account one at claim time.
 
 ## Tracks
 

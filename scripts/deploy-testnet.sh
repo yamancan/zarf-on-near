@@ -24,7 +24,7 @@
 set -euo pipefail
 
 NETWORK=testnet
-RPC=https://rpc.testnet.near.org
+RPC=https://test.rpc.fastnear.com
 USDC_ID=${USDC_ID:-3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af}
 MIN_LIFETIME_NS=600000000000      # 10 min on testnet (spec)
 AGENT_TTL_NS=604800000000000      # 7 days, the Shade CLI re-registration period (spec)
