@@ -104,22 +104,27 @@ Deployed with `wrangler deploy --env testnet` (Cloudflare account `f0b938c1…`,
 subdomain `sparkling-queen-5e77`). Secrets were uploaded with `wrangler secret put`, piped from
 `~/.config/zarf-near/`; their values are never printed or stored in the repo.
 
+Redeployed from `02568c7` against the escrow `zarf-near-1112.testnet` (same verifier signer
+`2d10ebec…`; relayer `zarf-near-relayer-1111.testnet` with a new claim-only key for 1112).
+
 | Service | URL | Version |
 | --- | --- | --- |
-| Web (create + claim) | https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev | `123a37dd-bdf0-4329-a132-27a33e67e748` |
-| Verifier | https://zarf-near-verifier-testnet.sparkling-queen-5e77.workers.dev | `35cf22f9-3ebe-48a1-9c2a-a340bbde7385` |
-| Relayer | https://zarf-near-relayer-testnet.sparkling-queen-5e77.workers.dev | `b0b86112-8e40-4fec-86f9-4f865b5dfd44` |
+| Web (create + claim) | https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev | `781714e5-2ad0-4573-b94e-32ea076436cd` |
+| Verifier | https://zarf-near-verifier-testnet.sparkling-queen-5e77.workers.dev | `42ded7e0-a585-40e6-b48d-273b70f3cb3d` |
+| Relayer | https://zarf-near-relayer-testnet.sparkling-queen-5e77.workers.dev | `c47d9d86-d62c-4087-8dea-d314257a07ad` |
 
 Smoke against the public URLs:
 
 | Check | Result |
 | --- | --- |
-| relayer `GET /health` | `{"allowance":null,"balance":"9998707874175780800000000","claim_only":true}` |
-| verifier `POST /claim`, no Google client yet | `500 {"error":"VERIFIER_MISCONFIGURED"}`: fails closed |
-| CORS preflight from the web origin (verifier, relayer) | `204`, `access-control-allow-origin: https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev` |
-| web CSP `connect-src` | `'self'`, the verifier, the relayer, `https://rpc.testnet.near.org` |
-| `/claim/999999/…` (headless Chromium, phone size) | one `get_campaign` to testnet; "Claim before: this campaign does not exist"; no console errors |
-| `/create` | `get_config` from testnet; the token is accepted, Connect is enabled; no console errors |
+| verifier `GET /health` | `{"contract_id":"zarf-near-1112.testnet","signer":"2d10ebec…4e32","google_client_id_set":false}` |
+| relayer `GET /health` | `{"contract_id":"zarf-near-1112.testnet","allowance":null,"balance":"9997401738950342600000000","claim_only":true}` |
+| verifier `POST /claim` with a 20 KB body | `413 {"error":"TOO_LARGE"}` |
+| CORS preflight from `http://localhost:5173` / the web origin | no `access-control-allow-origin` / the web origin |
+| `/`, `/campaigns`, `/create`, `/privacy` | `200` |
+| `/claim/999999/…` with a valid fragment (headless Chromium) | "This campaign does not exist", no form, no console errors |
+| a spec vector link on campaign 0 | "This claim link does not match" (`LINK_MISMATCH`), no form |
+| a missing or damaged fragment | "This claim link is incomplete", no form |
 
 Google sign-in stays off until the owner creates the OAuth client. Then add
 `https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev` as a JavaScript origin and
