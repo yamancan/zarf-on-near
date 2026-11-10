@@ -46,7 +46,7 @@ Everything else is ready now.
    secrets directory and never overwrites them. It prints only the verifier signer (hex) and the relayer
    public key. They are never the testnet or spec keys, and the contract refuses test keys on
    mainnet anyway.
-3. **On chain: done by `scripts/deploy.sh`** (coding-agent's runbook, `docs/deploy/mainnet.md`).
+3. **On chain: done by `scripts/deploy.sh`** (the escrow runbook, `docs/deploy/mainnet.md`).
    Run it with `SIGNER_PUBKEY=<signer from step 2>`. Its `new` registers that signer as the initial
    signer, so it is active at once with no `add_owner_key` and no 1 h wait. It also adds the
    relayer's claim-only key from `mainnet-relayer.key`. Run `mainnet-keys.mjs` **before**

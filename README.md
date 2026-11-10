@@ -14,7 +14,8 @@ never an email. Built for the NEAR Hackathon
 - Escrow contract: [`zarf-near-1112.testnet`](https://testnet.nearblocks.io/address/zarf-near-1112.testnet)
   (accounts, keys and versions: `docs/deploy/testnet.md`)
 
-> Status: work in progress. Sections marked **TODO** are filled in before submission.
+> Status: live on NEAR testnet. Google sign-in on the hosted app and the cross-chain payout have
+> not run end to end yet; the evidence table below says what has.
 
 ## Trust model
 
@@ -73,8 +74,9 @@ Read this before using it with real money.
   `prepay_withdraw` sends free pre-pay back to the sender.
 
 Known limit: an account created in the browser ("Create one for me") receives the USDC but needs a
-little NEAR for gas before it can move it. **TODO:** the owner decides whether claims include a
-small NEAR drip.
+little NEAR for gas before it can move it. Claims carry no NEAR drip. Gas for the claim itself
+is the relayer's: the contract requires 55 Tgas attached (`required_claim_gas`), and a claim
+measured about 11.6 Tgas burnt.
 
 ## How it works
 
@@ -161,8 +163,8 @@ includes it and rejects its tokens (`verifier/test/demo.test.ts`).
 | A reverted transfer is never shown as paid | `relayer/test/relay.test.ts` (`claim_reverted`), `web/src/lib/services.test.ts` (`settleClaim`) |
 | A draft can be funded at most once: (sender, merkle_root) is an idempotency key (E132), and after a lost wallet response the app checks `campaign_by_root` before any resend | `web/src/lib/create/create.test.ts` (`fundCampaign`, `resolveByRoot`, `mayCreate`); `contract/src/tests.rs` (`duplicate_root_is_e132_and_changes_nothing`) |
 | A claim whose callback fails stays pending until the owner's `resolve_pending` (after 1 h); `reclaim` never touches in-flight funds | `contract/src/tests.rs` (`callback_failure_restores_claim_but_not_storage_debit`, `reclaim_excludes_in_flight_and_reverts_on_failed_transfer`, `resolve_pending_is_owner_only_and_waits_an_hour`); `contract/integration/tests/escrow.rs` (`failed_callback_strands_claim_until_owner_resolves_it`) |
-| A real claim on testnet | **TODO:** tx hash |
-| A cross-chain claim through NEAR Intents lands on Base | **TODO (T9):** tx hashes |
+| The contract pays a claim on testnet and refuses a repeat (contract-level evidence on 0.1.2, not a Google claim) | claim `Cmi5X9XyiQjSfhJDahWz6TvZKSjkVX5MKjFqAYS7m7Zt`; repeat `FLmmkbCQckFQWK9CEKxmxrtMrf2XLB28qR2guPnk6RFL` → `E105` |
+| A cross-chain claim through NEAR Intents lands on Base | not run yet |
 
 ## Prior work, baseline and libraries
 

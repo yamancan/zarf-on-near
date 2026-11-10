@@ -6,7 +6,7 @@
 set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$root"
-ACCOUNT=f0b938c1641f5223c48199ec45751913 # Cloudflare account "Contact@trionlabs.dev's Account"
+ACCOUNT=f0b938c1641f5223c48199ec45751913 # Cloudflare account id
 dir=${ZARF_NEAR_SECRETS:-$HOME/.config/zarf-near}
 token_file=${CLOUDFLARE_TOKEN_FILE:-$HOME/.config/cloudflare/api-token}
 die() { echo "deploy-mainnet-hosting: $*" >&2; exit 1; }
