@@ -63,7 +63,7 @@ small NEAR drip.
 | Part | Path | What it does |
 | --- | --- | --- |
 | Spec | `spec/` | Byte-exact claim format (`claim.md`) and the shared test vectors (`vectors.json`) every layer must reproduce |
-| Contract | `contract/` | **TODO (T2/T3):** NEP-141 escrow: campaigns, merkle-checked signed claims, pending/in-flight accounting, reclaim |
+| Contract | `contract/` | NEP-141 escrow (Rust, near-sdk 5.26.1): campaigns keyed by (sender, merkle_root), merkle-checked claims signed by a registered verifier key, pending/in-flight accounting with a `#[private]` callback, reclaim after the deadline, the owner's `resolve_pending` exit. **Not yet compiled.** See `contract/README.md` |
 | Verifier | `verifier/` | Cloudflare Worker: Google ID token (RS256, JWKS, aud/iss/exp/email_verified, nonce = destination), HMAC commitment, merkle proof, chain checks, ed25519 signature |
 | Relayer | `relayer/` | Cloudflare Worker: submits verifier-signed `claim` calls with a claim-only function-call key; payout status from the contract's events |
 | Create app | `web/src/routes/create` | CSV → salts, commitments, tree; storage pre-pay + one `ft_transfer_call`; claim links and the public leaf list |
@@ -104,7 +104,7 @@ includes it and rejects its tokens (`verifier/test/demo.test.ts`).
 
 | Claim | Evidence |
 | --- | --- |
-| Every layer agrees on the bytes of commitments, leaves, nonces and signed payloads | `spec/vectors.json`; `verifier/test/claim.test.ts`, `verifier/test/claimFlow.test.ts`, `web/src/lib/create/create.test.ts`, `web/src/lib/merkle.test.ts`; **TODO** contract tests |
+| Every layer agrees on the bytes of commitments, leaves, nonces and signed payloads | `spec/vectors.json`; `verifier/test/claim.test.ts`, `verifier/test/claimFlow.test.ts`, `web/src/lib/create/create.test.ts`, `web/src/lib/merkle.test.ts`; contract: `contract/src/tests.rs` (`leaves_match_vectors`, `payload_rebuilt_from_args_matches_vectors`, `every_invalid_vector_fails_with_its_code`), **not yet compiled** |
 | The verifier also produces the same signatures inside Cloudflare's runtime | `verifier/test/workerd.test.ts` |
 | A Google sign-in only pays the destination chosen before it | `verifier/test/googleIdToken.test.ts` (`BAD_NONCE`), `web/src/lib/claim.test.ts` (nonce vectors) |
 | Another person's Google account or claim link cannot claim | `verifier/test/claimFlow.test.ts` (`COMMITMENT_MISMATCH`) |
@@ -112,8 +112,8 @@ includes it and rejects its tokens (`verifier/test/demo.test.ts`).
 | No email or salt goes on chain or into the public leaf list | `web/src/lib/create/create.test.ts` (leaf list test); `spec/claim.md` |
 | The relayer can only call `claim`, never with a deposit, and refuses claims our verifier did not sign | `relayer/test/relay.test.ts`, `relayer/test/near.test.ts` (transaction bytes checked against `@near-js/transactions`) |
 | A reverted transfer is never shown as paid | `relayer/test/relay.test.ts` (`claim_reverted`), `web/src/lib/services.test.ts` (`settleClaim`) |
-| A draft can be funded at most once: (sender, merkle_root) is an idempotency key (E132), and after a lost wallet response the app checks `campaign_by_root` before any resend | `web/src/lib/create/create.test.ts` (`fundCampaign`, `resolveByRoot`); contract test `duplicate_root_is_e132_and_changes_nothing` (**TODO**: path once `contract/` lands) |
-| A claim whose callback fails stays pending until the owner's `resolve_pending` (after 1 h); `reclaim` never touches in-flight funds | **TODO (T3)** contract tests |
+| A draft can be funded at most once: (sender, merkle_root) is an idempotency key (E132), and after a lost wallet response the app checks `campaign_by_root` before any resend | `web/src/lib/create/create.test.ts` (`fundCampaign`, `resolveByRoot`, `mayCreate`); `contract/src/tests.rs` (`duplicate_root_is_e132_and_changes_nothing`), **not yet compiled** |
+| A claim whose callback fails stays pending until the owner's `resolve_pending` (after 1 h); `reclaim` never touches in-flight funds | `contract/src/tests.rs` (`callback_failure_restores_claim_but_not_storage_debit`, `reclaim_excludes_in_flight_and_reverts_on_failed_transfer`, `resolve_pending_is_owner_only_and_waits_an_hour`); `contract/integration/tests/escrow.rs` (`failed_callback_strands_claim_until_owner_resolves_it`), **not yet compiled** |
 | A real claim on testnet | **TODO:** tx hash |
 | A cross-chain claim through NEAR Intents lands on Base | **TODO (T9):** tx hashes |
 
@@ -141,8 +141,9 @@ History: [hackathon-submission](https://github.com/yamancan/zarf-on-near/tree/ha
 | web | `@sveltejs/kit`, `svelte`, `vite`, `@sveltejs/adapter-cloudflare` | apps |
 | web (create only) | `@near-wallet-selector/core` + `@near-wallet-selector/my-near-wallet` 10.1.4, `@near-js/transactions` 2.5.1, `buffer` 6.0.3 | sender wallet (MyNearWallet popup) |
 | all | `typescript`, `vitest`, `wrangler`, `svelte-check` | build and tests |
+| contract | `near-sdk` 5.26.1 (Rust 1.86.0) | the escrow; built with `cargo-near` |
+| contract (tests only) | `near-workspaces` 0.24.0 (Rust 1.95.0), `near-contract-standards` 5.26.1 (the test-only `mock-ft`), `tokio`, `ed25519-dalek` 2, `sha2` 0.10 | sandbox integration tests and a test-only `mock-ft` token |
 | verifier (tests only) | `@types/node` 24 | builds the release and demo bundles in a test, to check what each contains |
-| contract | **TODO (T2)** | `near-sdk`, `cargo-near`, `near-workspaces` versions |
 
 AI assistance: this code was written with Claude Code agents (implementation and review), with
 humans deciding design and scope.
