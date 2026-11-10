@@ -61,14 +61,17 @@ async function run(final) {
   await p.goto(base + v.links.main[0]);
   await p.getByText('Another chain', { exact: true }).click();
   await p.waitForSelector('#chain');
-  assert((await p.locator('#chain option').first().innerText()) === 'USDC on Base', 'Base is first');
+  assert((await p.locator('#chain button').first().innerText()).trim() === 'USDC on Base', 'Base is first');
   await p.fill('#addr', RECIPIENT.slice(0, -1) + 'D'); // checksum typo
   assert(/typo/.test(await p.locator('#addr-note').innerText()), 'EIP-55 typo caught');
   await p.fill('#addr', RECIPIENT);
   await p.waitForSelector('.quote');
   const box = await p.locator('.quote').innerText();
-  assert(/about 9\.99558 USDC on Base/.test(box) && /at least 9\.895624/.test(box), `quote box: ${box}`);
-  assert(/returns to sender\.near on NEAR/.test(await p.locator('main').innerText()), 'refund copy names the sender');
+  assert(/≈ 9\.99 USDC on Base/.test(box), `quote line: ${box}`);
+  await p.getByText('Details', { exact: true }).click(); // minimum, cost and refund sit one layer down
+  const detail = await p.locator('#addr-note details').innerText();
+  assert(/About 9\.99558 USDC, at least 9\.895624/.test(detail), `quote detail: ${detail}`);
+  assert(/returns to sender\.near on NEAR/.test(detail), 'refund copy names the sender');
   await p.locator('button.google').click();
   await p.waitForURL(/receipt/);
   await p.waitForFunction((t) => document.querySelector('h1')?.textContent?.includes(t), final === 'SUCCESS' ? 'Arrived on Base' : 'Not delivered', { timeout: 20000 });

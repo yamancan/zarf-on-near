@@ -4,10 +4,10 @@
   let { label, value, unit = 'USDC', approx = false, struck = false }: { label: string; value: string; unit?: string; approx?: boolean; struck?: boolean } = $props();
 </script>
 
-<div class="flex flex-col items-center gap-1">
+<span class="flex flex-col items-center gap-1">
   <span class="text-[10px] uppercase tracking-[0.3em] text-zen-fg-muted font-bold">{label}</span>
   <span class="flex items-baseline justify-center gap-2 {struck ? 'line-through decoration-1 text-zen-fg-muted' : 'text-zen-fg'}">
     <span class="text-5xl font-light tracking-tighter tabular-nums">{approx ? '≈' : ''}{value}</span>
     <span class="text-sm font-medium text-zen-primary uppercase tracking-widest">{unit}</span>
   </span>
-</div>
+</span>

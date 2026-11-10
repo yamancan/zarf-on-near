@@ -89,7 +89,7 @@ export async function submitClaim(relayerUrl: string | undefined, args: ClaimArg
 }
 
 const MESSAGES: Record<string, string> = {
-  COMMITMENT_MISMATCH: 'This link belongs to a different Google account. Sign in with the address the sender used.',
+  COMMITMENT_MISMATCH: 'This link was sent to a different Google account. Sign in with the account it was sent to.',
   E125_CAMPAIGN_ENDED: 'This campaign has ended. Unclaimed funds go back to the sender.',
   E110_UNKNOWN_CAMPAIGN: 'This campaign does not exist.',
   E102_INVALID_MERKLE_PROOF: 'This claim is not in the campaign list.',
@@ -108,21 +108,34 @@ const MESSAGES: Record<string, string> = {
   INTENTS_QUOTE_EXPIRES_FIRST: 'Your cross-chain quote expired. Open your claim link to get a new one and sign in again.',
   INTENTS_NOT_PENDING: 'This cross-chain quote was already used. Open your claim link to get a new one.',
   QUOTE_EXPIRED: 'Your cross-chain quote expired. Open your claim link to get a new one and sign in again.',
+  E114_CLAIM_EXPIRED: 'That took too long. Open your claim link and sign in again.',
+  E108_INVALID_INPUT: 'This claim link is damaged. Ask the sender for your link again.',
+  E109_INVALID_AMOUNT: 'This claim link is damaged. Ask the sender for your link again.',
+  NO_EMAIL: 'Google did not share an email for this account. Sign in with the account the link was sent to.',
+  RPC_ERROR: 'NEAR is not answering right now. Try again in a minute.',
 };
 
+
+/** The stable code behind a failure, for a small details line; the sentence never carries it. */
+export const errorCode = (e: unknown): string => (e instanceof ClaimError ? e.code : 'UNEXPECTED');
+
 export function describeError(e: unknown): string {
-  const code = e instanceof ClaimError ? e.code : 'UNEXPECTED';
+  const code = errorCode(e);
   if (code.startsWith('NOT_CONFIGURED:')) return `This site is not fully set up yet (${code.slice(15)}).`;
   if (!MESSAGES[code] && code.startsWith('INTENTS_')) {
-    return "The cross-chain quote doesn't match what you chose. Nothing was sent. Open your claim link to get a new one.";
+    return "The cross-chain quote doesn't match what you chose. Open your claim link to get a new one.";
   }
-  return MESSAGES[code] ?? `The claim did not go through (${code}).`;
+  if (!MESSAGES[code] && /^HTTP_5\d\d$/.test(code)) return MESSAGES.RPC_ERROR.replace('NEAR is', 'Our service is');
+  return MESSAGES[code] ?? 'Something went wrong. Open your claim link and try again.';
 }
+
+/** True when describeError fell back to a generic sentence, so the code is worth showing as a detail. */
+export const isUnmapped = (e: unknown): boolean => !MESSAGES[errorCode(e)];
 
 /** Why the claim page could not read the chain before any claim: never 'the claim did not go through'. */
 export function describeCheckError(e: unknown): string {
   if (e instanceof ClaimError && e.code.startsWith('NOT_CONFIGURED:')) return describeError(e);
-  return 'We could not check this claim link on NEAR right now. Nothing was claimed.';
+  return 'NEAR is not answering right now.';
 }
 
 export type ClaimState = 'unclaimed' | 'pending' | 'claimed';

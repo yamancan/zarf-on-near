@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import vectors from '../../../spec/vectors.json';
-import { accountExists, canRetry, ClaimError, describeCheckError, describeError, getCampaign, getClaimState, outcomeAfterRelay, requestSignature, settleClaim, submitClaim, type ClaimState } from './services';
+import { accountExists, canRetry, ClaimError, describeCheckError, describeError, errorCode, isUnmapped, getCampaign, getClaimState, outcomeAfterRelay, requestSignature, settleClaim, submitClaim, type ClaimState } from './services';
 
 const reply = (body: unknown, status = 200) => vi.fn(async () => new Response(JSON.stringify(body), { status }));
 afterEach(() => vi.unstubAllGlobals());
@@ -59,7 +59,17 @@ describe('verifier and relayer', () => {
   });
   it('explains missing config and unknown codes', () => {
     expect(describeError(new ClaimError('NOT_CONFIGURED:PUBLIC_VERIFIER_URL'))).toMatch(/PUBLIC_VERIFIER_URL/);
-    expect(describeError(new ClaimError('E999'))).toMatch(/E999/);
+    expect(describeError(new ClaimError('E999'))).toBe('Something went wrong. Open your claim link and try again.');
+    expect(errorCode(new ClaimError('E999'))).toBe('E999');
+    expect(isUnmapped(new ClaimError('E999'))).toBe(true);
+    expect(isUnmapped(new ClaimError('COMMITMENT_MISMATCH'))).toBe(false);
+  });
+  it('never puts a machine code in the sentence (critic P1-7)', () => {
+    for (const c of ['HTTP_503', 'RPC_ERROR', 'E114_CLAIM_EXPIRED', 'RELAYER_NO_TX', 'BAD_AUDIENCE', 'INTENTS_WRONG_RECIPIENT', 'UNKNOWN_KID']) {
+      expect(describeError(new ClaimError(c))).not.toMatch(/[A-Z]{2,}_[A-Z0-9]/);
+    }
+    expect(describeError(new ClaimError('HTTP_503'))).toMatch(/not answering/);
+    expect(describeError(new ClaimError('E114_CLAIM_EXPIRED'))).toMatch(/took too long/);
   });
 });
 
@@ -160,7 +170,7 @@ describe('accountExists (view_account)', () => {
 describe('describeCheckError (claim page, before any claim)', () => {
   it('a network or RPC failure says the page could not check, not that a claim failed', () => {
     for (const e of [new ClaimError('HTTP_503'), new ClaimError('RPC_ERROR'), new TypeError('Failed to fetch')]) {
-      expect(describeCheckError(e)).toBe('We could not check this claim link on NEAR right now. Nothing was claimed.');
+      expect(describeCheckError(e)).toBe('NEAR is not answering right now.');
     }
   });
   it('keeps the set-up message for missing config', () => {

@@ -11,6 +11,8 @@ const enc = (o) => [...Buffer.from(JSON.stringify(o))];
 const LINK = v.links.main[0];
 const [, , CAMP, COMMIT] = LINK.split('#')[0].split('/');
 const DEP = 'd'.repeat(64);
+const TX = '6zgh2u9DqHHiXzdy9ouTP7oGky2T4nugqzqt9wJZwNFm';
+const IMPLICIT = 'a'.repeat(64);
 const EVM = '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed';
 const FUTURE = '1894488400000000000', PAST = '1700000000000000000';
 const camp = (o = {}) => ({ sender: 'sender.testnet', merkle_root: v.campaigns.main.merkle_root, deadline_ns: FUTURE, ...o });
@@ -23,7 +25,11 @@ function rpc(p, o = {}) {
     const body = JSON.parse(r.request().postData());
     const q = body.params;
     let res;
-    if (q.request_type === 'view_account') res = q.account_id === 'alice.testnet' || q.account_id === 'sender.testnet' ? { result: { amount: '1' } } : { error: { cause: { name: 'UNKNOWN_ACCOUNT' } } };
+    if (q.request_type === 'view_account') {
+      if (o.accountDown) return r.fulfill({ status: 503, body: 'down' });
+      if (o.accountSlow) return; // never answers: the field stays on "Checking…"
+      res = q.account_id === 'alice.testnet' || q.account_id === 'sender.testnet' ? { result: { amount: '1' } } : { error: { cause: { name: 'UNKNOWN_ACCOUNT' } } };
+    }
     else {
       const m = q.method_name, args = q.args_base64 ? JSON.parse(Buffer.from(q.args_base64, 'base64')) : {};
       const val = m === 'get_network' ? (o.network ?? 'testnet')
@@ -39,12 +45,21 @@ function rpc(p, o = {}) {
   }).then(() => st);
 }
 
-async function oneclick(p, final) {
+async function oneclick(p, final, o = {}) {
   await p.route('https://1click.chaindefuser.com/**', async (r) => {
     const u = new URL(r.request().url());
-    if (u.pathname === '/v0/tokens') return r.fulfill({ contentType: 'application/json', body: JSON.stringify(tokens) });
+    if (u.pathname === '/v0/tokens') {
+      if (o.tokens === 'hang') return;
+      if (o.tokens === 'down') return r.fulfill({ status: 500, body: '{}' });
+      return r.fulfill({ contentType: 'application/json', body: JSON.stringify(tokens) });
+    }
     if (u.pathname === '/v0/quote') {
       const b = JSON.parse(r.request().postData());
+      const mode = b.dry ? o.dry : o.real;
+      if (mode === 'hang') return;
+      if (mode === 'refuse') return r.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ message: 'Amount is too low for this route.' }) });
+      if (mode === 'down') return r.fulfill({ status: 500, body: '{}' });
+      if (mode === 'loss') return r.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ quote: { amountIn: b.amount, amountOut: '9000000', amountOutFormatted: '9.0', minAmountOut: '8900000', timeEstimate: 22 } }) });
       return r.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ quote: { amountIn: b.amount, amountOut: '9995580', amountOutFormatted: '9.99558', minAmountOut: '9895624', timeEstimate: 22, ...(b.dry ? {} : { depositAddress: DEP }) } }) });
     }
     if (u.pathname === '/v0/deposit/submit') return r.fulfill({ status: 200, body: '{}' });
@@ -56,18 +71,55 @@ async function oneclick(p, final) {
   });
 }
 
-async function signinFlow(p, { verifierError } = {}) {
+async function signinFlow(p, { verifierError, verifierHang, relayer } = {}) {
   await p.route('https://accounts.google.com/**', async (r) => {
     const u = new URL(r.request().url());
     await r.fulfill({ status: 302, headers: { location: `${base}/auth/google#id_token=h.p.s&state=${encodeURIComponent(u.searchParams.get('state'))}` } });
   });
   await p.route(/verifier.*\/claim$/, async (r) => {
+    if (verifierHang) return;
     if (verifierError) return r.fulfill({ status: 400, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ error: verifierError, code: verifierError }) });
     const c = v.claims.valid[0].call_args;
     await r.fulfill({ contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(c) });
   });
-  await p.route(/relayer.*\/claim$/, (r) => r.fulfill({ contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ status: 'paid', tx_hash: '6zgh2u9DqHHiXzdy9ouTP7oGky2T4nugqzqt9wJZwNFm' }) }));
+  await p.route(/relayer.*\/claim$/, (r) => {
+    if (relayer === 'hang') return;
+    if (relayer === 'reverted') return r.fulfill({ status: 409, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ error: 'E115_TOKEN_TRANSFER_FAILED', tx_hash: TX }) });
+    const status = relayer === 'submitted' ? 202 : 200;
+    return r.fulfill({ status, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ status: relayer === 'submitted' ? 'submitted' : 'paid', tx_hash: TX }) });
+  });
 }
+
+
+// Claim to a NEAR account, sign in (stubbed Google), land on the receipt.
+const nearClaim = async (p, o = {}) => {
+  await rpc(p, o.rpc); await signinFlow(p, o);
+  await p.goto(base + LINK); await p.fill('#dest', o.dest ?? 'alice.testnet'); await p.waitForTimeout(1200);
+  if (o.ack) await p.getByText(/I hold it/).click();
+  await p.locator('button.google').click(); await p.waitForURL(/receipt/); await p.waitForTimeout(o.wait ?? 1500);
+  return { full: true };
+};
+// Cross-chain (mainnet) up to the quote; `go` signs in.
+const chainClaim = async (p, o = {}) => {
+  await rpc(p, { network: 'mainnet', camp: { sender: 'sender.near' }, ...o.rpc }); await oneclick(p, o.final ?? 'SUCCESS', o.q); await signinFlow(p, o);
+  await p.route(/verifier.*\/claim$/, async (r) => {
+    if (o.verifierHang) return;
+    if (o.verifierError) return r.fulfill({ status: 400, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ error: o.verifierError }) });
+    r.fulfill({ contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ ...v.claims.valid[0].call_args, destination: DEP }) });
+  });
+  await p.goto(base + LINK); await p.getByText('Another chain', { exact: true }).click();
+  if (o.stopAt === 'picker') { await p.waitForTimeout(o.wait ?? 1200); return { full: true }; }
+  await p.fill('#addr', o.addr ?? EVM);
+  if (o.stopAt === 'quote') { await p.waitForTimeout(o.wait ?? 1500); return { full: true }; }
+  await p.waitForSelector('.quote');
+  if (o.stopAt === 'quoted') { await p.waitForTimeout(300); return { full: true }; }
+  await p.locator('button.google').click();
+  if (o.stopAt === 'signin') { await p.waitForTimeout(o.wait ?? 1200); return { full: true }; }
+  await p.waitForURL(/receipt/); await p.waitForTimeout(o.wait ?? 3000); return { full: true };
+};
+// Receipt page only: run timers 1000x faster (the 30-minute bridge watch) or move the clock (quote expiry).
+const fastTimers = (ctx) => ctx.addInitScript(() => { if (!location.pathname.endsWith('/receipt')) return; const st = window.setTimeout; window.setTimeout = (f, ms, ...a) => st(f, (ms || 0) / 1000, ...a); });
+const lateClock = (ctx) => ctx.addInitScript(() => { if (!location.pathname.endsWith('/receipt')) return; const n = Date.now.bind(Date); Date.now = () => n() + 3_600_000; });
 
 const wallet = (ctx, id = 'sender.testnet') => ctx.addInitScript((a) => {
   localStorage.setItem('near-wallet-selector:selectedWalletId', JSON.stringify('my-near-wallet'));
@@ -81,7 +133,7 @@ const S = {
   'landing-detail': async (p) => { await rpc(p); await p.goto(base + '/'); await p.waitForSelector('h1'); await p.getByText('Who sees the email?').click(); await p.waitForTimeout(2800); return { full: true }; },
   'claim-near': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.fill('#dest', 'alice.testnet'); await p.waitForTimeout(1200); return { full: true }; },
   'claim-near-missing': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.fill('#dest', 'alise.testnet'); await p.waitForTimeout(1200); return { full: true }; },
-  'claim-chain-testnet': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText('Another chain', { exact: true }).click(); await p.waitForTimeout(400); return { full: true }; },
+  'claim-testnet-detail': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText('The email never goes on chain').click(); await p.waitForTimeout(400); return { full: true }; },
   'claim-chain-mainnet': async (p) => { await rpc(p, { network: 'mainnet', camp: { sender: 'sender.near' } }); await oneclick(p, 'SUCCESS'); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText('Another chain', { exact: true }).click(); await p.waitForSelector('#chain'); await p.fill('#addr', EVM); await p.waitForSelector('.quote'); await p.waitForTimeout(300); return { full: true }; },
   'claim-checking': async (p) => { await p.route(/fastnear|rpc/, () => {}); await p.goto(base + LINK); await p.waitForTimeout(800); return {}; },
   'term-unknown': async (p) => { await rpc(p, { campaign: null }); await p.goto(base + LINK); await p.waitForSelector('h1'); return {}; },
@@ -100,6 +152,53 @@ const S = {
     await p.goto(base + LINK); await p.getByText('Another chain', { exact: true }).click(); await p.fill('#addr', EVM); await p.waitForSelector('.quote');
     await p.locator('button.google').click(); await p.waitForURL(/receipt/); await p.waitForTimeout(f === 'PROCESSING' ? 2500 : 3000); return { full: true };
   }])),
+  boot: async (p) => { await p.goto(base + LINK); return {}; },
+  'claim-empty': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.waitForTimeout(400); return { full: true }; },
+  'claim-acct-checking': async (p) => { await rpc(p, { accountSlow: true }); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.fill('#dest', 'alice.testnet'); await p.waitForTimeout(900); return { full: true }; },
+  'claim-implicit-missing': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.fill('#dest', IMPLICIT); await p.waitForTimeout(1200); return { full: true }; },
+  'claim-wrong': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.fill('#dest', EVM); await p.waitForTimeout(600); return { full: true }; },
+  'claim-acct-error': async (p) => { await rpc(p, { accountDown: true }); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.fill('#dest', 'alice.testnet'); await p.waitForTimeout(1200); return { full: true }; },
+  'claim-chain-loading': (p) => chainClaim(p, { q: { tokens: 'hang' }, stopAt: 'picker' }),
+  'claim-chain-unavailable': (p) => chainClaim(p, { q: { tokens: 'down' }, stopAt: 'picker' }),
+  'claim-chain-addr-error': (p) => chainClaim(p, { addr: EVM.slice(0, -1) + 'D', stopAt: 'quote', wait: 600 }),
+  'claim-chain-quoting': (p) => chainClaim(p, { q: { dry: 'hang' }, stopAt: 'quote', wait: 1200 }),
+  'claim-chain-refused': (p) => chainClaim(p, { q: { dry: 'refuse' }, stopAt: 'quote' }),
+  'claim-chain-loss': (p) => chainClaim(p, { q: { dry: 'loss' }, stopAt: 'quote' }),
+  'claim-chain-detail': async (p) => { const o = await chainClaim(p, { stopAt: 'quoted' }); await p.getByText('Details', { exact: true }).click(); await p.waitForTimeout(300); return o; },
+  'claim-signin-busy': (p) => chainClaim(p, { q: { real: 'hang' }, stopAt: 'signin' }),
+  'claim-signin-quote-failed': (p) => chainClaim(p, { q: { real: 'down' }, stopAt: 'signin' }),
+  'auth-signing': async (p, ctx) => {
+    await ctx.addInitScript(([c, k]) => sessionStorage.setItem('zarf-near:attempt', JSON.stringify({ campaign: c, commitment: k, salt: 's', amount: '1', proof: [], destination: 'alice.testnet', attemptId: 'x' })), [CAMP, COMMIT]);
+    await p.route(/receipt\/\+page/, () => {}); // the receipt module never loads, so the page stays on "Signing you in"
+    await p.goto(base + `/auth/google#id_token=h.p.s&state=${encodeURIComponent(`${CAMP}/${COMMIT}/x`)}`); await p.waitForTimeout(1200); return {};
+  },
+  'auth-cancelled-back': async (p, ctx) => {
+    await ctx.addInitScript(([c, k]) => sessionStorage.setItem('zarf-near:attempt', JSON.stringify({ campaign: c, commitment: k, salt: 's', amount: '1', proof: [], destination: 'alice.testnet', attemptId: 'x' })), [CAMP, COMMIT]);
+    await p.goto(base + '/auth/google#error=access_denied'); await p.waitForSelector('h1'); return {};
+  },
+  'auth-error': async (p, ctx) => {
+    await ctx.addInitScript(([c, k]) => sessionStorage.setItem('zarf-near:attempt', JSON.stringify({ campaign: c, commitment: k, salt: 's', amount: '1', proof: [], destination: 'alice.testnet', attemptId: 'x' })), [CAMP, COMMIT]);
+    await p.goto(base + '/auth/google#error=server_error'); await p.waitForSelector('h1'); return {};
+  },
+  'auth-mismatch': async (p, ctx) => {
+    await ctx.addInitScript(([c, k]) => sessionStorage.setItem('zarf-near:attempt', JSON.stringify({ campaign: c, commitment: k, salt: 's', amount: '1', proof: [], destination: 'alice.testnet', attemptId: 'x' })), [CAMP, COMMIT]);
+    await p.goto(base + '/auth/google#id_token=h.p.s&state=other'); await p.waitForSelector('h1'); return {};
+  },
+  'receipt-checking': (p) => nearClaim(p, { verifierHang: true }),
+  'receipt-sending': (p) => nearClaim(p, { relayer: 'hang' }),
+  'receipt-implicit': (p) => nearClaim(p, { dest: IMPLICIT, ack: true }),
+  'receipt-reverted': (p) => nearClaim(p, { relayer: 'reverted' }),
+  'receipt-unsettled': (p) => nearClaim(p, { relayer: 'submitted', rpc: { claimState: 'pending' }, wait: 63000 }),
+  'receipt-failed-final': (p) => nearClaim(p, { verifierError: 'E105_ALREADY_CLAIMED' }),
+  'receipt-failed-unmapped': (p) => nearClaim(p, { verifierError: 'BAD_AUDIENCE' }),
+  'receipt-reload': async (p) => { await nearClaim(p); await p.reload(); await p.waitForSelector('h1'); await p.waitForTimeout(800); return { full: true }; },
+  'term-claimed-paid': async (p) => { await nearClaim(p); await p.unrouteAll(); await rpc(p, { claimState: 'claimed' }); await p.goto(base + LINK); await p.waitForSelector('h1'); await p.waitForTimeout(500); return {}; },
+  'receipt-quote-expired': async (p, ctx) => { await lateClock(ctx); return chainClaim(p, { wait: 1500 }); },
+  'receipt-chain-failed': (p) => chainClaim(p, { final: 'FAILED' }),
+  'receipt-chain-stalled': async (p, ctx) => { await fastTimers(ctx); return chainClaim(p, { final: 'PROCESSING', wait: 4000 }); },
+  'receipt-chain-resumed': async (p) => { await chainClaim(p, { final: 'PROCESSING', wait: 2000 }); await p.reload(); await p.waitForSelector('h1'); await p.waitForTimeout(1500); return { full: true }; },
+  'receipt-chain-checking': (p) => chainClaim(p, { verifierHang: true, wait: 1500 }),
+  'receipt-chain-notclaimed': (p) => chainClaim(p, { verifierError: 'COMMITMENT_MISMATCH', wait: 1500 }),
   'receipt-empty': async (p) => { await rpc(p); await p.goto(base + `/claim/${CAMP}/${COMMIT}/receipt`); await p.waitForSelector('h1'); return {}; },
   'auth-cancelled': async (p) => { await p.goto(base + '/auth/google#error=access_denied'); await p.waitForSelector('h1'); return {}; },
   'create-1': async (p) => { await rpc(p); await p.goto(base + '/create'); await p.waitForTimeout(1500); return { full: true }; },
@@ -124,7 +223,7 @@ const S = {
   for (const [name, fn] of Object.entries(S)) {
     if (filter && !new RegExp(filter).test(name)) continue;
     for (const theme of (process.env.THEMES || 'dark,light').split(',')) for (const [w, h] of [[390, 844], [1280, 800]].filter(([w]) => (process.env.WIDTHS || '390,1280').split(',').includes(String(w)))) {
-      const ctx = await b.newContext({ viewport: { width: w, height: h } });
+      const ctx = await b.newContext({ viewport: { width: w, height: h }, javaScriptEnabled: name !== 'boot', colorScheme: theme });
       await ctx.addInitScript((t) => localStorage.setItem('zarf_theme', t), theme);
       const p = await ctx.newPage();
       const errs = []; p.on('pageerror', (e) => errs.push(String(e))); p.on('console', (m) => m.type() === 'error' && errs.push(m.text().slice(0, 140)));

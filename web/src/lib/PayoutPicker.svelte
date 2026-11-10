@@ -1,9 +1,13 @@
 <script lang="ts">
-  // "USDC on another chain": chain + address, then a dry 1Click quote shown before sign-in.
+  // "USDC on another chain" (mainnet only): chain + address, then a dry 1Click quote shown before sign-in.
   // The real quote (and its deposit address, which the sign-in binds) is taken on "Sign in".
   import { onMount } from 'svelte';
   import { formatAmount } from '$lib/create/recipients';
-  import ZenBadge from '$lib/zen/components/ZenBadge.svelte';
+  import { ChevronDown } from 'lucide-svelte';
+  import { twoDecimals } from '$lib/claim';
+  import Note from '$lib/Note.svelte';
+  import ZenInput from '$lib/zen/components/ZenInput.svelte';
+  import ZenSelect from '$lib/zen/components/ZenSelect.svelte';
   import {
     getQuote, lossBps, MAX_LOSS_BPS, PAYOUT_CHAINS, QUOTE_LIFETIME_MS, QuoteError, resolveAssets, type PayoutAsset, type Quote,
   } from '$lib/intents';
@@ -62,7 +66,7 @@
         quote = { for: tag, q };
         choice = { asset: a, recipient };
       } catch (e) {
-        quoteError = e instanceof QuoteError ? `1Click refused this payout: ${e.message}` : 'Cross-chain quotes are unavailable right now. Try again, or claim to a NEAR account.';
+        quoteError = e instanceof QuoteError ? `The bridge refused this payout: ${e.message}` : 'Cross-chain quotes are unavailable right now. Try again, or claim to a NEAR account.';
       } finally {
         quoting = false;
       }
@@ -78,60 +82,56 @@
   };
 </script>
 
-{#if !mainnet}
-  <ul class="flex flex-col" aria-label="Chains">
-    {#each PAYOUT_CHAINS as c (c.key)}
-      <li class="flex items-center justify-between min-h-11 px-1 text-sm text-zen-fg-muted border-b-[0.5px] border-zen-border-subtle last:border-b-0">
-        USDC on {c.name} <ZenBadge size="sm">Mainnet only</ZenBadge>
-      </li>
-    {/each}
-  </ul>
-  <p class="text-xs text-zen-fg-subtle pl-1">NEAR Intents runs on mainnet. This testnet demo pays to a NEAR account.</p>
-{:else if loadError}
-  <p class="text-xs text-zen-error pl-1" role="alert">{loadError}</p>
+{#if loadError}
+  <Note tone="error">{loadError}</Note>
 {:else if !assets}
-  <p class="text-xs text-zen-fg-subtle pl-1" role="status">Loading chains…</p>
+  <Note tone="pending">Loading chains…</Note>
 {:else}
-  <label for="chain" class="text-xs font-medium text-zen-fg-muted pl-1 -mb-1">Chain</label>
-  <select id="chain" bind:value={key} class="control-border w-full min-h-11 bg-[oklch(from_var(--zen-bg)_l_c_h_/_0.5)] rounded-[var(--zen-radius-input)] px-4 py-3 text-sm text-zen-fg focus:outline-none">
-    {#each assets as a (a.chain.key)}<option value={a.chain.key}>USDC on {a.chain.name}</option>{/each}
-  </select>
+  <span id="chain-l" class="text-sm font-medium text-zen-fg">Chain</span>
+  <div id="chain" role="group" aria-labelledby="chain-l">
+    <ZenSelect bind:value={key} options={assets.map((a) => ({ value: a.chain.key, label: `USDC on ${a.chain.name}` }))} aria-label="Chain" class="w-full [&>button]:w-full [&>button]:min-h-11 [&>button]:!border [&>button]:!border-[var(--zarf-control-border)]" />
+  </div>
   {#if asset}
-    <label for="addr" class="text-xs font-medium text-zen-fg-muted pl-1 -mb-1">Your {asset.chain.name} address</label>
-    <input
+    <label for="addr" class="text-sm font-medium text-zen-fg">Your {asset.chain.name} address</label>
+    <ZenInput
       id="addr"
-      type="text"
-      class="control-border w-full min-h-11 bg-[oklch(from_var(--zen-bg)_l_c_h_/_0.5)] rounded-[var(--zen-radius-input)] px-4 py-3 text-sm font-mono text-zen-fg placeholder:text-zen-fg-subtle focus:outline-none"
+      class="control-border font-mono"
       bind:value={address}
       placeholder={asset.chain.placeholder}
       autocomplete="off"
       autocapitalize="off"
-      spellcheck="false"
+      spellcheck={false}
       aria-invalid={!!addressError}
       aria-describedby="addr-note"
     />
-    <div id="addr-note" class="text-xs flex flex-col gap-2">
+    <div id="addr-note" class="flex flex-col gap-2 pl-1">
       {#if addressError}
-        <p class="text-zen-error" role="alert">{addressError}</p>
+        <Note tone="error">{addressError}</Note>
       {:else if quoting}
-        <p class="text-zen-fg-subtle" role="status">Getting a quote…</p>
+        <Note tone="pending">Getting a quote…</Note>
       {:else if quoteError}
-        <p class="text-zen-error" role="alert">{quoteError}</p>
+        <Note tone="error">{quoteError}</Note>
       {:else if quote}
-        <div class="quote rounded-2xl bg-zen-fg/[0.03] border-[0.5px] border-zen-border-subtle px-4 py-3 flex flex-col gap-1" role="status">
-          <p class="text-sm text-zen-fg-muted">
-            You receive about <strong class="text-zen-fg font-semibold">{quote.q.amountOutFormatted} USDC on {asset.chain.name}</strong>
-            (at least {fmt(quote.q.minAmountOut, asset.decimals)})
-          </p>
-          <p class="text-zen-fg-subtle">
-            Cost {cost(quote.q, asset.decimals)} USDC · about {quote.q.timeEstimate} s · fresh quote at sign-in
-          </p>
-        </div>
+        <p class="quote text-sm text-zen-fg" role="status">
+          <span class="font-semibold tabular-nums">≈ {twoDecimals(quote.q.amountOutFormatted)} USDC</span> on {asset.chain.name}
+          <span class="text-zen-fg-muted">· about {quote.q.timeEstimate} s</span>
+        </p>
       {/if}
-      <p class="text-zen-fg-subtle">
-        If it cannot be paid, the USDC returns to <span class="font-mono">{refundTo}</span> on NEAR (the sender), not to this address.
-      </p>
-      {#if asset.chain.note}<p class="text-zen-fg-subtle">{asset.chain.note}</p>{/if}
+      <details class="group text-xs text-zen-fg-muted">
+        <summary class="inline-flex items-center gap-1.5 min-h-11 cursor-pointer list-none hover:text-zen-fg">
+          Details <ChevronDown class="w-3.5 h-3.5 transition-transform group-open:rotate-180" aria-hidden="true" />
+        </summary>
+        <div class="flex flex-col gap-2 leading-relaxed">
+          {#if quote}
+            <p>
+              About {quote.q.amountOutFormatted} USDC, at least {fmt(quote.q.minAmountOut, asset.decimals)}. Cost
+              {cost(quote.q, asset.decimals)} USDC. A fresh quote is taken when you sign in.
+            </p>
+          {/if}
+          <p>If it cannot be paid, the USDC returns to <span class="font-mono">{refundTo}</span> on NEAR (the sender), not to this address.</p>
+          {#if asset.chain.note}<p>{asset.chain.note}</p>{/if}
+        </div>
+      </details>
     </div>
   {/if}
 {/if}

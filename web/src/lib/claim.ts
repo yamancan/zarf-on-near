@@ -147,9 +147,48 @@ export function deadlineText(deadlineMs: number, nowMs: number, timeZone?: strin
   const when = new Intl.DateTimeFormat('en-GB', {
     day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short', timeZone,
   }).format(deadlineMs);
-  const left = deadlineMs - nowMs;
-  if (left <= 0) return when;
-  const h = Math.floor(left / 3_600_000);
-  const rest = h >= 48 ? `${Math.floor(h / 24)} days left` : h >= 1 ? `${h} hour${h === 1 ? '' : 's'} left` : 'less than an hour left';
-  return `${when}, ${rest}`;
+  const rest = timeLeft(deadlineMs, nowMs);
+  return rest ? `${when}, ${rest}` : when;
 }
+
+/** "6 days left", "3 hours left", "less than an hour left"; '' once it has passed. */
+export function timeLeft(deadlineMs: number, nowMs: number): string {
+  const left = deadlineMs - nowMs;
+  if (left <= 0) return '';
+  const h = Math.floor(left / 3_600_000);
+  return h >= 48 ? `${Math.floor(h / 24)} days left` : h >= 1 ? `${h} hour${h === 1 ? '' : 's'} left` : 'less than an hour left';
+}
+
+/** What a finished claim paid, kept so a reload or a reopened link can still show it. Nothing here is secret. */
+export interface Receipt {
+  amount: string; // USDC base units (the link's amount)
+  destination: string; // the NEAR account, or for a cross-chain payout the address on that chain
+  txHash: string; // the NEAR claim tx
+  chainName?: string; // set for a cross-chain payout
+}
+
+const receiptKey = (campaign: string, commitment: string) => `zarf-near:receipt:${campaign}/${commitment}`;
+
+// localStorage, not sessionStorage: the recipient often reopens the link from the email in a new tab.
+export function saveReceipt(campaign: string, commitment: string, r: Receipt, store?: Storage): void {
+  try {
+    (store ?? localStorage).setItem(receiptKey(campaign, commitment), JSON.stringify(r));
+  } catch {
+    // best effort: without it a reload shows "Already claimed" without the transaction
+  }
+}
+
+export function loadReceipt(campaign: string, commitment: string, store?: Storage): Receipt | null {
+  try {
+    const r = JSON.parse((store ?? localStorage).getItem(receiptKey(campaign, commitment)) ?? 'null') as Receipt | null;
+    return r && /^[1-9]\d{0,38}$/.test(r.amount) && typeof r.destination === 'string' && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(r.txHash) ? r : null;
+  } catch {
+    return null;
+  }
+}
+
+/** "0x5aAe…1BeAed": long addresses on one line; the full value stays in a title and on copy. */
+export const middle = (s: string, keep = 6): string => (s.length > keep * 2 + 1 ? `${s.slice(0, keep)}…${s.slice(-keep)}` : s);
+
+/** "9.99558" -> "9.99": display only, never rounds up an amount the recipient may not get. */
+export const twoDecimals = (s: string): string => s.replace(/^(\d+)(\.\d{1,2})?\d*$/, (_, w, f = '') => w + (f && f !== '.00' ? f : ''));

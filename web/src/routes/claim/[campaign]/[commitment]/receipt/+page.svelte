@@ -2,10 +2,14 @@
   import { onMount } from 'svelte';
   import { page } from '$app/state';
   import { env } from '$env/dynamic/public';
-  import { clearAttempt, isImplicitAccount, loadAttempt, signedIn } from '$lib/claim';
-  import { canRetry, ClaimError, describeError, getClaimState, outcomeAfterRelay, requestSignature, submitClaim } from '$lib/services';
+  import { clearAttempt, isImplicitAccount, loadAttempt, loadReceipt, middle, saveReceipt, signedIn, twoDecimals } from '$lib/claim';
+  import { ClaimError, describeError, errorCode, getClaimState, isUnmapped, outcomeAfterRelay, requestSignature, submitClaim } from '$lib/services';
   import { formatAmount } from '$lib/create/recipients';
-  import { AlertTriangle, ArrowUpRight, Check, Clock, Loader2, Mail, Undo2 } from 'lucide-svelte';
+  import { AlertTriangle, ArrowUpRight, Check, ChevronDown, Clock, Loader2, Mail, Undo2 } from 'lucide-svelte';
+  import Amount from '$lib/Amount.svelte';
+  import Medallion from '$lib/Medallion.svelte';
+  import Note from '$lib/Note.svelte';
+  import ZenButton from '$lib/zen/components/ZenButton.svelte';
   import ZenCard from '$lib/zen/components/ZenCard.svelte';
   import { describeStatus, getStatus, loadPayout, savePayout, submitDeposit, type StatusView } from '$lib/intents';
 
@@ -15,13 +19,18 @@
 
   let step = $state<'checking' | 'paying' | 'settling' | 'done' | 'reverted' | 'unsettled' | 'failed'>('checking');
   let error = $state('');
-  let retryable = $state(true);
+  let code = $state(''); // shown as a detail only when the sentence is the generic one
   let txHash = $state('');
   const explorer = $derived(env.PUBLIC_EXPLORER_TX_URL ? `${env.PUBLIC_EXPLORER_TX_URL}${txHash}` : '');
   // A reload after the NEAR claim has no sign-in left, but the payout it started can still be followed.
   const resumed = ok ? null : loadPayout(page.params.campaign!, page.params.commitment!);
   const payout = ok ? attempt!.intents : resumed;
   const depositAddress = ok ? attempt!.destination : (resumed?.depositAddress ?? '');
+  // A reload after a NEAR-account claim: the sign-in is spent, but what was paid is kept (claim.ts saveReceipt).
+  const stored = ok || resumed ? null : loadReceipt(page.params.campaign!, page.params.commitment!);
+  // The claim this tab started, if any: every failure leads back to it (its salt is still in this tab).
+  const claimHref = `/claim/${page.params.campaign}/${page.params.commitment}`;
+  const canGoBack = !!attempt && attempt.campaign === page.params.campaign && attempt.commitment === page.params.commitment;
   let bridge = $state<StatusView | null>(null);
   const bridgeView = $derived(bridge && payout ? describeStatus(bridge, payout.chainName, payout.refundTo) : null);
 
@@ -75,6 +84,9 @@
       if (state === 'claimed') {
         step = 'done';
         clearAttempt(); // salt and destination are no longer needed in this tab
+        saveReceipt(attempt.campaign, attempt.commitment, {
+          amount: attempt.amount, txHash, destination: attempt.intents?.recipient ?? attempt.destination, chainName: attempt.intents?.chainName,
+        });
         if (attempt.intents) {
           const i = attempt.intents;
           savePayout(attempt.campaign, attempt.commitment, {
@@ -90,7 +102,7 @@
       if (e instanceof ClaimError && e.code === 'E115_TOKEN_TRANSFER_FAILED') step = 'reverted';
       else {
         error = describeError(e);
-        retryable = canRetry(e);
+        code = isUnmapped(e) ? errorCode(e) : '';
         step = 'failed';
       }
     }
@@ -99,121 +111,134 @@
 
 <svelte:head><title>Your claim · Zarf</title></svelte:head>
 
-{#snippet medallion(Icon: typeof Mail, tone: 'success' | 'error' | 'muted', spin = false)}
-  <div
-    class="w-14 h-14 rounded-full flex items-center justify-center shrink-0 border
-      {tone === 'success' ? 'bg-zen-success/10 text-zen-success border-zen-success/10'
-      : tone === 'error' ? 'bg-zen-error/5 text-zen-error border-zen-error/10'
-      : 'bg-zen-fg/5 text-zen-fg-muted border-zen-border-subtle'}"
-    aria-hidden="true"
-  >
-    <Icon class="w-6 h-6 {spin ? 'animate-spin' : ''}" />
-  </div>
+{#snippet back()}
+  {#if canGoBack}
+    <ZenButton href={claimHref} variant="primary" class="rounded-full min-h-11">Back to your claim</ZenButton>
+  {:else}
+    <p class="text-xs text-zen-fg-muted">Open your claim link again to try once more.</p>
+  {/if}
 {/snippet}
 
-{#snippet pill(href: string, text: string)}
-  <a {href} target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 min-h-11 px-5 rounded-full text-sm font-medium no-underline text-zen-fg bg-zen-fg/5 hover:bg-zen-fg/10 transition-colors">
-    {text}<ArrowUpRight class="w-3.5 h-3.5" aria-hidden="true" />
-  </a>
-{/snippet}
-
-{#snippet retry(href: string)}
-  <a {href} class="inline-flex items-center min-h-11 px-5 rounded-full text-sm font-medium no-underline bg-zen-fg text-zen-bg">Try again</a>
+{#snippet explorerButton(href: string, text: string)}
+  <ZenButton {href} target="_blank" rel="noopener noreferrer" variant="secondary" class="rounded-full min-h-11">
+    {text}
+    {#snippet iconRight()}<ArrowUpRight class="w-3.5 h-3.5" />{/snippet}
+  </ZenButton>
 {/snippet}
 
 {#snippet failure()}
   {#if step === 'reverted'}
-    <p class="text-sm text-zen-error" role="alert">The transfer failed and your claim is open again.</p>
-    {@render retry(`/claim/${page.params.campaign}/${page.params.commitment}`)}
+    <Note tone="error">The transfer failed and your claim is open again.</Note>
+    {@render back()}
   {:else if step === 'unsettled'}
     <p class="text-sm text-zen-fg-muted">The transaction was sent but has not settled yet. There is no need to claim again.</p>
-    {#if explorer}{@render pill(explorer, 'View the transaction')}{/if}
+    {#if explorer}{@render explorerButton(explorer, 'View the transaction')}{/if}
   {:else if step === 'failed'}
-    <p class="text-sm text-zen-error" role="alert">{error}</p>
-    {#if retryable}<p class="text-xs text-zen-fg-subtle">Open your claim link to try again.</p>{/if}
+    <Note tone="error">{error}</Note>
+    {#if code}<p class="text-xs text-zen-fg-muted">Code <span class="font-mono">{code}</span></p>{/if}
+    {@render back()}
   {/if}
 {/snippet}
 
-<div class="w-full max-w-md mx-auto px-4 py-8 sm:py-14">
-  <ZenCard variant="glass" padding="lg" radius="3xl" class="!p-6 sm:!p-8">
+{#snippet nearDone(amount: string, to: string, hash: string)}
+  <Medallion icon={Check} tone="success" />
+  <h1 class="text-xl font-semibold tracking-tight">Arrived</h1>
+  <Amount label="You received" value={formatAmount(BigInt(amount))} />
+  <p class="text-sm text-zen-fg-muted">to <span class="font-mono text-zen-fg" title={to}>{middle(to, 8)}</span></p>
+  {#if env.PUBLIC_EXPLORER_TX_URL}
+    {@render explorerButton(`${env.PUBLIC_EXPLORER_TX_URL}${hash}`, 'View the transaction')}
+  {:else}
+    <p class="text-xs text-zen-fg-muted">Transaction <span class="font-mono">{middle(hash, 8)}</span></p>
+  {/if}
+  {#if isImplicitAccount(to)}
+    <p class="text-xs text-zen-fg-muted">To move these funds later, this account needs a little NEAR for gas.</p>
+  {/if}
+{/snippet}
+
+<div class="w-full max-w-lg mx-auto px-4 py-8 sm:py-14">
+  <ZenCard variant="elevated" class="!p-6 sm:!p-8">
     <div class="flex flex-col items-center text-center gap-4">
-      {#if !resumed && (!ok || !attempt)}
-        {@render medallion(Mail, 'muted')}
-        <h1 class="text-2xl font-semibold tracking-tight">Nothing to show yet</h1>
-        <p class="text-sm text-zen-fg-muted">Open your claim link to start.</p>
-        <a href="/" class="inline-flex items-center min-h-11 px-5 rounded-full text-sm font-medium no-underline text-zen-fg-muted hover:text-zen-fg bg-zen-fg/5">What is Zarf?</a>
+      {#if stored && !stored.chainName}
+        {@render nearDone(stored.amount, stored.destination, stored.txHash)}
+      {:else if !resumed && (!ok || !attempt)}
+        <Medallion icon={Mail} tone="muted" />
+        <h1 class="text-xl font-semibold tracking-tight">Nothing to show yet</h1>
+        <p class="text-sm text-zen-fg-muted">This page shows a claim after the Google sign-in.</p>
+        {#if canGoBack}
+          {@render back()}
+        {:else}
+          <ZenButton href="/" variant="secondary" class="rounded-full min-h-11">What is Zarf?</ZenButton>
+        {/if}
       {:else if payout}
         {@const arrived = !!bridgeView?.done && bridgeView.ok}
         {@const returned = !!bridgeView?.done && !bridgeView.ok}
         {#if working || (step === 'done' && !bridgeView?.done)}
-          {@render medallion(Loader2, 'muted', true)}
+          <Medallion icon={Loader2} tone="muted" spin />
         {:else if arrived}
-          {@render medallion(Check, 'success')}
+          <Medallion icon={Check} tone="success" />
         {:else if returned}
-          {@render medallion(Undo2, 'error')}
+          <Medallion icon={Undo2} tone="error" />
         {:else if step === 'unsettled'}
-          {@render medallion(Clock, 'muted')}
+          <Medallion icon={Clock} tone="muted" />
         {:else}
-          {@render medallion(AlertTriangle, 'error')}
+          <Medallion icon={AlertTriangle} tone="error" />
         {/if}
-        <h1 class="text-2xl font-semibold tracking-tight">
-          {#if step === 'checking'}Checking your claim…{:else if step === 'paying' || step === 'settling'}Sending your tokens…{:else if step === 'done'}{bridgeView?.done && bridgeView.ok ? `Arrived on ${payout.chainName}` : bridgeView?.done ? 'Not delivered' : `Sending to ${payout.chainName}…`}{:else if step === 'unsettled'}Still settling{:else}Not claimed{/if}
+        <h1 class="text-xl font-semibold tracking-tight">
+          {#if step === 'checking'}Checking your claim…{:else if step === 'paying' || step === 'settling'}Sending your tokens…{:else if step === 'done'}{arrived ? `Arrived on ${payout.chainName}` : returned ? 'Not delivered' : `Sending to ${payout.chainName}…`}{:else if step === 'unsettled'}Still settling{:else}Not claimed{/if}
         </h1>
-        <p class="flex flex-col items-center gap-1">
-          <span class="text-4xl font-bold tracking-tighter tabular-nums {arrived ? 'text-zen-success' : returned ? 'text-zen-fg-subtle line-through' : ''}">{arrived ? '' : '~'}{payout.amountOutFormatted} USDC</span>
-          <span class="text-xs text-zen-fg-subtle">to <span class="font-mono break-all">{payout.recipient}</span> on {payout.chainName}</span>
-        </p>
+        <Amount
+          label={arrived ? 'You received' : returned ? 'Not delivered' : 'On its way'}
+          value={twoDecimals(arrived && bridge?.amountOutFormatted ? bridge.amountOutFormatted : payout.amountOutFormatted)}
+          approx={!arrived}
+          struck={returned}
+        />
+        <p class="text-sm text-zen-fg-muted">to <span class="font-mono text-zen-fg" title={payout.recipient}>{middle(payout.recipient)}</span> on {payout.chainName}</p>
         {#if step === 'done'}
-          <!-- Two legs, one dot each: the NEAR claim, then the 1Click payout -->
+          <!-- Two legs, one mark each: the NEAR claim, then the bridge payout -->
           <ol class="w-full flex flex-col gap-3 text-left text-sm border-y-[0.5px] border-zen-border-subtle py-4 my-1">
             <li class="flex items-center gap-3">
-              <Check class="w-4 h-4 text-zen-success shrink-0" aria-hidden="true" />
+              <Check class="w-4 h-4 text-zen-success-content shrink-0" aria-hidden="true" />
               <span class="flex-1">Claimed on NEAR</span>
-              {#if explorer}<a href={explorer} target="_blank" rel="noopener noreferrer" class="text-xs text-zen-fg-muted">The NEAR claim transaction</a>{/if}
+              {#if explorer}<a href={explorer} target="_blank" rel="noopener noreferrer" class="inline-flex items-center min-h-11 text-xs text-zen-fg-muted underline underline-offset-2 hover:text-zen-fg">Transaction</a>{/if}
             </li>
             <li class="flex items-center gap-3">
-              {#if arrived}<Check class="w-4 h-4 text-zen-success shrink-0" aria-hidden="true" />
-              {:else if returned}<Undo2 class="w-4 h-4 text-zen-error shrink-0" aria-hidden="true" />
-              {:else}<span class="w-4 h-4 flex items-center justify-center shrink-0" aria-hidden="true"><span class="w-2 h-2 rounded-full bg-zen-fg-subtle animate-pulse"></span></span>{/if}
-              <span class="flex-1 {returned ? 'text-zen-error' : ''}" role="status">{bridgeView?.text ?? 'Sent from NEAR, waiting for the bridge.'}</span>
+              {#if arrived}<Check class="w-4 h-4 text-zen-success-content shrink-0" aria-hidden="true" />
+              {:else if returned}<Undo2 class="w-4 h-4 text-zen-error-content shrink-0" aria-hidden="true" />
+              {:else}<Loader2 class="w-4 h-4 text-zen-fg-muted shrink-0 animate-spin" aria-hidden="true" />{/if}
+              <span class="flex-1 {returned ? 'text-zen-error-content' : ''}" role="status">{bridgeView?.text ?? 'Sent from NEAR, waiting for the bridge.'}</span>
             </li>
           </ol>
           {#if bridge?.destinationTx}
-            {#if bridge.destinationTx.explorerUrl}{@render pill(bridge.destinationTx.explorerUrl, `View it on ${payout.chainName}`)}{:else}<p class="text-xs text-zen-fg-muted">{payout.chainName} transaction: <code>{bridge.destinationTx.hash}</code></p>{/if}
+            {#if bridge.destinationTx.explorerUrl}{@render explorerButton(bridge.destinationTx.explorerUrl, `View it on ${payout.chainName}`)}{:else}<p class="text-xs text-zen-fg-muted">{payout.chainName} transaction <span class="font-mono">{middle(bridge.destinationTx.hash, 8)}</span></p>{/if}
           {/if}
-          {#if stalled && !bridgeView?.done}<p class="text-xs text-zen-fg-muted">Still processing after 30 minutes. Keep this page and the deposit address below, and contact the sender.</p>{/if}
-          {#if (bridgeView?.done && !bridgeView.ok) || stalled}<p class="text-xs text-zen-fg-subtle">1Click deposit address: <code>{depositAddress}</code></p>{/if}
+          {#if stalled && !bridgeView?.done}<Note tone="info">Still processing after 30 minutes. Keep this page and contact the sender.</Note>{/if}
+          {#if returned || stalled}
+            <details class="group text-xs text-zen-fg-muted">
+              <summary class="inline-flex items-center gap-1.5 min-h-11 cursor-pointer list-none hover:text-zen-fg">Details <ChevronDown class="w-3.5 h-3.5 transition-transform group-open:rotate-180" aria-hidden="true" /></summary>
+              <p class="break-all">Bridge deposit address <span class="font-mono">{depositAddress}</span></p>
+            </details>
+          {/if}
         {:else}
           {@render failure()}
         {/if}
       {:else if attempt}
-        {#if working}
-          {@render medallion(Loader2, 'muted', true)}
-        {:else if step === 'done'}
-          {@render medallion(Check, 'success')}
-        {:else if step === 'unsettled'}
-          {@render medallion(Clock, 'muted')}
-        {:else}
-          {@render medallion(AlertTriangle, 'error')}
-        {/if}
         {#if step === 'done'}
-          <h1 class="flex flex-col items-center gap-1">
-            <span class="text-5xl font-bold tracking-tighter tabular-nums text-zen-success">{formatAmount(BigInt(attempt.amount))} USDC</span>
-            <span class="text-sm font-normal text-zen-fg-muted">sent to <span class="font-mono break-all text-zen-fg">{attempt.destination}</span></span>
-          </h1>
-          {#if explorer}
-            {@render pill(explorer, 'View the transaction')}
-          {:else}
-            <p class="text-xs text-zen-fg-subtle">Transaction: <code>{txHash}</code></p>
-          {/if}
-          {#if isImplicitAccount(attempt.destination)}
-            <p class="text-xs text-zen-fg-muted">To move these funds later, this account needs a little NEAR for gas.</p>
-          {/if}
+          {@render nearDone(attempt.amount, attempt.destination, txHash)}
         {:else}
-          <h1 class="text-2xl font-semibold tracking-tight">
+          {#if working}
+            <Medallion icon={Loader2} tone="muted" spin />
+          {:else if step === 'unsettled'}
+            <Medallion icon={Clock} tone="muted" />
+          {:else}
+            <Medallion icon={AlertTriangle} tone="error" />
+          {/if}
+          <h1 class="text-xl font-semibold tracking-tight">
             {#if step === 'checking'}Checking your claim…{:else if step === 'paying' || step === 'settling'}Sending your tokens…{:else if step === 'unsettled'}Still settling{:else}Not claimed{/if}
           </h1>
-          <p class="text-xs text-zen-fg-subtle">Funds go to: <span class="font-mono break-all">{attempt.destination}</span></p>
+          {#if working}
+            <Amount label="Claiming" value={formatAmount(BigInt(attempt.amount))} />
+            <p class="text-sm text-zen-fg-muted">to <span class="font-mono text-zen-fg" title={attempt.destination}>{middle(attempt.destination, 8)}</span></p>
+          {/if}
           {@render failure()}
         {/if}
       {/if}

@@ -1,7 +1,7 @@
 <script lang="ts">
   // The one medallion: 64 px, icon 32 px, as in the main claim app (LoginPrompt, ClaimStep4Proof).
-  import type { Component } from 'svelte';
-  let { icon: Icon, tone = 'primary', spin = false }: { icon: Component<{ class?: string }>; tone?: 'primary' | 'success' | 'error' | 'muted'; spin?: boolean } = $props();
+  import type { Mail } from 'lucide-svelte';
+  let { icon: Icon, tone = 'primary', spin = false }: { icon: typeof Mail; tone?: 'primary' | 'success' | 'error' | 'muted'; spin?: boolean } = $props();
 </script>
 
 <div

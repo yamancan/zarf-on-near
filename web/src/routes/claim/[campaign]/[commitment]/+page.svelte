@@ -3,16 +3,19 @@
   import { page } from '$app/state';
   import { env } from '$env/dynamic/public';
   import {
-    classifyDestination, claimState, deadlineText, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isValidAccountId, loadAttempt, newAttemptId,
-    parseLinkFragment, saveAttempt, type LinkSecret,
+    classifyDestination, claimState, deadlineText, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isValidAccountId, loadAttempt, loadReceipt,
+    middle, newAttemptId, parseLinkFragment, saveAttempt, timeLeft, type LinkSecret,
   } from '$lib/claim';
   import { rootFromProof } from '$lib/merkle';
   import { accountExists, ClaimError, describeCheckError, describeError, getCampaign, getClaimState, getNetwork } from '$lib/services';
   import { getQuote, lossBps, MAX_LOSS_BPS, QUOTE_LIFETIME_MS, QuoteError, type PayoutAsset } from '$lib/intents';
   import PayoutPicker from '$lib/PayoutPicker.svelte';
-  import { AlertTriangle, Check, CheckCircle, ChevronDown, Clock, Link2Off, Loader2, Mail, SearchX, ShieldCheck } from 'lucide-svelte';
-  import ZenBadge from '$lib/zen/components/ZenBadge.svelte';
+  import { AlertTriangle, ArrowUpRight, CheckCircle, ChevronDown, Clock, Link2Off, Loader2, Mail, SearchX, ShieldCheck } from 'lucide-svelte';
+  import Amount from '$lib/Amount.svelte';
+  import Medallion from '$lib/Medallion.svelte';
+  import Note from '$lib/Note.svelte';
   import ZenButton from '$lib/zen/components/ZenButton.svelte';
+  import ZenCheckbox from '$lib/zen/components/ZenCheckbox.svelte';
   import ZenCard from '$lib/zen/components/ZenCard.svelte';
   import ZenInput from '$lib/zen/components/ZenInput.svelte';
   import { themeStore } from '$lib/zen/stores/themeStore.svelte';
@@ -41,7 +44,16 @@
   let confirmed = $state(false);
   let error = $state('');
   let deadline = $state('loading…');
+  let left = $state('');
   let checkError = $state('');
+  // A claim this browser finished earlier (receipt page): lets "Already claimed" show what was paid.
+  const paid = loadReceipt(campaign, commitment);
+  const MODES = $derived([
+    ['existing', 'NEAR account'],
+    ...(network === 'mainnet' ? [['chain', 'Another chain']] : []),
+    ...(implicitEnabled ? [['new', 'New account']] : []),
+  ] as [typeof mode, string][]);
+  const walletSite = $derived(network === 'mainnet' ? 'https://app.mynearwallet.com' : 'https://testnet.mynearwallet.com');
 
   const dest = $derived(classifyDestination(typed));
   const destination = $derived(mode === 'existing' ? (dest.kind === 'named' || dest.kind === 'implicit' ? dest.id : '') : (implicit?.accountId ?? ''));
@@ -88,6 +100,7 @@
   });
 
   async function checkLink(l: LinkSecret) {
+    check = 'checking';
     try {
       const [c, net] = await Promise.all([
         getCampaign(env.PUBLIC_NEAR_RPC_URL, env.PUBLIC_CONTRACT_ID, campaign),
@@ -99,7 +112,9 @@
         return;
       }
       sender = c.sender;
-      deadline = deadlineText(Number(BigInt(c.deadline_ns) / 1_000_000n), Date.now());
+      const ms = Number(BigInt(c.deadline_ns) / 1_000_000n);
+      deadline = deadlineText(ms, Date.now());
+      left = timeLeft(ms, Date.now());
       if ((await rootFromProof(commitment, l.amount, l.proof)) !== c.merkle_root) {
         check = 'mismatch';
         return;
@@ -131,11 +146,6 @@
     exported = true;
   }
 
-  async function copy() {
-    await navigator.clipboard.writeText(implicit!.privateKey);
-    exported = true;
-  }
-
   async function signIn() {
     const clientId = env.PUBLIC_GOOGLE_CLIENT_ID;
     if (!clientId) {
@@ -156,7 +166,7 @@
         to = q.depositAddress!;
         intents = { chainName: asset.chain.name, assetId: asset.assetId, recipient, refundTo: sender, requestDeadline, amountOutFormatted: q.amountOutFormatted };
       } catch (e) {
-        error = e instanceof QuoteError ? `1Click refused this payout: ${e.message}` : 'Cross-chain quotes are unavailable right now. Try again, or claim to a NEAR account.';
+        error = e instanceof QuoteError ? `The bridge refused this payout: ${e.message}` : 'Cross-chain quotes are unavailable right now. Try again, or claim to a NEAR account.';
         busy = '';
         return;
       }
@@ -173,142 +183,136 @@
 
 <svelte:head><title>Claim your USDC · Zarf</title></svelte:head>
 
-{#snippet medallion(Icon: typeof Mail, tone: 'primary' | 'success' | 'error' | 'muted', spin = false)}
-  <!-- Medallion from the main claim app (LoginPrompt, ClaimStep4Proof) -->
-  <div
-    class="w-14 h-14 rounded-full flex items-center justify-center shrink-0 border
-      {tone === 'success' ? 'bg-zen-success/10 text-zen-success border-zen-success/10'
-      : tone === 'error' ? 'bg-zen-error/5 text-zen-error border-zen-error/10'
-      : tone === 'muted' ? 'bg-zen-fg/5 text-zen-fg-muted border-zen-border-subtle'
-      : 'bg-zen-primary/10 text-zen-primary border-transparent'}"
-    aria-hidden="true"
-  >
-    <Icon class="w-6 h-6 {spin ? 'animate-spin' : ''}" />
+
+{#snippet terminal(Icon: typeof Mail, tone: 'success' | 'error' | 'muted', title: string, line: string, action: 'home' | 'recheck' | 'none')}
+  <div class="flex flex-col items-center text-center gap-4 py-2">
+    <Medallion icon={Icon} {tone} />
+    <h1 class="text-xl font-semibold tracking-tight">{title}</h1>
+    <p class="text-sm text-zen-fg-muted max-w-xs" role={tone === 'error' ? 'alert' : undefined}>{line}</p>
+    {#if action === 'recheck'}
+      <ZenButton variant="primary" class="rounded-full min-h-11 mt-2" onclick={() => link && checkLink(link)}>Check again</ZenButton>
+    {:else if action === 'home'}
+      <ZenButton href="/" variant="secondary" class="rounded-full min-h-11 mt-2">What is Zarf?</ZenButton>
+    {/if}
   </div>
 {/snippet}
 
-{#snippet terminal(Icon: typeof Mail, tone: 'success' | 'error' | 'muted', title: string, line: string, alert: boolean, newLink: boolean)}
-  <div class="flex flex-col items-center text-center gap-4 py-4">
-    {@render medallion(Icon, tone)}
-    <h1 class="text-2xl font-semibold tracking-tight">{title}</h1>
-    <p class="text-sm max-w-xs {alert ? 'text-zen-error' : 'text-zen-fg-muted'}" role={alert ? 'alert' : undefined}>{line}</p>
-    {#if newLink}<p class="text-xs text-zen-fg-subtle">Nothing was taken from you. Ask the sender for a new link.</p>{/if}
-    <a href="/" class="mt-2 inline-flex items-center justify-center min-h-11 px-5 rounded-full text-sm font-medium no-underline text-zen-fg-muted hover:text-zen-fg bg-zen-fg/5 hover:bg-zen-fg/10 transition-colors">What is Zarf?</a>
-  </div>
-{/snippet}
-
-<div class="w-full max-w-md mx-auto px-4 py-8 sm:py-14">
-  <ZenCard variant="glass" padding="lg" radius="3xl" class="!p-6 sm:!p-8">
+<div class="w-full max-w-lg mx-auto px-4 py-8 sm:py-14">
+  <ZenCard variant="elevated" class="!p-6 sm:!p-8">
     <div class="flex flex-col gap-6">
       {#if !linkOk}
-        {@render terminal(Link2Off, 'muted', 'This claim link is broken', 'Open the link from your email again, exactly as it was sent.', false, true)}
+        {@render terminal(Link2Off, 'muted', 'This claim link is broken', 'Open the link from your email again, in full.', 'home')}
       {:else if loaded && !link}
-        {@render terminal(Link2Off, 'muted', 'This claim link is incomplete', 'The part after # is missing or damaged. Open the full link from your email again.', false, true)}
+        {@render terminal(Link2Off, 'muted', 'This claim link is incomplete', 'The part after # is missing. Open the full link from your email again.', 'home')}
       {:else if check === 'mismatch'}
-        {@render terminal(Link2Off, 'error', 'This link cannot be claimed', describeError(new ClaimError('LINK_MISMATCH')), true, true)}
+        {@render terminal(Link2Off, 'error', 'This link cannot be claimed', describeError(new ClaimError('LINK_MISMATCH')), 'home')}
       {:else if check === 'unknown'}
-        {@render terminal(SearchX, 'muted', 'This campaign does not exist', `There is no campaign ${campaign} on this contract. Ask the sender for your link again.`, false, true)}
+        {@render terminal(SearchX, 'muted', 'Campaign not found', "This link's campaign was not found. Ask the sender for your link again.", 'home')}
       {:else if check === 'claimed'}
-        {@render terminal(CheckCircle, 'success', 'Already claimed', 'The tokens for this link have been paid out.', false, false)}
+        <div class="flex flex-col items-center text-center gap-4 py-2">
+          <Medallion icon={CheckCircle} tone="success" />
+          <h1 class="text-xl font-semibold tracking-tight">Already claimed</h1>
+          <Amount label={paid ? 'Paid out' : 'This link held'} value={formatAmount(BigInt(link!.amount))} unit={network === 'mainnet' ? 'USDC' : 'test USDC'} />
+          {#if paid}
+            <p class="text-sm text-zen-fg-muted">to <span class="font-mono text-zen-fg" title={paid.destination}>{middle(paid.destination, 8)}</span>{paid.chainName ? ` on ${paid.chainName}` : ''}</p>
+            {#if env.PUBLIC_EXPLORER_TX_URL}
+              <ZenButton href="{env.PUBLIC_EXPLORER_TX_URL}{paid.txHash}" target="_blank" rel="noopener noreferrer" variant="secondary" class="rounded-full min-h-11">
+                View the transaction
+                {#snippet iconRight()}<ArrowUpRight class="w-3.5 h-3.5" />{/snippet}
+              </ZenButton>
+            {/if}
+          {:else}
+            <p class="text-sm text-zen-fg-muted max-w-xs">The tokens for this link have been paid out.</p>
+          {/if}
+        </div>
       {:else if check === 'pending'}
-        {@render terminal(Clock, 'muted', 'This claim is being paid', 'A claim for this link is in progress. Check again in a minute.', false, false)}
+        {@render terminal(Clock, 'muted', 'This claim is being paid', 'A claim for this link is in progress. It usually settles within a minute.', 'recheck')}
       {:else if check === 'ended'}
-        {@render terminal(Clock, 'muted', 'This campaign has ended', `Claims closed on ${deadline}. Ask the sender about it.`, false, false)}
+        {@render terminal(Clock, 'muted', 'This campaign has ended', `Claims closed on ${deadline}. Ask the sender about it.`, 'home')}
       {:else if check === 'error'}
-        {@render terminal(AlertTriangle, 'error', 'Could not check this claim', `${checkError} Try again in a minute.`, true, false)}
+        {@render terminal(AlertTriangle, 'error', 'Could not check this claim', checkError, 'recheck')}
       {:else if loaded && check === 'checking'}
         <div class="flex flex-col items-center gap-4 py-8">
-          {@render medallion(Loader2, 'muted', true)}
+          <Medallion icon={Loader2} tone="muted" spin />
           <p class="text-sm text-zen-fg-muted" role="status">Checking your claim…</p>
         </div>
       {:else if loaded}
-        <!-- Header: medallion, the amount as the hero number, sender and deadline muted -->
-        <div class="flex flex-col items-center text-center gap-3">
-          {@render medallion(Mail, 'primary')}
-          <h1 class="flex flex-col items-center gap-1">
-            <span class="text-5xl font-bold tracking-tighter text-zen-fg tabular-nums">{formatAmount(BigInt(link!.amount))} USDC</span>
-            <span class="text-base font-normal text-zen-fg-muted">is waiting for you</span>
-          </h1>
-          <p class="text-xs text-zen-fg-subtle leading-relaxed">
-            From <span class="font-mono">{sender}</span><br />Claim by {deadline}
+        <!-- Header: medallion, the amount as the hero figure, one muted line -->
+        <div class="flex flex-col items-center text-center gap-4">
+          <Medallion icon={Mail} />
+          <h1><Amount label="Waiting for you" value={formatAmount(BigInt(link!.amount))} unit={network === 'mainnet' ? 'USDC' : 'test USDC'} /></h1>
+          <p class="text-xs text-zen-fg-muted">
+            From <span class="font-mono">{sender}</span>{#if left}{' · '}<span title="Claim by {deadline}">{left}</span>{/if}
           </p>
-          {#if network !== 'mainnet'}<ZenBadge size="sm">NEAR {network} · test funds, no value</ZenBadge>{/if}
         </div>
 
-        <!-- Destination: one question, one switch, one field -->
+        <!-- Destination: one question, one field; a switch only when there is a real choice -->
         <div class="flex flex-col gap-3">
-          <h2 id="dest-q" class="text-sm font-medium text-zen-fg">Where should it go?</h2>
-          <div class="control-border grid grid-cols-2 gap-1 p-1 rounded-full" role="radiogroup" aria-labelledby="dest-q">
-            {#each [['existing', 'NEAR account'], ['chain', 'Another chain']] as [value, text] (value)}
-              <label
-                class="flex items-center justify-center min-h-10 whitespace-nowrap text-sm font-medium rounded-full px-3 cursor-pointer transition-colors has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-zen-fg
-                  {mode === value ? 'bg-zen-fg text-zen-bg' : 'text-zen-fg-muted hover:text-zen-fg'}"
-              >
-                <input class="sr-only" type="radio" bind:group={mode} {value} />{text}
-              </label>
-            {/each}
-          </div>
-          {#if implicitEnabled}
-            <label class="flex items-center gap-2 min-h-11 text-xs text-zen-fg-muted"><input type="radio" bind:group={mode} value="new" /> Create a NEAR account for me</label>
+          {#if MODES.length > 1}
+            <h2 id="dest-q" class="text-sm font-medium text-zen-fg">Where should it go?</h2>
+            <div class="control-border grid gap-1 p-1 rounded-full" style="grid-template-columns: repeat({MODES.length}, minmax(0, 1fr))" role="radiogroup" aria-labelledby="dest-q">
+              {#each MODES as [value, text] (value)}
+                <label
+                  class="flex items-center justify-center min-h-10 whitespace-nowrap text-sm font-medium rounded-full px-2 cursor-pointer transition-colors has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-zen-fg
+                    {mode === value ? 'bg-zen-fg text-zen-bg' : 'text-zen-fg-muted hover:text-zen-fg'}"
+                >
+                  <input class="sr-only" type="radio" bind:group={mode} {value} />{text}
+                </label>
+              {/each}
+            </div>
           {/if}
 
           {#if mode === 'chain'}
             <PayoutPicker {network} amount={link!.amount} refundTo={sender} bind:choice={payout} />
           {:else if mode === 'existing'}
+            <label for="dest" class="text-sm font-medium text-zen-fg {MODES.length > 1 ? 'sr-only' : ''}">Your NEAR account</label>
             <ZenInput
               id="dest"
               class="control-border"
-              aria-label="NEAR account"
               bind:value={typed}
               placeholder={network === 'mainnet' ? 'alice.near' : 'alice.testnet'}
               autocomplete="off"
               autocapitalize="off"
               spellcheck={false}
-              aria-invalid={dest.kind === 'wrong' || acct?.state === 'missing'}
+              aria-invalid={dest.kind === 'wrong' || (acct?.state === 'missing' && dest.kind === 'named')}
               aria-describedby="dest-note"
             />
-            <div id="dest-note" class="text-xs flex flex-col gap-2 -mt-1 pl-1">
+            <div id="dest-note" class="flex flex-col gap-2 pl-1">
               {#if dest.kind === 'wrong'}
-                <p class="text-zen-error" role="alert">{dest.reason}</p>
+                <Note tone="error">{dest.reason}</Note>
               {:else if acct?.state === 'checking'}
-                <p class="text-zen-fg-subtle" role="status">Checking {acct.id}…</p>
+                <Note tone="pending">Checking <span class="font-mono">{acct.id}</span>…</Note>
               {:else if acct?.state === 'found'}
-                <p class="flex items-center gap-1.5 text-zen-success" role="status"><Check class="w-3.5 h-3.5" aria-hidden="true" /><span class="font-mono">{acct.id}</span> found</p>
+                <Note tone="success"><span class="font-mono">{acct.id}</span> found</Note>
               {:else if acct?.state === 'missing' && dest.kind === 'named'}
-                <p class="text-zen-error" role="alert">There is no NEAR account called {acct.id}. Check the spelling.</p>
+                <Note tone="error">There is no NEAR account called <span class="font-mono">{acct.id}</span>. Check the spelling.</Note>
               {:else if acct?.state === 'missing'}
-                <label class="flex gap-2 items-start text-zen-fg-muted">
-                  <input type="checkbox" bind:checked={unfundedAck} />
-                  This account is not on chain yet. Only the holder of its private key can use these funds.
-                </label>
+                <Note tone="info">This account is not on chain yet.</Note>
+                <ZenCheckbox bind:checked={unfundedAck} label="Only the holder of its private key can use these funds. I hold it." />
               {:else if acct?.state === 'error'}
-                <p class="text-zen-error" role="alert">Could not check this account right now. Try again in a minute.</p>
+                <Note tone="error">Could not check this account right now. Try again in a minute.</Note>
               {/if}
               {#if acct?.state !== 'found'}
-                <p class="text-zen-fg-subtle">
-                  No NEAR account? <a href="https://docs.near.org/getting-started/create-account" target="_blank" rel="noopener noreferrer">Create one</a>, then come back.
+                <p class="text-xs text-zen-fg-muted">
+                  No NEAR account? <a href={walletSite} target="_blank" rel="noopener noreferrer" class="underline underline-offset-2 hover:text-zen-fg">Create a free one at MyNearWallet</a>, then type it here. This tab keeps your claim.
                 </p>
               {/if}
             </div>
           {:else if !implicit}
-            <ZenButton variant="secondary" class="rounded-full" onclick={create}>Create a NEAR account in this browser</ZenButton>
+            <p class="text-sm text-zen-fg-muted">We create a NEAR account in this browser. Only you get its key.</p>
+            <ZenButton variant="secondary" class="rounded-full min-h-11 self-center" onclick={create}>Create my NEAR account</ZenButton>
           {:else}
-            <p class="text-sm">Your account: <code>{implicit.accountId}</code></p>
-            <p class="text-sm"><strong>Save its key now.</strong> We never see it, and without it nobody can move these funds.</p>
-            <div class="flex flex-wrap gap-2">
-              <ZenButton variant="secondary" size="sm" class="rounded-full min-h-11" onclick={download}>Download key file</ZenButton>
-              <ZenButton variant="secondary" size="sm" class="rounded-full min-h-11" onclick={copy}>Copy private key</ZenButton>
-            </div>
-            <label class="flex items-center gap-2 min-h-11 text-sm">
-              <input type="checkbox" bind:checked={confirmed} disabled={!exported} />
-              I saved the key somewhere safe
-            </label>
+            <p class="text-sm text-zen-fg-muted">Your new account <span class="font-mono text-zen-fg" title={implicit.accountId}>{middle(implicit.accountId, 8)}</span></p>
+            <Note tone="info">Save its key now. Without it nobody can move these funds, and we never see it.</Note>
+            <ZenButton variant="secondary" class="rounded-full min-h-11 self-start" onclick={download}>Download key</ZenButton>
+            <ZenCheckbox bind:checked={confirmed} disabled={!exported} label="I saved the key somewhere safe" />
           {/if}
         </div>
 
-        <!-- Sign in: Google's own pill asset, centred -->
+        <!-- Sign in: which account first, then Google's own pill asset -->
         <div class="flex flex-col items-center gap-3 pt-1">
-          {#if busy}<p class="text-xs text-zen-fg-subtle" role="status">{busy}</p>{/if}
+          <p class="text-xs text-zen-fg-muted text-center">Use the Google account this link was sent to.</p>
+          {#if busy}<Note tone="pending">{busy}</Note>{/if}
           <button class="google" disabled={!ready} onclick={signIn}>
             <img src={themeStore.isDark ? '/google/signin-dark.svg' : '/google/signin-light.svg'} alt="Sign in with Google" width="180" height="40" />
           </button>
@@ -324,15 +328,16 @@
           <div class="mt-2 flex flex-col gap-2 leading-relaxed">
             <p>Our verifier, operated by Trion Labs, sees your email once to check this claim, and does not store it.</p>
             <p>
-              You choose where the USDC goes, then sign in with Google. The sign-in only proves the email and is bound to
-              this destination, so it cannot pay anyone else. We cannot access your Google account. The USDC usually
-              arrives in about a minute.
+              The sign-in only proves the email and is bound to the destination you chose, so it cannot pay anyone else. We
+              cannot access your Google account. The USDC usually arrives in about a minute.
             </p>
+            {#if network !== 'mainnet'}<p>This is NEAR testnet: the USDC is a test token with no value. Payouts to Base, Arbitrum and Ethereum run on mainnet.</p>{/if}
+            <p>Claim by {deadline}.</p>
           </div>
         </details>
       {/if}
 
-      {#if error}<p class="text-sm text-zen-error text-center" role="alert">{error}</p>{/if}
+      {#if error}<Note tone="error" class="justify-center">{error}</Note>{/if}
     </div>
   </ZenCard>
 </div>
@@ -347,6 +352,10 @@
     line-height: 0;
     border-radius: 9999px;
     cursor: pointer;
+  }
+  .google:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
   .google img {
     width: 240px;

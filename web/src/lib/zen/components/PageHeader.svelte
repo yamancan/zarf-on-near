@@ -2,11 +2,8 @@
     // Copied from the main repo (web/packages/ui/lib/components/ui), values unchanged.
     import type { Snippet } from 'svelte';
 
-    let { title, description, extra } = $props<{
-        title: string;
-        description: string;
-        extra?: Snippet;
-    }>();
+    // (the generic $props<…>() form is typed as below here; svelte-check rejects the generic)
+    let { title, description, extra }: { title: string; description: string; extra?: Snippet } = $props();
 </script>
 
 <header class="mb-10 text-left">

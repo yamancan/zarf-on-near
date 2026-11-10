@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import vectors from '../../../spec/vectors.json';
 import {
   classifyDestination, claimState, deadlineText, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isImplicitAccount, isValidAccountId, loadAttempt, newAttemptId,
-  decodeProof, encodeProof, parseCallback, parseLinkFragment, saveAttempt, clearAttempt,
+  decodeProof, encodeProof, parseCallback, parseLinkFragment, saveAttempt, clearAttempt, saveReceipt, loadReceipt, middle, twoDecimals,
 } from './claim';
 
 const main = vectors.campaigns.main;
@@ -151,5 +151,48 @@ describe('deadlineText', () => {
     expect(deadlineText(at, at - 3_600_000, 'UTC')).toMatch(/1 hour left$/);
     expect(deadlineText(at, at - 60_000, 'UTC')).toMatch(/less than an hour left$/);
     expect(deadlineText(at, at + 1, 'UTC')).toBe('17 Nov 2026, 21:55 UTC');
+  });
+});
+
+describe('receipt record (reload or reopened link after a paid claim)', () => {
+  const mem = (): Storage => {
+    const m = new Map<string, string>();
+    return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => void m.set(k, v), removeItem: (k) => void m.delete(k) } as Storage;
+  };
+  const r = { amount: '10000000', destination: 'alice.testnet', txHash: '6zgh2u9DqHHiXzdy9ouTP7oGky2T4nugqzqt9wJZwNFm' };
+  it('is kept per claim and survives garbage', () => {
+    const s = mem();
+    expect(loadReceipt('7', 'c', s)).toBeNull();
+    saveReceipt('7', 'c', r, s);
+    expect(loadReceipt('7', 'c', s)).toEqual(r);
+    expect(loadReceipt('7', 'd', s)).toBeNull();
+    s.setItem('zarf-near:receipt:7/c', '{');
+    expect(loadReceipt('7', 'c', s)).toBeNull();
+  });
+  it('refuses a record whose tx hash or amount is malformed (it feeds the explorer link)', () => {
+    const s = mem();
+    saveReceipt('7', 'c', { ...r, txHash: 'javascript:alert(1)' }, s);
+    expect(loadReceipt('7', 'c', s)).toBeNull();
+    saveReceipt('7', 'c', { ...r, amount: '-1' }, s);
+    expect(loadReceipt('7', 'c', s)).toBeNull();
+  });
+  it('never throws when storage is blocked', () => {
+    const blocked = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); } } as unknown as Storage;
+    expect(() => saveReceipt('7', 'c', r, blocked)).not.toThrow();
+    expect(loadReceipt('7', 'c', blocked)).toBeNull();
+  });
+});
+
+describe('display helpers', () => {
+  it('middle-truncates long addresses only', () => {
+    expect(middle('0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed')).toBe('0x5aAe…1BeAed');
+    expect(middle('alice.testnet')).toBe('alice.testnet');
+  });
+  it('cuts to two decimals without rounding up', () => {
+    expect(twoDecimals('9.99558')).toBe('9.99');
+    expect(twoDecimals('10')).toBe('10');
+    expect(twoDecimals('2.5')).toBe('2.5');
+    expect(twoDecimals('9.009')).toBe('9');
+    expect(twoDecimals('7.001')).toBe('7');
   });
 });
