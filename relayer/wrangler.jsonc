@@ -28,6 +28,20 @@
         { "name": "PER_IP", "namespace_id": "2001", "simple": { "limit": 10, "period": 60 } },
         { "name": "PER_COMMITMENT", "namespace_id": "2002", "simple": { "limit": 3, "period": 60 } }
       ]
+    },
+    // `wrangler dev --env testnet --port 8788`; RELAYER_KEY comes from .dev.vars.testnet.
+    "testnet": {
+      "secrets": { "required": ["RELAYER_KEY"] },
+      "vars": {
+        "NETWORK": "testnet", "CONTRACT_ID": "zarf-near-1111.testnet", "RELAYER_ACCOUNT_ID": "zarf-near-relayer-1111.testnet",
+        "NEAR_RPC_URL": "https://rpc.testnet.near.org",
+        "VERIFIER_SIGNERS": "2d10ebec1ec795cef82b8d357cc60d39d9119b99908741660b632fc5cf0d4e32",
+        "CLAIM_ORIGINS": "http://localhost:5173,http://127.0.0.1:5173"
+      },
+      "ratelimits": [
+        { "name": "PER_IP", "namespace_id": "2001", "simple": { "limit": 10, "period": 60 } },
+        { "name": "PER_COMMITMENT", "namespace_id": "2002", "simple": { "limit": 3, "period": 60 } }
+      ]
     }
   }
 }

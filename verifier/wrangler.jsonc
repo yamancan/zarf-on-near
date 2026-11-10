@@ -20,6 +20,13 @@
     // `wrangler dev --env dev`: vars are not inherited, so all of them are repeated here.
     "dev": {
       "vars": { "GOOGLE_CLIENT_ID": "", "CLAIM_ORIGINS": "http://localhost:5173", "CONTRACT_ID": "", "NEAR_RPC_URL": "" }
+    },
+    // `wrangler dev --env testnet --port 8787` against the live testnet contract (docs/deploy/testnet.md).
+    // SIGNER_SEED comes from .dev.vars.testnet (scripts/testnet-dev-vars.sh). GOOGLE_CLIENT_ID stays
+    // empty until the owner creates the OAuth client, so every claim fails closed until then.
+    "testnet": {
+      "secrets": { "required": ["SIGNER_SEED"] },
+      "vars": { "GOOGLE_CLIENT_ID": "", "CLAIM_ORIGINS": "http://localhost:5173,http://127.0.0.1:5173", "CONTRACT_ID": "zarf-near-1111.testnet", "NEAR_RPC_URL": "https://rpc.testnet.near.org" }
     }
   }
 }

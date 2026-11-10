@@ -52,3 +52,48 @@ required_claim_gas: "55000000000000"
 
 - First real claim with Circle USDC (reviewer m2): record `total_gas_burnt` and per-receipt gas,
   and confirm it passes at exactly 55 Tgas. Needs the sender funded with test USDC (owner).
+
+## Local smoke (2026-11-11, `t8d-testnet-local`)
+
+The verifier, relayer and apps run locally against the live testnet contract. Nothing is deployed
+to Cloudflare; there is no domain and no Google client yet.
+
+```bash
+scripts/testnet-dev-vars.sh     # writes gitignored, mode-600 .dev.vars.testnet from ~/.config/zarf-near/
+(cd verifier && npx wrangler dev --env testnet --port 8787 --inspector-port 9341)
+(cd relayer  && npx wrangler dev --env testnet --port 8788)
+(cd web && pnpm build && npx wrangler dev --env testnet --port 5173 --inspector-port 9342)
+```
+
+`scripts/testnet-dev-vars.sh` prints only the public signer derived from the seed:
+`2d10ebec1ec795cef82b8d357cc60d39d9119b99908741660b632fc5cf0d4e32`, equal to the key registered with
+`add_owner_key` above.
+
+| Check | Result |
+| --- | --- |
+| relayer `GET /health` | `{"allowance":null,"balance":"9999957942264602800000000","claim_only":true}`: the key is claim-only for the contract, allowance unlimited, ~9.99996 NEAR for gas |
+| verifier chain reader: `get_network` | `"testnet"` |
+| verifier chain reader: `get_agent(2d10ebec…)` | `{"kind":"owner","valid_until_ns":"1799578835000000000"}`: registered, valid until 2027-01-10T11:00:35Z |
+| verifier chain reader: `get_campaign(999999)`, `get_agent(<foreign key>)` | `null`, `null` |
+| verifier `POST /claim` with no Google client configured | `500 {"error":"VERIFIER_MISCONFIGURED"}`: fails closed |
+| verifier CORS preflight from `http://localhost:5173` | `204`, `Access-Control-Allow-Origin: http://localhost:5173` |
+| claim page `/claim/999999/…#s=…` | one `get_campaign` call to testnet; shows "Claim before: this campaign does not exist" |
+| `/create` | one `get_config` call; the USDC token is accepted, the deadline defaults to now + 7 d, Connect is enabled; no errors |
+| `storage_costs(USDC)` (read by `/create` at funding time) | `{"ft_storage_deposit":"1250000000000000000000","claim_entry_cost":"1060000000000000000000","per_claim_storage":"2310000000000000000000","campaign_bytes_cost":"7090000000000000000000"}` |
+| `campaigns_of(zarf-near-sender-1111.testnet)` | `[]` (no campaign yet) |
+| `required_claim_gas` | `"55000000000000"` |
+
+Note: the relayer's `GET /health` shares the per-IP limit (10 per minute); poll a different route
+to wait for the server.
+
+### Enabling Google sign-in (owner)
+
+Once the owner creates the OAuth web client (docs/spikes/S4.md; `http://localhost` and
+`http://localhost:5173` as JavaScript origins and `http://localhost:5173/auth/google` as redirect
+URI are enough for a first real claim), set the client id in the two testnet envs:
+
+- `verifier/wrangler.jsonc`, `env.testnet.vars`: `"GOOGLE_CLIENT_ID": "<client id>.apps.googleusercontent.com"`
+- `web/wrangler.jsonc`, `env.testnet.vars`: `"PUBLIC_GOOGLE_CLIENT_ID": "<client id>.apps.googleusercontent.com"`
+
+The client id is public. A real claim then also needs a funded campaign from the sender account
+and its leaf list served at `PUBLIC_LEAVES_URL` (empty in the testnet env until hosting is decided).
