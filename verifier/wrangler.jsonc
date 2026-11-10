@@ -1,0 +1,11 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "zarf-near-verifier",
+  "main": "src/index.ts",
+  // No nodejs_compat: nothing here needs it, and it would copy secrets onto process.env.
+  "compatibility_date": "2026-06-01",
+  "vars": {
+    // The OAuth web client id (S4). Empty fails closed: every request errors until it is set.
+    "GOOGLE_CLIENT_ID": ""
+  }
+}
