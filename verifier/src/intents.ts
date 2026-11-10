@@ -14,6 +14,19 @@ export const ONECLICK_API = 'https://1click.chaindefuser.com';
 export const NEAR_USDC_ASSET = 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1';
 /** The only `appFees` entry allowed: the 1 bp fee 1Click adds to keyless quotes (seen on every keyless quote, S3). */
 export const ONECLICK_KEYLESS_FEE = { recipient: '5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd', maxBps: 25 };
+/**
+ * The only payout assets, with their decimals: Circle's native USDC on Base, Arbitrum and Ethereum
+ * (contract addresses 0x8335…2913, 0xaf88…5831, 0xa0b8…eb48). The claim page pins the same ids;
+ * a lookalike "USDC" that 1Click lists is never accepted.
+ */
+export const PAYOUT_ASSETS: ReadonlyMap<string, number> = new Map([
+  ['nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near', 6],
+  ['nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near', 6],
+  ['nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near', 6],
+]);
+const ORIGIN_DECIMALS = 6; // NEAR USDC
+/** Worst case a quote may lose, as `minAmountOut` against the amount: the claim page refuses more too. */
+export const MAX_LOSS_BPS = 500n;
 /** Highest slippage we let a quote carry; above it `minAmountOut` drifts toward zero. */
 export const MAX_SLIPPAGE_BPS = 100;
 const FETCH_TIMEOUT_MS = 10_000;
@@ -132,8 +145,14 @@ export function checkIntentsStatus(status: unknown, claim: IntentsClaim): void {
   }
   checkAppFees(qr.appFees);
 
-  if (qr.destinationAsset !== claim.destinationAsset) fail('INTENTS_WRONG_DESTINATION_ASSET');
-  if (qr.recipientType !== 'DESTINATION_CHAIN' || !sameAddress(qr.recipient, claim.recipient)) {
+  const decimals = PAYOUT_ASSETS.get(claim.destinationAsset);
+  if (decimals === undefined || qr.destinationAsset !== claim.destinationAsset) fail('INTENTS_WRONG_DESTINATION_ASSET');
+  // The worst case after fees and slippage, in origin units, must keep 95% of the amount.
+  const minOut = q.minAmountOut;
+  if (typeof minOut !== 'string' || !DECIMAL.test(minOut)) fail('INTENTS_MALFORMED');
+  const minOutOrigin = (BigInt(minOut as string) * 10n ** BigInt(ORIGIN_DECIMALS)) / 10n ** BigInt(decimals!);
+  if (minOutOrigin * 10_000n < BigInt(claim.amount) * (10_000n - MAX_LOSS_BPS)) fail('INTENTS_LOSS_TOO_HIGH');
+  if (qr.recipientType !== 'DESTINATION_CHAIN' || !sameAddress(qr.recipient, claim.recipient) || /^0x0{40}$/i.test(claim.recipient)) {
     fail('INTENTS_WRONG_RECIPIENT');
   }
   // These reroute the output (virtual chains, ft_transfer_call on NEAR); a plain payout never sets them.

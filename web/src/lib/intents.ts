@@ -18,6 +18,7 @@ const defaultFetch: Fetch = (u, i) => fetch(u, i);
 /** EIP-55: all-lower or all-upper is accepted as is; mixed case must match the checksum (a typo guard). */
 export function evmAddressError(address: string): string | null {
   if (!/^0x[0-9a-fA-F]{40}$/.test(address)) return 'Enter the full address: 0x followed by 40 letters and digits.';
+  if (/^0x0{40}$/i.test(address)) return 'That is the zero address; nobody can use funds sent there.';
   const body = address.slice(2);
   if (body === body.toLowerCase() || body === body.toUpperCase()) return null;
   const h = hex(keccak_256(body.toLowerCase()));
@@ -38,24 +39,31 @@ export function evmAddressError(address: string): string | null {
 export interface PayoutChain {
   key: string;
   name: string;
-  blockchain: string; // 1Click /v0/tokens `blockchain`
+  assetId: string; // pinned: never looked up by symbol (a lookalike 'USDC' could be listed first)
+  decimals: number; // pinned, not taken from /v0/tokens
   placeholder: string;
   addressError(address: string): string | null;
   preflight?(address: string, fetchFn?: Fetch): Promise<string | null>;
   note: string;
 }
 
-const evmChain = (key: string, name: string): PayoutChain => ({
+const evmChain = (key: string, name: string, usdc: string): PayoutChain => ({
   key,
   name,
-  blockchain: key,
+  assetId: `nep141:${key}-${usdc}.omft.near`,
+  decimals: 6,
   placeholder: '0x…',
   addressError: evmAddressError,
   note: `Paste your own ${name} wallet address. If it is an exchange address, make sure the exchange credits USDC on ${name} to it without a memo or tag.`,
 });
 
 /** Base first (the owner's pick); each is hidden at runtime if 1Click stops listing it. */
-export const PAYOUT_CHAINS: PayoutChain[] = [evmChain('base', 'Base'), evmChain('arb', 'Arbitrum'), evmChain('eth', 'Ethereum')];
+// Circle's native USDC contracts; the verifier pins the same three asset ids (verifier/src/intents.ts).
+export const PAYOUT_CHAINS: PayoutChain[] = [
+  evmChain('base', 'Base', '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'),
+  evmChain('arb', 'Arbitrum', '0xaf88d065e77c8cc2239327c5edb3a432268e5831'),
+  evmChain('eth', 'Ethereum', '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'),
+];
 
 export interface PayoutAsset {
   chain: PayoutChain;
@@ -63,15 +71,12 @@ export interface PayoutAsset {
   decimals: number;
 }
 
-/** GET /v0/tokens → the allow-listed chains' USDC, in list order. */
+/** GET /v0/tokens only says which pinned assets 1Click routes today; ids and decimals stay ours. */
 export async function resolveAssets(fetchFn: Fetch = defaultFetch): Promise<PayoutAsset[]> {
   const res = await fetchFn(`${ONECLICK_API}/v0/tokens`, { signal: AbortSignal.timeout(10_000) });
   if (!res.ok) throw new Error(`tokens: HTTP ${res.status}`);
-  const tokens = (await res.json()) as { assetId: string; blockchain: string; symbol: string; decimals: number }[];
-  return PAYOUT_CHAINS.flatMap((chain) => {
-    const t = tokens.find((x) => x.blockchain === chain.blockchain && x.symbol === 'USDC');
-    return t && typeof t.assetId === 'string' && Number.isInteger(t.decimals) ? [{ chain, assetId: t.assetId, decimals: t.decimals }] : [];
-  });
+  const listed = new Set(((await res.json()) as { assetId?: unknown }[]).map((t) => t.assetId));
+  return PAYOUT_CHAINS.filter((c) => listed.has(c.assetId)).map((chain) => ({ chain, assetId: chain.assetId, decimals: chain.decimals }));
 }
 
 export interface QuoteArgs {

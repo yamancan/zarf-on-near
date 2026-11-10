@@ -20,6 +20,13 @@
   scripts.
 </p>
 
+<h2>Cross-chain payouts</h2>
+<p>
+  If you choose USDC on another chain, your destination address and the amount go to NEAR Intents 1Click, a third-party
+  swap service, which also sees your IP address. 1Click's status for the deposit address of your payout is public, so
+  anyone who knows that address can link the claim to your destination address.
+</p>
+
 <h2>Testnet only</h2>
 <p>This service runs on NEAR testnet. The tokens are test funds with no value.</p>
 

@@ -14,6 +14,7 @@ describe('evmAddressError (EIP-55)', () => {
   it('refuses a mixed-case address whose checksum is off by one letter', () => {
     expect(evmAddressError('0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAeD')).toMatch(/typo/);
   });
+  it('refuses the zero address', () => expect(evmAddressError('0x' + '0'.repeat(40))).toMatch(/zero address/));
   it.each(['', '0x123', '5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed', '0x' + 'g'.repeat(40), 'alice.near'])('refuses the format of %j', (a) =>
     expect(evmAddressError(a)).toMatch(/full address/));
 });
@@ -26,6 +27,14 @@ describe('resolveAssets', () => {
       ['arb', 'nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near', 6],
       ['eth', 'nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near', 6],
     ]);
+  });
+  it('pins asset ids and decimals: a lookalike USDC listed first, or other decimals, changes nothing', async () => {
+    const base = tokens.find((t) => t.blockchain === 'base' && t.symbol === 'USDC')!;
+    const lookalike = { ...base, assetId: 'nep141:base-0xdeadbeef.omft.near', contractAddress: '0xdeadbeef' };
+    const got = await resolveAssets(json([lookalike, ...tokens.map((t) => ({ ...t, decimals: 18 }))]));
+    expect(got[0]).toMatchObject({ assetId: 'nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near', decimals: 6 });
+    expect(got.every((a) => a.decimals === 6)).toBe(true);
+    expect((await resolveAssets(json([lookalike]))).length).toBe(0); // only the lookalike listed: hide Base
   });
   it('hides a chain 1Click stops listing', async () => {
     expect((await resolveAssets(json(tokens.filter((t) => t.blockchain !== 'arb')))).map((a) => a.chain.key)).toEqual(['base', 'eth']);

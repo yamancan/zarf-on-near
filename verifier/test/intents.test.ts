@@ -117,6 +117,23 @@ describe('checkIntentsStatus', () => {
   });
 });
 
+describe('checkIntentsStatus: pinned assets and the loss bound', () => {
+  it('refuses a lookalike asset even when the quote and the claim agree on it', () => {
+    const fake = 'nep141:base-0x1c4a802fd6b591bb71daa01d8335e43719048b24.omft.near'; // sUSDC, listed by 1Click
+    const s = mutate((x) => (x.quoteResponse.quoteRequest.destinationAsset = fake));
+    expect(code(s, { ...claim, destinationAsset: fake })).toBe('INTENTS_WRONG_DESTINATION_ASSET');
+  });
+  it('requires minAmountOut to keep 95% of the amount (6-decimal USDC)', () => {
+    expect(code(mutate((x) => (x.quoteResponse.quote.minAmountOut = '1900000')))).toBeUndefined(); // exactly 95%
+    expect(code(mutate((x) => (x.quoteResponse.quote.minAmountOut = '1899999')))).toBe('INTENTS_LOSS_TOO_HIGH');
+    expect(code(mutate((x) => delete x.quoteResponse.quote.minAmountOut))).toBe('INTENTS_MALFORMED');
+  });
+  it('refuses the zero address as recipient', () => {
+    const zero = '0x' + '0'.repeat(40);
+    expect(code(mutate((x) => (x.quoteResponse.quoteRequest.recipient = zero)), { ...claim, recipient: zero })).toBe('INTENTS_WRONG_RECIPIENT');
+  });
+});
+
 describe('fetchIntentsStatus', () => {
   it('requests the status by deposit address and returns the body', async () => {
     const urls: string[] = [];

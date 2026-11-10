@@ -184,6 +184,7 @@ describe('handleClaim with a 1Click payout (intents)', () => {
     const s = structuredClone(recorded);
     s.quoteResponse.quote.depositAddress = DEP;
     s.quoteResponse.quote.deadline = later;
+    s.quoteResponse.quote.minAmountOut = named.call_args.amount; // within the 5% loss bound
     Object.assign(s.quoteResponse.quoteRequest, { amount: named.call_args.amount, deadline: later, refundTo: 'sender.testnet' });
     fn(s);
     return s;
