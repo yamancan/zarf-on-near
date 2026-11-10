@@ -10,6 +10,9 @@
   import { saveFile } from '$lib/create/publish';
   import { formatAmount, parseRecipients } from '$lib/create/recipients';
   import { myNearWallet, type SenderWallet } from '$lib/create/wallet';
+  import { ArrowRight, Check, ChevronDown, Mail } from 'lucide-svelte';
+  import ZenButton from '$lib/zen/components/ZenButton.svelte';
+  import ZenCard from '$lib/zen/components/ZenCard.svelte';
 
   const rpc = env.PUBLIC_NEAR_RPC_URL;
   const contract = env.PUBLIC_CONTRACT_ID;
@@ -345,6 +348,26 @@
     csv = error = '';
   }
 
+  // Wizard: the first three steps are local; Send and the links follow the draft and the result.
+  const STEPS = ['Recipients', 'Deadline', 'Wallet', 'Send'];
+  const QUESTIONS = ['Who gets it?', 'Until when can they claim?', 'Which wallet pays?', 'Review and send'];
+  let uiStep = $state(0);
+  const step = $derived(result && draft ? 4 : draft ? 3 : uiStep);
+  const recipientsOk = $derived(parsed.rows.length > 0 && parsed.rejected.length === 0);
+  let stepHeading = $state<HTMLElement | null>(null);
+  let lastStep = -1;
+  $effect(() => {
+    const s = step;
+    // A step the user moved to (focus was on a control) puts focus on its heading; a restored one does not.
+    const fromUser = typeof document !== 'undefined' && document.activeElement !== document.body;
+    if (lastStep !== -1 && lastStep !== s && fromUser) stepHeading?.focus();
+    lastStep = s;
+  });
+  const previewAmount = $derived(parsed.rows[0] ? formatAmount(BigInt(parsed.rows[0].amount)) : '10');
+  const previewDeadline = $derived(
+    Number.isFinite(deadlineMs) ? new Date(deadlineMs).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '',
+  );
+
   async function copyAll() {
     await navigator.clipboard.writeText(links.join('\n'));
     copied = true;
@@ -358,165 +381,216 @@
 
 <svelte:head><title>Send USDC · Zarf</title></svelte:head>
 
-<h1>Send tokens to emails</h1>
-<p class="muted"><a href="/campaigns">Your campaigns</a>: reclaim after the deadline, withdraw unused storage pre-pay.</p>
-<p class="muted">
-  Each recipient claims with their Google account. Emails never go on chain; when someone claims, our verifier sees
-  their email to check it matches the claim.
-</p>
-
-{#if otherTab && !draft}
-  <p class="error" role="alert">
-    Another tab has a campaign from <code>{otherTab.sender}</code> whose send has not resolved yet. Finish it there
-    before creating a new one here, or the same tokens could be sent twice.
-  </p>
-  <p><button onclick={checkOtherTab} disabled={!config}>Check it</button></p>
-{/if}
-{#if otherTabNote}<p role="status">{otherTabNote}</p>{/if}
-
-{#if setupError}
-  <p class="error" role="alert">{setupError}</p>
-{:else if result && draft}
-  <h2>Campaign {result.campaignId} is live</h2>
-  {#if env.PUBLIC_EXPLORER_TX_URL && result.txHash}
-    <p><a href="{env.PUBLIC_EXPLORER_TX_URL}{result.txHash}" target="_blank" rel="noopener noreferrer">View the transaction</a></p>
-  {/if}
-
-  <h2>Claim links</h2>
-  <p class="error">
-    These links are the only copy of each recipient's salt. Send each link only to its recipient and keep them
-    private: anyone holding a link can test whether it matches an email they guess. Without the links (or your
-    recovery file) nobody can claim, and you can only reclaim after the deadline.
-  </p>
-  {#if linkRows.length > LONG_LINKS_ABOVE}
-    <p class="error" role="alert">Long links: some apps may cut them; send by email or copy carefully.</p>
-  {/if}
-  <ul class="links">
-    {#each linkRows as { r, link }, i (r.commitment)}
-      <li>
-        <span>{r.email} · {formatAmount(BigInt(r.amount))} USDC</span>
-        <button onclick={() => copyOne(i)}>{copiedRow === i ? 'Copied' : 'Copy'}</button>
-        <a href={mailtoHref(r, link)}>Email</a>
-      </li>
-    {/each}
-  </ul>
-  <textarea readonly rows="8" aria-label="Claim links">{links.join('\n')}</textarea>
-  <p>
-    <button onclick={copyAll}>{copied ? 'Copied' : 'Copy all'}</button>
-    <button onclick={() => saveFile(`zarf-links-${result!.campaignId}.csv`, `email,amount,link\n${links.join('\n')}\n`, 'text/csv')}>Download as CSV</button>
-  </p>
-  <p>
-    <button onclick={startOver}>Start a new campaign</button>
-  </p>
-{:else}
-  <h2>1. Recipients</h2>
-  <p class="muted">One per line: <code>email,amount</code> in USDC. Use the exact address the recipient signs in to Google with.</p>
-  <label for="recipients">Recipients (email,amount per line)</label>
-  <textarea id="recipients" bind:value={csv} rows="8" placeholder={'email,amount\nalice@example.com,10\nbob@example.com,2.5'} disabled={!!draft}></textarea>
-  {#if parsed.rows.length}
-    <p>{parsed.rows.length} recipients, {formatAmount(parsed.total)} USDC in total.</p>
-  {/if}
-  {#if parsed.rejected.length}
-    <div class="error" role="alert">
-      <p>Fix these lines first:</p>
-      <ul>
-        {#each parsed.rejected as r (r.line)}<li>Line {r.line}: {r.reason}</li>{/each}
-      </ul>
-    </div>
-  {/if}
-
-  <h2>2. Deadline</h2>
-  <label for="deadline">Claim deadline</label>
-  <input id="deadline" type="datetime-local" bind:value={deadline} disabled={!!draft} />
-  {#if minMs !== null && deadline && !deadlineOk}
-    <p class="error">The deadline must be after {new Date(minMs).toLocaleString()}.</p>
-  {/if}
-  <p class="muted">Recipients can claim until then. After it, you can reclaim whatever is left.</p>
-
-  <h2>3. Wallet</h2>
-  <p class="muted">
-    You need a NEAR testnet account and test USDC:
-    <a href="https://docs.near.org/getting-started/faucet" target="_blank" rel="noopener noreferrer">NEAR testnet faucet</a> ·
-    <a href="https://faucet.circle.com" target="_blank" rel="noopener noreferrer">Circle USDC faucet</a> (choose NEAR Testnet).
-  </p>
+{#snippet walletBlock()}
   {#if pinned && !wrongAccount}
-    <p>Sending from <code>{account}</code>. This campaign is tied to this account until it resolves.</p>
+    <p class="text-sm text-zen-fg-muted">Sending from <span class="font-mono text-zen-fg">{account}</span>. This campaign is tied to this account until it resolves.</p>
   {:else}
     {#if wrongAccount}
-      <p class="error" role="alert">This draft belongs to <code>{sentFrom}</code>: reconnect {sentFrom} to continue.</p>
+      <p class="text-sm text-zen-error" role="alert">This draft belongs to <code>{sentFrom}</code>: reconnect {sentFrom} to continue.</p>
     {/if}
     {#if account}
-      <p>Sending from <code>{account}</code> <button onclick={disconnect} disabled={!!busy}>Disconnect</button></p>
+      <div class="flex items-center justify-between gap-3 min-h-11 px-4 rounded-2xl bg-zen-fg/[0.03] border-[0.5px] border-zen-border-subtle">
+        <span class="text-sm truncate"><span class="text-zen-fg-muted">Sending from</span> <span class="font-mono">{account}</span></span>
+        <ZenButton variant="ghost" size="sm" class="rounded-full min-h-11" onclick={disconnect} disabled={!!busy}>Disconnect</ZenButton>
+      </div>
     {:else}
-      <button onclick={connect} disabled={!walletReady}>Connect MyNearWallet</button>
+      <ZenButton variant="secondary" class="rounded-full self-start" onclick={connect} disabled={!walletReady}>Connect MyNearWallet</ZenButton>
     {/if}
   {/if}
+{/snippet}
 
-  <h2>4. Create</h2>
-  {#if !draft}
-    <button class="primary" disabled={!ready} onclick={prepare}>Generate claim links</button>
-  {:else}
-    <p>Save the recovery file before you send anything. It holds every salt, so you can rebuild the links if this page is lost.</p>
-    <p><button onclick={saveRecovery}>Download recovery file</button></p>
-    <label><input type="checkbox" bind:checked={recoveryAck} disabled={!recoverySaved} /> I stored the recovery file somewhere private</label>
-    <p>You send {formatAmount(BigInt(draft.total))} USDC to {draft.recipients.length} recipients, plus a small NEAR storage pre-pay that your wallet shows before you sign.</p>
-    {#if txState === 'checking'}
-      <p role="status">Checking whether your campaign was created… Do not send again until this finishes.</p>
-      <p>
-        <button onclick={recheck} disabled={!!busy}>{busy || 'Check again'}</button>
-        {#if env.PUBLIC_EXPLORER_TX_URL && sentTx}<a href="{env.PUBLIC_EXPLORER_TX_URL}{sentTx}" target="_blank" rel="noopener noreferrer">View it on the explorer</a>{/if}
-      </p>
-    {:else if txState === 'settling'}
-      <p role="status">
-        That attempt was refunded. Making sure an earlier attempt did not land (about 90 seconds) before these links can change…
-      </p>
-    {:else if txState === 'mismatch'}
-      <p class="error" role="alert">
-        The contract holds a campaign for these links that does not match this draft. It is not used. Generate new links.
-      </p>
-      <p><button onclick={startOver}>Generate new links</button></p>
-    {:else if txState === 'unclear'}
-      <p class="error" role="alert">
-        The transaction ran but did not create this campaign, and we could not confirm your tokens came back. Do not
-        send again; check it on the explorer first.
-      </p>
-      {#if env.PUBLIC_EXPLORER_TX_URL && sentTx}<p><a href="{env.PUBLIC_EXPLORER_TX_URL}{sentTx}" target="_blank" rel="noopener noreferrer">View it on the explorer</a></p>{/if}
-    {:else}
-      <button class="primary" disabled={!recoveryAck || !!busy || !!sentTx || !sendable.ok} onclick={create}>{busy || 'Create campaign'}</button>
-      {#if !pinned}<p><button onclick={() => (draft = null)} disabled={!!busy}>Edit recipients</button></p>{/if}
-    {/if}
-  {/if}
+{#snippet actions(back: boolean, label: string, enabled: boolean, go: () => void)}
+  <div class="mt-4 pt-6 border-t-[0.5px] border-zen-border-subtle flex items-center {back ? 'justify-between' : 'justify-end'} gap-3">
+    {#if back}<ZenButton variant="ghost" class="rounded-full min-h-11" onclick={() => (uiStep -= 1)}>Back</ZenButton>{/if}
+    <ZenButton variant="primary" class="rounded-full min-h-11" disabled={!enabled} onclick={go}>
+      {label}
+      {#snippet iconRight()}<ArrowRight class="w-4 h-4" />{/snippet}
+    </ZenButton>
+  </div>
+{/snippet}
+
+{#if step < 4}
+  <!-- WizardSteps (main repo create app): one thin bar and the step name -->
+  <div class="w-full border-b-[0.5px] border-zen-border-subtle">
+    <div class="max-w-5xl mx-auto px-4 sm:px-6 py-2 flex items-center gap-4">
+      <div class="flex-1 h-1 bg-zen-fg/10 rounded-full overflow-hidden" role="progressbar" aria-valuemin={1} aria-valuemax={STEPS.length} aria-valuenow={step + 1} aria-valuetext="Step {step + 1} of {STEPS.length}: {STEPS[step]}">
+        <div class="h-full bg-zen-fg rounded-full transition-all duration-500 ease-out" style="width: {((step + 1) / STEPS.length) * 100}%"></div>
+      </div>
+      <div class="text-xs font-mono text-zen-fg-muted whitespace-nowrap">
+        Step {step + 1} of {STEPS.length} · <span class="text-zen-fg font-medium uppercase tracking-wider">{STEPS[step]}</span>
+      </div>
+    </div>
+  </div>
 {/if}
 
-{#if error}<p class="error" role="alert">{error}</p>{/if}
+<div class="w-full max-w-5xl mx-auto px-4 sm:px-6 py-8 md:py-12">
+  <!-- PageHeader (main repo) -->
+  <header class="mb-8 flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+    <div class="space-y-2">
+      <h1 class="text-2xl md:text-3xl font-light tracking-tight">Send USDC to emails</h1>
+      <p class="text-sm md:text-base text-zen-fg-muted font-light">Each recipient claims with their Google account.</p>
+    </div>
+    <a href="/campaigns" class="inline-flex items-center min-h-11 text-xs font-medium no-underline text-zen-fg-muted hover:text-zen-fg">Your campaigns</a>
+  </header>
 
-<style>
-  textarea {
-    width: 100%;
-    box-sizing: border-box;
-    font: 14px/1.4 ui-monospace, monospace;
-    padding: 0.75rem;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: transparent;
-    color: inherit;
-  }
-  .links {
-    list-style: none;
-    padding: 0;
-  }
-  .links li {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    padding: 4px 0;
-  }
-  .links span {
-    flex: 1;
-    overflow-wrap: anywhere;
-  }
-  h2 {
-    font-size: 1.1rem;
-    margin: 1.5rem 0 0.5rem;
-  }
-</style>
+  {#if otherTab && !draft}
+    <div class="mb-6 flex flex-col gap-3 rounded-2xl border-[0.5px] border-zen-error/20 bg-zen-error-muted p-4 text-sm" role="alert">
+      <p>Another tab has a campaign from <code>{otherTab.sender}</code> whose send has not resolved yet. Finish it there before creating a new one here, or the same tokens could be sent twice.</p>
+      <ZenButton variant="secondary" size="sm" class="rounded-full self-start min-h-11" onclick={checkOtherTab} disabled={!config}>Check it</ZenButton>
+    </div>
+  {/if}
+  {#if otherTabNote}<p class="mb-6 text-sm text-zen-fg-muted" role="status">{otherTabNote}</p>{/if}
+
+  {#if setupError}
+    <p class="text-sm text-zen-error" role="alert">{setupError}</p>
+  {:else if result && draft}
+    <!-- Done: the links are the product of this page -->
+    <section class="max-w-2xl flex flex-col gap-6" aria-labelledby="done-h">
+      <div class="flex items-center gap-4">
+        <div class="w-12 h-12 rounded-full bg-zen-success/10 text-zen-success border border-zen-success/10 flex items-center justify-center shrink-0" aria-hidden="true"><Check class="w-5 h-5" /></div>
+        <div>
+          <h2 id="done-h" bind:this={stepHeading} tabindex="-1" class="text-xl font-semibold tracking-tight outline-hidden">Campaign {result.campaignId} is live</h2>
+          <p class="text-sm text-zen-fg-muted">{formatAmount(BigInt(draft.total))} USDC to {draft.recipients.length} recipients
+            {#if env.PUBLIC_EXPLORER_TX_URL && result.txHash}· <a href="{env.PUBLIC_EXPLORER_TX_URL}{result.txHash}" target="_blank" rel="noopener noreferrer">View the transaction</a>{/if}
+          </p>
+        </div>
+      </div>
+
+      <div class="flex flex-col gap-2">
+        <h3 class="text-sm font-medium">Claim links</h3>
+        <details class="group text-sm">
+          <summary class="flex items-center gap-2 min-h-11 cursor-pointer list-none text-zen-warning-content">
+            Send each link only to its recipient: it is the only copy.
+            <ChevronDown class="w-4 h-4 shrink-0 transition-transform group-open:rotate-180" aria-hidden="true" />
+          </summary>
+          <p class="mt-1 text-zen-fg-muted">
+            These links are the only copy of each recipient's salt. Keep them private: anyone holding a link can test
+            whether it matches an email they guess. Without the links (or your recovery file) nobody can claim, and you
+            can only reclaim after the deadline.
+          </p>
+        </details>
+        {#if linkRows.length > LONG_LINKS_ABOVE}
+          <p class="text-sm text-zen-error" role="alert">Long links: some apps may cut them; send by email or copy carefully.</p>
+        {/if}
+      </div>
+
+      <ul class="links flex flex-col">
+        {#each linkRows as { r, link }, i (r.commitment)}
+          <li class="flex items-center gap-2 min-h-12 border-b-[0.5px] border-zen-border-subtle last:border-b-0">
+            <span class="flex-1 min-w-0 text-sm"><span class="break-all">{r.email}</span> <span class="text-zen-fg-muted tabular-nums">· {formatAmount(BigInt(r.amount))} USDC</span></span>
+            <ZenButton variant="ghost" size="sm" class="rounded-full min-h-11" onclick={() => copyOne(i)}>{copiedRow === i ? 'Copied' : 'Copy'}</ZenButton>
+            <a href={mailtoHref(r, link)} class="inline-flex items-center min-h-11 px-3 text-xs font-medium">Email</a>
+          </li>
+        {/each}
+      </ul>
+      <textarea readonly rows="5" aria-label="Claim links" class="control-border w-full rounded-2xl bg-transparent p-3 font-mono text-xs text-zen-fg-muted">{links.join('\n')}</textarea>
+      <div class="flex flex-wrap gap-3">
+        <ZenButton variant="primary" class="rounded-full min-h-11" onclick={copyAll}>{copied ? 'Copied' : 'Copy all'}</ZenButton>
+        <ZenButton variant="secondary" class="rounded-full min-h-11" onclick={() => saveFile(`zarf-links-${result!.campaignId}.csv`, `email,amount,link\n${links.join('\n')}\n`, 'text/csv')}>Download as CSV</ZenButton>
+        <ZenButton variant="ghost" class="rounded-full min-h-11" onclick={startOver}>Start a new campaign</ZenButton>
+      </div>
+    </section>
+  {:else}
+    <div class="flex flex-col lg:flex-row lg:items-start gap-10 lg:gap-12">
+      <!-- Form -->
+      <section class="w-full lg:max-w-xl lg:shrink-0 flex flex-col gap-4" aria-labelledby="step-h">
+        <h2 id="step-h" bind:this={stepHeading} tabindex="-1" class="text-lg font-semibold tracking-tight outline-hidden">{QUESTIONS[step]}</h2>
+
+        {#if step === 0}
+          <label for="recipients" class="text-sm text-zen-fg-muted">One per line: <code>email,amount</code> in USDC, with the address they sign in to Google with.</label>
+          <textarea id="recipients" bind:value={csv} rows="8" class="control-border w-full rounded-2xl bg-transparent p-4 font-mono text-sm" placeholder={'alice@gmail.com,10\nbob@gmail.com,2.5'} disabled={!!draft}></textarea>
+          {#if parsed.rows.length}
+            <p class="text-sm"><span class="font-semibold tabular-nums">{formatAmount(parsed.total)} USDC</span> <span class="text-zen-fg-muted">to {parsed.rows.length} recipients</span></p>
+          {/if}
+          {#if parsed.rejected.length}
+            <div class="text-sm text-zen-error" role="alert">
+              <p>Fix these lines first:</p>
+              <ul class="list-disc pl-5">
+                {#each parsed.rejected as r (r.line)}<li>Line {r.line}: {r.reason}</li>{/each}
+              </ul>
+            </div>
+          {/if}
+          {@render actions(false, 'Continue', recipientsOk, () => (uiStep = 1))}
+        {:else if step === 1}
+          <label for="deadline" class="text-sm text-zen-fg-muted">Recipients can claim until then. After it, you can reclaim what is left.</label>
+          <input id="deadline" type="datetime-local" bind:value={deadline} disabled={!!draft} class="control-border w-full sm:w-auto min-h-11 rounded-[var(--zen-radius-input)] bg-transparent px-4 py-3 text-sm" />
+          {#if minMs !== null && deadline && !deadlineOk}
+            <p class="text-sm text-zen-error" role="alert">The deadline must be after {new Date(minMs).toLocaleString()}.</p>
+          {/if}
+          {@render actions(true, 'Continue', deadlineOk, () => (uiStep = 2))}
+        {:else if step === 2}
+          {#if config?.network !== 'mainnet'}
+            <p class="text-sm text-zen-fg-muted">
+              You need a NEAR testnet account and test USDC:
+              <a href="https://docs.near.org/getting-started/faucet" target="_blank" rel="noopener noreferrer">NEAR faucet</a> ·
+              <a href="https://faucet.circle.com" target="_blank" rel="noopener noreferrer">Circle USDC faucet</a> (NEAR Testnet).
+            </p>
+          {/if}
+          {@render walletBlock()}
+          {@render actions(true, 'Generate claim links', ready, prepare)}
+        {:else}
+          <p class="text-sm">
+            You send <span class="font-semibold tabular-nums">{formatAmount(BigInt(draft!.total))} USDC</span> to {draft!.recipients.length} recipients,
+            <span class="text-zen-fg-muted">plus a small NEAR storage pre-pay your wallet shows before you sign.</span>
+          </p>
+          {@render walletBlock()}
+          <div class="flex flex-col gap-3 rounded-2xl bg-zen-fg/[0.03] border-[0.5px] border-zen-border-subtle p-4">
+            <p class="text-sm">Save the recovery file first. <span class="text-zen-fg-muted">It holds every salt, so you can rebuild the links if this page is lost.</span></p>
+            <ZenButton variant="secondary" size="sm" class="rounded-full self-start min-h-11" onclick={saveRecovery}>Download recovery file</ZenButton>
+            <label class="flex items-center gap-2 min-h-11 text-sm {recoverySaved ? '' : 'opacity-50'}">
+              <input type="checkbox" bind:checked={recoveryAck} disabled={!recoverySaved} class="w-4 h-4" /> I stored the recovery file somewhere private
+            </label>
+          </div>
+          {#if txState === 'checking'}
+            <p class="text-sm" role="status">Checking whether your campaign was created… Do not send again until this finishes.</p>
+            <div class="flex flex-wrap items-center gap-3">
+              <ZenButton variant="secondary" class="rounded-full min-h-11" onclick={recheck} disabled={!!busy}>{busy || 'Check again'}</ZenButton>
+              {#if env.PUBLIC_EXPLORER_TX_URL && sentTx}<a href="{env.PUBLIC_EXPLORER_TX_URL}{sentTx}" target="_blank" rel="noopener noreferrer" class="text-sm">View it on the explorer</a>{/if}
+            </div>
+          {:else if txState === 'settling'}
+            <p class="text-sm" role="status">That attempt was refunded. Making sure an earlier attempt did not land (about 90 seconds) before these links can change…</p>
+          {:else if txState === 'mismatch'}
+            <p class="text-sm text-zen-error" role="alert">The contract holds a campaign for these links that does not match this draft. It is not used. Generate new links.</p>
+            <ZenButton variant="secondary" class="rounded-full self-start min-h-11" onclick={startOver}>Generate new links</ZenButton>
+          {:else if txState === 'unclear'}
+            <p class="text-sm text-zen-error" role="alert">
+              The transaction ran but did not create this campaign, and we could not confirm your tokens came back. Do not send again; check it on the explorer first.
+            </p>
+            {#if env.PUBLIC_EXPLORER_TX_URL && sentTx}<a href="{env.PUBLIC_EXPLORER_TX_URL}{sentTx}" target="_blank" rel="noopener noreferrer" class="text-sm">View it on the explorer</a>{/if}
+          {:else}
+            <div class="mt-4 pt-6 border-t-[0.5px] border-zen-border-subtle flex items-center {pinned ? 'justify-end' : 'justify-between'} gap-3">
+              {#if !pinned}<ZenButton variant="ghost" class="rounded-full min-h-11" onclick={() => (draft = null)} disabled={!!busy}>Edit recipients</ZenButton>{/if}
+              <ZenButton variant="primary" class="rounded-full min-h-11" disabled={!recoveryAck || !!busy || !!sentTx || !sendable.ok} onclick={create}>{busy || 'Create campaign'}</ZenButton>
+            </div>
+          {/if}
+        {/if}
+
+        {#if error}<p class="text-sm text-zen-error" role="alert">{error}</p>{/if}
+
+        <details class="group mt-6 text-sm text-zen-fg-muted">
+          <summary class="flex items-center gap-2 min-h-11 cursor-pointer list-none hover:text-zen-fg">
+            Who sees the emails?
+            <ChevronDown class="w-4 h-4 transition-transform group-open:rotate-180" aria-hidden="true" />
+          </summary>
+          <p class="mt-1">
+            Emails never go on chain. When someone claims, our verifier, operated by Trion Labs, sees their email once to
+            check it matches the claim.
+          </p>
+        </details>
+      </section>
+
+      <!-- What the first recipient will see (desktop only): the claim card in miniature -->
+      <aside class="hidden lg:block lg:flex-1 lg:sticky lg:top-24" aria-label="Preview of a claim">
+        <p class="mb-4 ml-1 text-xs font-semibold uppercase tracking-wider text-zen-fg-subtle">What they see</p>
+        <ZenCard variant="glass" padding="lg" radius="3xl">
+          <div class="flex flex-col items-center text-center gap-3" aria-hidden="true">
+            <div class="w-14 h-14 rounded-full bg-zen-primary/10 text-zen-primary flex items-center justify-center"><Mail class="w-6 h-6" /></div>
+            <span class="text-4xl font-bold tracking-tighter tabular-nums">{previewAmount} USDC</span>
+            <span class="text-sm text-zen-fg-muted">is waiting for you</span>
+            <span class="text-xs text-zen-fg-subtle">From <span class="font-mono">{account ?? 'your account'}</span>{#if previewDeadline} · claim by {previewDeadline}{/if}</span>
+          </div>
+        </ZenCard>
+      </aside>
+    </div>
+  {/if}
+</div>
