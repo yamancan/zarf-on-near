@@ -1,89 +1,45 @@
 <script lang="ts">
+  import '../app.css';
+  import { onMount } from 'svelte';
+  import { page } from '$app/state';
   import ZarfMark from '$lib/ZarfMark.svelte';
+  import ThemeToggle from '$lib/zen/components/ThemeToggle.svelte';
+  import ZenBadge from '$lib/zen/components/ZenBadge.svelte';
+  import { themeStore } from '$lib/zen/stores/themeStore.svelte';
+
   let { children } = $props();
+  const NAV = [
+    { href: '/create', label: 'Send', wide: true },
+    { href: '/campaigns', label: 'Campaigns', wide: true },
+    { href: '/privacy', label: 'Privacy', wide: false },
+  ];
+
+  onMount(() => themeStore.restore());
 </script>
 
-<header><a class="brand" href="/" aria-label="Zarf home"><ZarfMark /><span>Zarf</span></a></header>
-<main>{@render children()}</main>
-<footer class="muted"><a href="/privacy">Privacy and terms</a></footer>
+<div class="min-h-screen font-sans bg-zen-bg text-zen-fg flex flex-col">
+  <!-- ZarfNavbar (main repo), with the mark alone, no tile; sized to read like zarf.to's lockup -->
+  <header class="h-16 bg-zen-bg/80 backdrop-blur-xl border-b-[0.5px] border-zen-border-subtle flex items-center justify-between px-4 sm:px-6 sticky top-0 z-50">
+    <div class="flex items-center gap-3">
+      <a href="/" class="flex items-center gap-2 min-h-11 opacity-90 hover:opacity-100 transition-opacity no-underline" aria-label="Zarf home">
+        <ZarfMark size={18} />
+        <span class="text-base font-semibold tracking-tight">zarf.to</span>
+      </a>
+      <ZenBadge size="sm">NEAR</ZenBadge>
+    </div>
+    <nav class="flex items-center gap-1 sm:gap-2" aria-label="Main">
+      {#each NAV as n (n.href)}
+        <a
+          href={n.href}
+          aria-current={page.url.pathname.startsWith(n.href) ? 'page' : undefined}
+          class="{n.wide ? 'hidden sm:inline-flex' : 'inline-flex'} items-center min-h-11 px-2 text-xs font-medium tracking-wide no-underline transition-colors
+            {page.url.pathname.startsWith(n.href) ? 'text-zen-fg' : 'text-zen-fg-muted hover:text-zen-fg'}">{n.label}</a
+        >
+      {/each}
+      <div class="w-px h-4 bg-zen-border mx-1" aria-hidden="true"></div>
+      <ThemeToggle />
+    </nav>
+  </header>
 
-<style>
-  :global(:root) {
-    /* Paper Porcelain (light): Soot text on paper; Glass Porcelain (dark): Porcelain on fume. */
-    --bg: #f8f8fa;
-    --fg: #0b0a13;
-    --muted: #78716c;
-    --line: #8a8580; /* form borders: 3:1 or more on the page (WCAG 1.4.11) */
-    --accent: #0b0a13;
-    --danger: #b91c1c;
-    color-scheme: light dark;
-  }
-  @media (prefers-color-scheme: dark) {
-    :global(:root) {
-      --bg: #0a0a0b;
-      --fg: #dcdde5;
-      --muted: #a8a29e;
-      --line: #78716c;
-      --accent: #dcdde5;
-      --danger: #f87171;
-    }
-  }
-  :global(body) {
-    margin: 0;
-    background: var(--bg);
-    color: var(--fg);
-    font: 16px/1.5 system-ui, sans-serif;
-  }
-  header {
-    max-width: 28rem;
-    margin: 0 auto;
-    padding: 1.25rem 16px 0;
-  }
-  .brand {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    text-decoration: none;
-    font: 600 1.05rem/1 'Saira', ui-sans-serif, system-ui, sans-serif;
-    letter-spacing: -0.02em;
-  }
-  :global(a) { color: var(--fg); }
-  :global(h1), :global(h2), :global(h3) { font-family: 'Saira', ui-sans-serif, system-ui, sans-serif; font-weight: 600; letter-spacing: -0.01em; }
-  main {
-    max-width: 28rem;
-    margin: 0 auto;
-    padding: 1.5rem 16px 2rem;
-  }
-  footer {
-    max-width: 28rem;
-    margin: 0 auto;
-    padding: 0 16px 2rem;
-  }
-  :global(h1) { font-size: 1.5rem; margin: 0 0 0.25rem; }
-  :global(h2) { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
-  :global(.muted) { color: var(--muted); font-size: 0.875rem; }
-  :global(.error) { color: var(--danger); }
-  :global(:focus-visible) { outline: 2px solid var(--fg); outline-offset: 2px; }
-  :global(code) { word-break: break-all; }
-  :global(input[type='text']) {
-    width: 100%;
-    box-sizing: border-box;
-    padding: 0.75rem;
-    font: inherit;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: transparent;
-    color: inherit;
-  }
-  :global(button) {
-    padding: 0.75rem 1rem;
-    font: inherit;
-    border-radius: 8px;
-    border: 1px solid var(--accent);
-    background: transparent;
-    color: var(--fg);
-    cursor: pointer;
-  }
-  :global(button.primary) { background: var(--accent); color: var(--bg); width: 100%; }
-  :global(button:disabled) { opacity: 0.4; cursor: not-allowed; }
-</style>
+  <main id="main" class="flex-1 flex flex-col">{@render children()}</main>
+</div>

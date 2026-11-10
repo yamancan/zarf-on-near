@@ -59,7 +59,7 @@ async function run(final) {
     body: JSON.stringify({ status: 'paid', tx_hash: '6zgh2u9DqHHiXzdy9ouTP7oGky2T4nugqzqt9wJZwNFm' }) }));
 
   await p.goto(base + v.links.main[0]);
-  await p.getByLabel('USDC on another chain').check();
+  await p.getByText('Another chain', { exact: true }).click();
   await p.waitForSelector('#chain');
   assert((await p.locator('#chain option').first().innerText()) === 'USDC on Base', 'Base is first');
   await p.fill('#addr', RECIPIENT.slice(0, -1) + 'D'); // checksum typo

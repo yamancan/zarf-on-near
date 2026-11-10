@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import vectors from '../../../spec/vectors.json';
-import { accountExists, canRetry, ClaimError, describeError, getCampaign, getClaimState, outcomeAfterRelay, requestSignature, settleClaim, submitClaim, type ClaimState } from './services';
+import { accountExists, canRetry, ClaimError, describeCheckError, describeError, getCampaign, getClaimState, outcomeAfterRelay, requestSignature, settleClaim, submitClaim, type ClaimState } from './services';
 
 const reply = (body: unknown, status = 200) => vi.fn(async () => new Response(JSON.stringify(body), { status }));
 afterEach(() => vi.unstubAllGlobals());
@@ -154,5 +154,16 @@ describe('accountExists (view_account)', () => {
     expect(await code(accountExists('https://rpc.test', 'alice.testnet'))).toBe('RPC_ERROR');
     vi.stubGlobal('fetch', reply({}, 503));
     expect(await code(accountExists('https://rpc.test', 'alice.testnet'))).toBe('HTTP_503');
+  });
+});
+
+describe('describeCheckError (claim page, before any claim)', () => {
+  it('a network or RPC failure says the page could not check, not that a claim failed', () => {
+    for (const e of [new ClaimError('HTTP_503'), new ClaimError('RPC_ERROR'), new TypeError('Failed to fetch')]) {
+      expect(describeCheckError(e)).toBe('We could not check this claim link on NEAR right now. Nothing was claimed.');
+    }
+  });
+  it('keeps the set-up message for missing config', () => {
+    expect(describeCheckError(new ClaimError('NOT_CONFIGURED:PUBLIC_NEAR_RPC_URL'))).toMatch(/not fully set up/);
   });
 });

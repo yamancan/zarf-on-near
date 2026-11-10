@@ -119,6 +119,12 @@ export function describeError(e: unknown): string {
   return MESSAGES[code] ?? `The claim did not go through (${code}).`;
 }
 
+/** Why the claim page could not read the chain before any claim: never 'the claim did not go through'. */
+export function describeCheckError(e: unknown): string {
+  if (e instanceof ClaimError && e.code.startsWith('NOT_CONFIGURED:')) return describeError(e);
+  return 'We could not check this claim link on NEAR right now. Nothing was claimed.';
+}
+
 export type ClaimState = 'unclaimed' | 'pending' | 'claimed';
 
 // Optimistic: the freshest state; a lagging `final` read right after the tx would say "unclaimed".
