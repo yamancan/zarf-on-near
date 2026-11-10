@@ -1,6 +1,7 @@
 // Network calls the claim app makes. Every endpoint comes from config; none is hard-coded.
 
 export interface Campaign {
+  sender: string;
   merkle_root: string;
   deadline_ns: string;
 }
@@ -66,6 +67,9 @@ export async function accountExists(rpcUrl: string | undefined, accountId: strin
   throw new ClaimError('RPC_ERROR');
 }
 
+export const getNetwork = async (rpcUrl: string | undefined, contractId: string | undefined) =>
+  nearView<string>(need(rpcUrl, 'PUBLIC_NEAR_RPC_URL'), need(contractId, 'PUBLIC_CONTRACT_ID'), 'get_network', {});
+
 export const getCampaign = async (rpcUrl: string | undefined, contractId: string | undefined, campaignId: string) =>
   nearView<Campaign | null>(need(rpcUrl, 'PUBLIC_NEAR_RPC_URL'), need(contractId, 'PUBLIC_CONTRACT_ID'), 'get_campaign', { campaign_id: campaignId });
 
@@ -101,11 +105,17 @@ const MESSAGES: Record<string, string> = {
   RATE_LIMITED: 'Too many attempts. Wait a minute and try again.',
   LINK_MISMATCH: 'This claim link does not match the campaign on chain. Ask the sender for your link again.',
   E115_TOKEN_TRANSFER_FAILED: 'The transfer failed and your claim is open again. Open your claim link to try again.',
+  INTENTS_QUOTE_EXPIRES_FIRST: 'Your cross-chain quote expired. Open your claim link to get a new one and sign in again.',
+  INTENTS_NOT_PENDING: 'This cross-chain quote was already used. Open your claim link to get a new one.',
+  QUOTE_EXPIRED: 'Your cross-chain quote expired. Open your claim link to get a new one and sign in again.',
 };
 
 export function describeError(e: unknown): string {
   const code = e instanceof ClaimError ? e.code : 'UNEXPECTED';
   if (code.startsWith('NOT_CONFIGURED:')) return `This site is not fully set up yet (${code.slice(15)}).`;
+  if (!MESSAGES[code] && code.startsWith('INTENTS_')) {
+    return "The cross-chain quote doesn't match what you chose. Nothing was sent. Open your claim link to get a new one.";
+  }
   return MESSAGES[code] ?? `The claim did not go through (${code}).`;
 }
 

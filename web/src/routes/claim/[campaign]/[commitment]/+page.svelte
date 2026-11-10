@@ -7,7 +7,9 @@
     parseLinkFragment, saveAttempt, type LinkSecret,
   } from '$lib/claim';
   import { rootFromProof } from '$lib/merkle';
-  import { accountExists, ClaimError, describeError, getCampaign, getClaimState } from '$lib/services';
+  import { accountExists, ClaimError, describeError, getCampaign, getClaimState, getNetwork } from '$lib/services';
+  import { getQuote, lossBps, MAX_LOSS_BPS, QUOTE_LIFETIME_MS, QuoteError, type PayoutAsset } from '$lib/intents';
+  import PayoutPicker from '$lib/PayoutPicker.svelte';
   import { formatAmount } from '$lib/create/recipients';
   import { createImplicitAccount, keyFile, type ImplicitAccount } from '$lib/implicit';
 
@@ -22,7 +24,11 @@
   // Every state but 'ok' replaces the form: nothing is asked of the recipient that cannot succeed.
   let check = $state<'checking' | 'ok' | 'mismatch' | 'unknown' | 'ended' | 'claimed' | 'pending' | 'error'>('checking');
   let loaded = $state(false);
-  let mode = $state<'existing' | 'new'>('existing');
+  let mode = $state<'existing' | 'new' | 'chain'>('existing');
+  let network = $state('');
+  let sender = $state('');
+  let payout = $state<{ asset: PayoutAsset; recipient: string } | null>(null);
+  let busy = $state('');
   let typed = $state('');
   let implicit = $state<ImplicitAccount | null>(null);
   let exported = $state(false);
@@ -39,7 +45,8 @@
     !!acct && acct.id === destination && (acct.state === 'found' || (acct.state === 'missing' && dest.kind === 'implicit' && unfundedAck)),
   );
   const ready = $derived(
-    !!link && check === 'ok' && isValidAccountId(destination) && (mode === 'existing' ? accountOk : exported && confirmed),
+    !!link && check === 'ok' && !busy &&
+      (mode === 'chain' ? !!payout : isValidAccountId(destination) && (mode === 'existing' ? accountOk : exported && confirmed)),
   );
 
   $effect(() => {
@@ -75,11 +82,16 @@
 
   async function checkLink(l: LinkSecret) {
     try {
-      const c = await getCampaign(env.PUBLIC_NEAR_RPC_URL, env.PUBLIC_CONTRACT_ID, campaign);
+      const [c, net] = await Promise.all([
+        getCampaign(env.PUBLIC_NEAR_RPC_URL, env.PUBLIC_CONTRACT_ID, campaign),
+        getNetwork(env.PUBLIC_NEAR_RPC_URL, env.PUBLIC_CONTRACT_ID),
+      ]);
+      network = net;
       if (!c) {
         check = 'unknown';
         return;
       }
+      sender = c.sender;
       deadline = new Date(Number(BigInt(c.deadline_ns) / 1_000_000n)).toLocaleString();
       if ((await rootFromProof(commitment, l.amount, l.proof)) !== c.merkle_root) {
         check = 'mismatch';
@@ -124,11 +136,29 @@
       return;
     }
     const attemptId = newAttemptId();
-    saveAttempt({ campaign, commitment, ...link!, destination, attemptId });
+    let to = destination;
+    let intents;
+    if (mode === 'chain') {
+      // One real quote per sign-in: its deposit address is the signed destination, never reused.
+      const { asset, recipient } = payout!;
+      const requestDeadline = new Date(Date.now() + QUOTE_LIFETIME_MS).toISOString();
+      busy = 'Getting your quote…';
+      try {
+        const q = await getQuote(false, { amount: link!.amount, assetId: asset.assetId, recipient, refundTo: sender, deadline: requestDeadline });
+        if (lossBps(link!.amount, q.minAmountOut, asset.decimals) > MAX_LOSS_BPS) throw new QuoteError('the price moved too far. Try again.');
+        to = q.depositAddress!;
+        intents = { chainName: asset.chain.name, assetId: asset.assetId, recipient, refundTo: sender, requestDeadline, amountOutFormatted: q.amountOutFormatted };
+      } catch (e) {
+        error = e instanceof QuoteError ? `1Click refused this payout: ${e.message}` : 'Cross-chain quotes are unavailable right now. Try again, or claim to a NEAR account.';
+        busy = '';
+        return;
+      }
+    }
+    saveAttempt({ campaign, commitment, ...link!, destination: to, attemptId, intents });
     location.href = googleAuthUrl({
       clientId,
       redirectUri: `${location.origin}/auth/google`,
-      nonce: await destinationNonce(destination),
+      nonce: await destinationNonce(to),
       state: claimState(campaign, commitment, attemptId),
     });
   }
@@ -165,14 +195,15 @@
   <p class="muted">Claim by {deadline}.</p>
 
   <h2>Where should they go?</h2>
-  {#if implicitEnabled}
-    <p>
-      <label><input type="radio" bind:group={mode} value="existing" /> I have a NEAR account</label><br />
-      <label><input type="radio" bind:group={mode} value="new" /> Create one for me</label>
-    </p>
-  {/if}
+  <p>
+    <label><input type="radio" bind:group={mode} value="existing" /> My NEAR account</label><br />
+    <label><input type="radio" bind:group={mode} value="chain" /> USDC on another chain</label>
+    {#if implicitEnabled}<br /><label><input type="radio" bind:group={mode} value="new" /> Create a NEAR account for me</label>{/if}
+  </p>
 
-  {#if mode === 'existing'}
+  {#if mode === 'chain'}
+    <PayoutPicker {network} amount={link!.amount} refundTo={sender} bind:choice={payout} />
+  {:else if mode === 'existing'}
     <label for="dest">NEAR account</label>
     <input
       id="dest"
@@ -223,13 +254,16 @@
     </label>
   {/if}
 
-  {#if isValidAccountId(destination)}
+  {#if mode === 'chain' && payout}
+    <p>Funds go to: <code>{payout.recipient}</code> on {payout.asset.chain.name}</p>
+  {:else if mode !== 'chain' && isValidAccountId(destination)}
     <p>Funds go to: <code>{destination}</code></p>
   {/if}
   <p class="muted">
     Our verifier sees your email to check it matches this claim. It is never put on chain. Your sign-in is bound to
     the account above, so it cannot be used to pay anyone else.
   </p>
+  {#if busy}<p class="muted" role="status">{busy}</p>{/if}
   <button class="google" disabled={!ready} onclick={signIn}>
     <picture>
       <source srcset="/google/signin-dark.svg" media="(prefers-color-scheme: dark)" />

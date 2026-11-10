@@ -112,8 +112,19 @@ export interface Attempt {
   salt: string;
   amount: string;
   proof: string[];
-  destination: string;
+  destination: string; // for a cross-chain payout: the 1Click deposit address
   attemptId: string;
+  intents?: PayoutAttempt;
+}
+
+/** A real 1Click quote the sign-in is bound to (its deposit address is the destination). */
+export interface PayoutAttempt {
+  chainName: string;
+  assetId: string;
+  recipient: string;
+  refundTo: string; // the campaign sender
+  requestDeadline: string; // ISO: the app refuses to start the claim after it
+  amountOutFormatted: string;
 }
 
 const KEY = 'zarf-near:attempt';
