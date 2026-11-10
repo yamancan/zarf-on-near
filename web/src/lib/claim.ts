@@ -141,3 +141,15 @@ export const clearAttempt = (store: Storage = sessionStorage) => store.removeIte
 
 /** The id_token lives in memory only: a reload means signing in again. */
 export const signedIn: { idToken: string | null } = { idToken: null };
+
+/** "17 Nov 2026, 21:55 GMT+3, 6 days left": absolute in the reader's own zone, plus what is left. */
+export function deadlineText(deadlineMs: number, nowMs: number, timeZone?: string): string {
+  const when = new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short', timeZone,
+  }).format(deadlineMs);
+  const left = deadlineMs - nowMs;
+  if (left <= 0) return when;
+  const h = Math.floor(left / 3_600_000);
+  const rest = h >= 48 ? `${Math.floor(h / 24)} days left` : h >= 1 ? `${h} hour${h === 1 ? '' : 's'} left` : 'less than an hour left';
+  return `${when}, ${rest}`;
+}

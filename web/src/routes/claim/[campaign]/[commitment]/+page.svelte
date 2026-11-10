@@ -3,7 +3,7 @@
   import { page } from '$app/state';
   import { env } from '$env/dynamic/public';
   import {
-    classifyDestination, claimState, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isValidAccountId, loadAttempt, newAttemptId,
+    classifyDestination, claimState, deadlineText, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isValidAccountId, loadAttempt, newAttemptId,
     parseLinkFragment, saveAttempt, type LinkSecret,
   } from '$lib/claim';
   import { rootFromProof } from '$lib/merkle';
@@ -92,7 +92,7 @@
         return;
       }
       sender = c.sender;
-      deadline = new Date(Number(BigInt(c.deadline_ns) / 1_000_000n)).toLocaleString();
+      deadline = deadlineText(Number(BigInt(c.deadline_ns) / 1_000_000n), Date.now());
       if ((await rootFromProof(commitment, l.amount, l.proof)) !== c.merkle_root) {
         check = 'mismatch';
         return;
@@ -191,8 +191,15 @@
 {:else if loaded && check === 'checking'}
   <p class="muted" role="status">Checking your claim…</p>
 {:else if loaded}
-  <h1><strong>{formatAmount(BigInt(link!.amount))} USDC</strong> is waiting for you</h1>
-  <p class="muted">Claim by {deadline}.</p>
+  <h1 class="amount"><strong>{formatAmount(BigInt(link!.amount))} USDC</strong> is waiting for you</h1>
+  <p>
+    From <code>{sender}</code> on NEAR {network}{network === 'mainnet' ? '' : ' (test funds, no value)'}.<br />
+    Claim by {deadline}.
+  </p>
+  <p class="muted">
+    Next: choose where the USDC goes, sign in with Google, and it arrives in about a minute. Signing in only proves
+    the email; we cannot access your Google account.
+  </p>
 
   <h2>Where should they go?</h2>
   <p>
@@ -283,6 +290,10 @@
     background: none;
     line-height: 0;
     border-radius: 4px;
+  }
+  .amount strong {
+    font-size: 2rem;
+    display: block;
   }
   .google img {
     width: 240px;

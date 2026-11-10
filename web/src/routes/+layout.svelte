@@ -42,6 +42,7 @@
     padding: 0 16px 2rem;
   }
   :global(h1) { font-size: 1.5rem; margin: 0 0 0.25rem; }
+  :global(h2) { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
   :global(.muted) { color: var(--muted); font-size: 0.875rem; }
   :global(.error) { color: var(--danger); }
   :global(code) { word-break: break-all; }

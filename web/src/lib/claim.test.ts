@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import vectors from '../../../spec/vectors.json';
 import {
-  classifyDestination, claimState, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isImplicitAccount, isValidAccountId, loadAttempt, newAttemptId,
+  classifyDestination, claimState, deadlineText, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isImplicitAccount, isValidAccountId, loadAttempt, newAttemptId,
   decodeProof, encodeProof, parseCallback, parseLinkFragment, saveAttempt, clearAttempt,
 } from './claim';
 
@@ -140,5 +140,16 @@ describe('classifyDestination', () => {
   });
   it('a lower-cased Stellar address would pass the NEAR format check, so the raw input is checked first', () => {
     expect(isValidAccountId(stellarG.toLowerCase())).toBe(true);
+  });
+});
+
+describe('deadlineText', () => {
+  const at = Date.UTC(2026, 10, 17, 21, 55);
+  it('absolute in the given zone, with the time left', () => {
+    expect(deadlineText(at, at - 6.5 * 86_400_000, 'UTC')).toBe('17 Nov 2026, 21:55 UTC, 6 days left');
+    expect(deadlineText(at, at - 5 * 3_600_000, 'UTC')).toBe('17 Nov 2026, 21:55 UTC, 5 hours left');
+    expect(deadlineText(at, at - 3_600_000, 'UTC')).toMatch(/1 hour left$/);
+    expect(deadlineText(at, at - 60_000, 'UTC')).toMatch(/less than an hour left$/);
+    expect(deadlineText(at, at + 1, 'UTC')).toBe('17 Nov 2026, 21:55 UTC');
   });
 });
