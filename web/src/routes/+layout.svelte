@@ -14,9 +14,6 @@
     { href: '/privacy', label: 'Privacy', wide: false },
   ];
 
-  // Pages not yet on Zen components keep the narrow plain column.
-  const legacy = $derived(/^\/(create|campaigns|privacy|auth)|\/receipt\/?$/.test(page.url.pathname));
-
   onMount(() => themeStore.restore());
 </script>
 
@@ -44,9 +41,5 @@
     </nav>
   </header>
 
-  {#if legacy}
-    <main id="main" class="legacy w-full max-w-md mx-auto px-4 py-8">{@render children()}</main>
-  {:else}
-    <main id="main" class="flex-1 flex flex-col">{@render children()}</main>
-  {/if}
+  <main id="main" class="flex-1 flex flex-col">{@render children()}</main>
 </div>

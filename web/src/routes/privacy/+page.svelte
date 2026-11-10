@@ -1,7 +1,10 @@
 <svelte:head><title>Privacy and terms · Zarf</title></svelte:head>
 
-<h1>Privacy and terms</h1>
-<p class="muted">Operated by Trion Labs. Contact: [CONTACT EMAIL].</p>
+<article class="prose-zarf w-full max-w-2xl mx-auto px-4 sm:px-6 py-8 md:py-12">
+<header class="mb-10 space-y-2">
+  <h1 class="text-2xl md:text-3xl font-light tracking-tight">Privacy and terms</h1>
+  <p class="text-sm md:text-base text-zen-fg-muted font-light">Operated by Trion Labs. Contact: [CONTACT EMAIL].</p>
+</header>
 
 <h2>Your email</h2>
 <p>
@@ -31,10 +34,18 @@
 
 <h2>Contact</h2>
 <p>[CONTACT EMAIL]</p>
+</article>
 
 <style>
-  h2 {
-    font-size: 1.1rem;
-    margin: 1.5rem 0 0.5rem;
+  .prose-zarf :global(h2) {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 2.5rem 0 0.75rem;
+  }
+  .prose-zarf :global(p) {
+    font-size: 0.9375rem;
+    line-height: 1.7;
+    color: var(--zen-fg-muted);
+    margin: 0 0 1rem;
   }
 </style>
