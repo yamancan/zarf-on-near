@@ -1,7 +1,7 @@
 <svelte:head><title>Privacy and terms · Zarf on NEAR</title></svelte:head>
 
 <h1>Privacy and terms</h1>
-<p class="muted">Operated by [COMPANY NAME]. Contact: [CONTACT EMAIL].</p>
+<p class="muted">Operated by Trion Labs. Contact: [CONTACT EMAIL].</p>
 
 <h2>Your email</h2>
 <p>
