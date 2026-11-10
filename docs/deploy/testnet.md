@@ -21,8 +21,8 @@ their values are never printed or stored in the repo.
 
 | Service | Version | From |
 | --- | --- | --- |
-| Web (create + claim) | `e0246f2c-95a1-4f81-8622-00f58120911d` | `a0d63d1` |
-| Verifier | `99b5d145-a15c-4bd3-9b75-190745efdeb8` | `a0d63d1` |
+| Web (create + claim) | `af1880dc` | `243ba1a` |
+| Verifier | `6c6b4286` | `243ba1a` |
 | Relayer | `eab5f60f-03e4-4ed4-9fc5-daf51d9561e5` | `29327b7` (unchanged since) |
 
 Smoke against the public URLs:
