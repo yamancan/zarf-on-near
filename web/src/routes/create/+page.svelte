@@ -354,6 +354,7 @@
 </script>
 
 <h1>Send tokens to emails</h1>
+<p class="muted"><a href="/campaigns">Your campaigns</a>: reclaim after the deadline, withdraw unused storage pre-pay.</p>
 <p class="muted">
   Each recipient claims with their Google account. Emails never go on chain; when someone claims, our verifier sees
   their email to check it matches the claim.
