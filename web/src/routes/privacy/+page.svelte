@@ -1,7 +1,7 @@
 <svelte:head><title>Privacy and terms · Zarf</title></svelte:head>
 
 <h1>Privacy and terms</h1>
-<p class="muted">Operated by Trion Labs. Contact: [CONTACT EMAIL].</p>
+<p class="muted">Operated by Trion Labs. Contact: <a href="mailto:operator@example.invalid">operator@example.invalid</a>.</p>
 
 <h2>Your email</h2>
 <p>
@@ -37,7 +37,7 @@
 </p>
 
 <h2>Contact</h2>
-<p>[CONTACT EMAIL]</p>
+<p><a href="mailto:operator@example.invalid">operator@example.invalid</a></p>
 
 <style>
   h2 {
