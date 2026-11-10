@@ -7,10 +7,11 @@
     }
 </script>
 
+<!-- Local change from the main repo: w-11/h-11 (44 px touch target) instead of w-9/h-9. -->
 <button
     onclick={toggle}
     class="
-        w-9 h-9 rounded-full
+        w-11 h-11 rounded-full
         flex items-center justify-center
         text-zen-fg-muted hover:text-zen-fg
         hover:bg-zen-fg/5
