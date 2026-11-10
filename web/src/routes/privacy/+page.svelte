@@ -14,7 +14,11 @@
   limits it keeps counters keyed by an irreversible HMAC of the email and of your IP address, never either one
   in the clear.
 </p>
-<p>We ask Google only for <code>openid</code> and <code>email</code>. We use no analytics and no third-party scripts.</p>
+<p>
+  We ask Google only for <code>openid</code> and <code>email</code>. We use no analytics. The judge page loads
+  Cloudflare Turnstile, a human check, from challenges.cloudflare.com; the claim and send pages load no third-party
+  scripts.
+</p>
 
 <h2>Testnet only</h2>
 <p>This service runs on NEAR testnet. The tokens are test funds with no value.</p>

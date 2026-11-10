@@ -12,6 +12,25 @@ export const isValidAccountId = (id: string): boolean => id.length >= 2 && id.le
 /** A NEAR implicit account: the hex of an ed25519 public key. It exists on chain only once NEAR is sent to it. */
 export const isImplicitAccount = (id: string): boolean => /^[0-9a-f]{64}$/.test(id);
 
+export type Destination =
+  | { kind: 'empty' }
+  | { kind: 'wrong'; reason: string } // not a NEAR account id: never sent to the chain
+  | { kind: 'named' | 'implicit'; id: string };
+
+/**
+ * What the recipient typed in the NEAR field, before any chain read. Foreign addresses are caught on
+ * the raw input: lower-casing would turn a Stellar or Ethereum address into a well-formed NEAR name.
+ */
+export function classifyDestination(input: string): Destination {
+  const raw = input.trim();
+  if (!raw) return { kind: 'empty' };
+  if (/^(G[A-Z2-7]{55}|M[A-Z2-7]{68})$/i.test(raw)) return { kind: 'wrong', reason: 'That looks like a Stellar address, not a NEAR account.' };
+  if (/^0x/i.test(raw)) return { kind: 'wrong', reason: 'That looks like an Ethereum address, not a NEAR account.' };
+  const id = raw.toLowerCase();
+  if (!isValidAccountId(id)) return { kind: 'wrong', reason: 'That is not a valid NEAR account name.' };
+  return { kind: isImplicitAccount(id) ? 'implicit' : 'named', id };
+}
+
 export const isCampaignId = (s: string): boolean => /^(0|[1-9]\d{0,19})$/.test(s) && BigInt(s) < 1n << 64n;
 export const isHex32 = (s: string): boolean => /^[0-9a-f]{64}$/.test(s);
 

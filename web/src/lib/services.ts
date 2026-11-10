@@ -53,6 +53,19 @@ export async function nearView<T>(rpcUrl: string, contractId: string, method: st
   return JSON.parse(new TextDecoder().decode(Uint8Array.from(res.result.result)));
 }
 
+/** view_account: true if the account exists, false on UNKNOWN_ACCOUNT; any other failure throws. */
+export async function accountExists(rpcUrl: string | undefined, accountId: string): Promise<boolean> {
+  const res = await postJson<{ result?: unknown; error?: { cause?: { name?: string } } }>(need(rpcUrl, 'PUBLIC_NEAR_RPC_URL'), {
+    jsonrpc: '2.0',
+    id: 'zarf',
+    method: 'query',
+    params: { request_type: 'view_account', finality: 'final', account_id: accountId },
+  });
+  if (res.result) return true;
+  if (res.error?.cause?.name === 'UNKNOWN_ACCOUNT') return false;
+  throw new ClaimError('RPC_ERROR');
+}
+
 export const getCampaign = async (rpcUrl: string | undefined, contractId: string | undefined, campaignId: string) =>
   nearView<Campaign | null>(need(rpcUrl, 'PUBLIC_NEAR_RPC_URL'), need(contractId, 'PUBLIC_CONTRACT_ID'), 'get_campaign', { campaign_id: campaignId });
 

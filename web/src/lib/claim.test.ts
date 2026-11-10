@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import vectors from '../../../spec/vectors.json';
 import {
-  claimState, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isImplicitAccount, isValidAccountId, loadAttempt, newAttemptId,
+  classifyDestination, claimState, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isImplicitAccount, isValidAccountId, loadAttempt, newAttemptId,
   decodeProof, encodeProof, parseCallback, parseLinkFragment, saveAttempt, clearAttempt,
 } from './claim';
 
@@ -119,5 +119,26 @@ describe('attempt storage', () => {
     saveAttempt(a, s);
     s.setItem('zarf-near:attempt', '{');
     expect(loadAttempt(s)).toBeNull();
+  });
+});
+
+describe('classifyDestination', () => {
+  const stellarG = 'GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN';
+  it('names and implicit ids, trimmed and lower-cased', () => {
+    expect(classifyDestination('  Alice.Testnet ')).toEqual({ kind: 'named', id: 'alice.testnet' });
+    expect(classifyDestination('AB'.repeat(32))).toEqual({ kind: 'implicit', id: 'ab'.repeat(32) });
+    expect(classifyDestination(' ')).toEqual({ kind: 'empty' });
+  });
+  it.each([
+    [stellarG, /Stellar/], [stellarG.toLowerCase(), /Stellar/], ['M' + 'A'.repeat(68), /Stellar/],
+    ['0x' + 'ab'.repeat(20), /Ethereum/], ['0X' + 'AB'.repeat(20), /Ethereum/],
+    ['alice..testnet', /not a valid/], ['a', /not a valid/],
+  ])('refuses %s', (input, why) => {
+    const d = classifyDestination(input);
+    expect(d.kind).toBe('wrong');
+    expect((d as { reason: string }).reason).toMatch(why);
+  });
+  it('a lower-cased Stellar address would pass the NEAR format check, so the raw input is checked first', () => {
+    expect(isValidAccountId(stellarG.toLowerCase())).toBe(true);
   });
 });

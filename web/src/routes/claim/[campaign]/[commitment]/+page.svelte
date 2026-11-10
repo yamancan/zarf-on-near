@@ -3,11 +3,11 @@
   import { page } from '$app/state';
   import { env } from '$env/dynamic/public';
   import {
-    claimState, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isValidAccountId, loadAttempt, newAttemptId,
+    classifyDestination, claimState, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isValidAccountId, loadAttempt, newAttemptId,
     parseLinkFragment, saveAttempt, type LinkSecret,
   } from '$lib/claim';
   import { rootFromProof } from '$lib/merkle';
-  import { ClaimError, describeError, getCampaign, getClaimState } from '$lib/services';
+  import { accountExists, ClaimError, describeError, getCampaign, getClaimState } from '$lib/services';
   import { formatAmount } from '$lib/create/recipients';
   import { createImplicitAccount, keyFile, type ImplicitAccount } from '$lib/implicit';
 
@@ -30,8 +30,37 @@
   let error = $state('');
   let deadline = $state('loading…');
 
-  const destination = $derived(mode === 'existing' ? typed.trim().toLowerCase() : (implicit?.accountId ?? ''));
-  const ready = $derived(!!link && check === 'ok' && isValidAccountId(destination) && (mode === 'existing' || (exported && confirmed)));
+  const dest = $derived(classifyDestination(typed));
+  const destination = $derived(mode === 'existing' ? (dest.kind === 'named' || dest.kind === 'implicit' ? dest.id : '') : (implicit?.accountId ?? ''));
+  // The typed account, read on chain before sign-in: a typo must never be paid (NEAR account-validation guide).
+  let acct = $state<{ id: string; state: 'checking' | 'found' | 'missing' | 'error' } | null>(null);
+  let unfundedAck = $state(false);
+  const accountOk = $derived(
+    !!acct && acct.id === destination && (acct.state === 'found' || (acct.state === 'missing' && dest.kind === 'implicit' && unfundedAck)),
+  );
+  const ready = $derived(
+    !!link && check === 'ok' && isValidAccountId(destination) && (mode === 'existing' ? accountOk : exported && confirmed),
+  );
+
+  $effect(() => {
+    const id = mode === 'existing' ? destination : '';
+    unfundedAck = false;
+    if (!id) {
+      acct = null;
+      return;
+    }
+    acct = { id, state: 'checking' };
+    const t = setTimeout(async () => {
+      let state: 'found' | 'missing' | 'error';
+      try {
+        state = (await accountExists(env.PUBLIC_NEAR_RPC_URL, id)) ? 'found' : 'missing';
+      } catch {
+        state = 'error';
+      }
+      if (acct?.id === id) acct = { id, state }; // a later keystroke owns the field now
+    }, 400);
+    return () => clearTimeout(t);
+  });
 
   onMount(() => {
     const prev = loadAttempt();
@@ -144,18 +173,41 @@
   {/if}
 
   {#if mode === 'existing'}
+    <label for="dest">NEAR account</label>
     <input
+      id="dest"
       type="text"
       bind:value={typed}
       placeholder="alice.testnet"
       autocomplete="off"
       autocapitalize="off"
       spellcheck="false"
-      aria-label="NEAR account"
+      aria-invalid={dest.kind === 'wrong' || acct?.state === 'missing'}
+      aria-describedby="dest-note"
     />
-    {#if typed && !isValidAccountId(destination)}
-      <p class="error">That is not a valid NEAR account name.</p>
-    {/if}
+    <div id="dest-note">
+      {#if dest.kind === 'wrong'}
+        <p class="error" role="alert">{dest.reason}</p>
+      {:else if acct?.state === 'checking'}
+        <p class="muted" role="status">Checking <code>{acct.id}</code>…</p>
+      {:else if acct?.state === 'found'}
+        <p role="status">Account found: <code>{acct.id}</code></p>
+      {:else if acct?.state === 'missing' && dest.kind === 'named'}
+        <p class="error" role="alert">There is no NEAR account called <code>{acct.id}</code>. Check the spelling.</p>
+      {:else if acct?.state === 'missing'}
+        <label>
+          <input type="checkbox" bind:checked={unfundedAck} />
+          This account is not on chain yet. Only the holder of its private key can use these funds.
+        </label>
+      {:else if acct?.state === 'error'}
+        <p class="error" role="alert">Could not check this account right now. Try again in a minute.</p>
+      {/if}
+      <p class="muted">
+        Your account on NEAR testnet, like <code>alice.testnet</code>. No NEAR account yet?
+        <a href="https://docs.near.org/getting-started/create-account" target="_blank" rel="noopener noreferrer">Create a free testnet account</a>
+        (about a minute), then come back to this tab. Your claim stays open until the deadline.
+      </p>
+    </div>
   {:else if !implicit}
     <button onclick={create}>Create a NEAR account in this browser</button>
   {:else}
@@ -178,7 +230,28 @@
     Our verifier sees your email to check it matches this claim. It is never put on chain. Your sign-in is bound to
     the account above, so it cannot be used to pay anyone else.
   </p>
-  <button class="primary" disabled={!ready} onclick={signIn}>Continue with Google</button>
+  <button class="google" disabled={!ready} onclick={signIn}>
+    <picture>
+      <source srcset="/google/signin-dark.svg" media="(prefers-color-scheme: dark)" />
+      <img src="/google/signin-light.svg" alt="Sign in with Google" width="180" height="40" />
+    </picture>
+  </button>
 {/if}
 
 {#if error}<p class="error" role="alert">{error}</p>{/if}
+
+<style>
+  /* Google's pre-approved asset, unchanged; the off state only lowers its opacity (branding guidelines). */
+  .google {
+    display: block;
+    padding: 0;
+    border: 0;
+    background: none;
+    line-height: 0;
+    border-radius: 4px;
+  }
+  .google img {
+    width: 240px;
+    height: auto;
+  }
+</style>

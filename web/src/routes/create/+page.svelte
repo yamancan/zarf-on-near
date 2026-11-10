@@ -430,6 +430,11 @@
   <p class="muted">Recipients can claim until then. After it, you can reclaim whatever is left.</p>
 
   <h2>3. Wallet</h2>
+  <p class="muted">
+    You need a NEAR testnet account and test USDC:
+    <a href="https://docs.near.org/getting-started/faucet" target="_blank" rel="noopener noreferrer">NEAR testnet faucet</a> ·
+    <a href="https://faucet.circle.com" target="_blank" rel="noopener noreferrer">Circle USDC faucet</a> (choose NEAR Testnet).
+  </p>
   {#if pinned && !wrongAccount}
     <p>Sending from <code>{account}</code>. This campaign is tied to this account until it resolves.</p>
   {:else}

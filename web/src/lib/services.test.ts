@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import vectors from '../../../spec/vectors.json';
-import { canRetry, ClaimError, describeError, getCampaign, getClaimState, outcomeAfterRelay, requestSignature, settleClaim, submitClaim, type ClaimState } from './services';
+import { accountExists, canRetry, ClaimError, describeError, getCampaign, getClaimState, outcomeAfterRelay, requestSignature, settleClaim, submitClaim, type ClaimState } from './services';
 
 const reply = (body: unknown, status = 200) => vi.fn(async () => new Response(JSON.stringify(body), { status }));
 afterEach(() => vi.unstubAllGlobals());
@@ -135,4 +135,24 @@ describe('canRetry (no "try again" when it cannot help)', () => {
     expect(canRetry(new ClaimError(c))).toBe(true);
   });
   it('an unexpected error keeps the hint', () => expect(canRetry(new Error('x'))).toBe(true));
+});
+
+describe('accountExists (view_account)', () => {
+  it('true when the account exists', async () => {
+    const f = reply({ jsonrpc: '2.0', result: { amount: '1' } });
+    vi.stubGlobal('fetch', f);
+    expect(await accountExists('https://rpc.test', 'alice.testnet')).toBe(true);
+    const sent = JSON.parse((f.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
+    expect(sent.params).toEqual({ request_type: 'view_account', finality: 'final', account_id: 'alice.testnet' });
+  });
+  it('false only on UNKNOWN_ACCOUNT', async () => {
+    vi.stubGlobal('fetch', reply({ jsonrpc: '2.0', error: { name: 'HANDLER_ERROR', cause: { name: 'UNKNOWN_ACCOUNT' } } }));
+    expect(await accountExists('https://rpc.test', 'nobody.testnet')).toBe(false);
+  });
+  it('throws on any other failure, so the page never says "not found" for an outage', async () => {
+    vi.stubGlobal('fetch', reply({ jsonrpc: '2.0', error: { name: 'HANDLER_ERROR', cause: { name: 'TIMEOUT_ERROR' } } }));
+    expect(await code(accountExists('https://rpc.test', 'alice.testnet'))).toBe('RPC_ERROR');
+    vi.stubGlobal('fetch', reply({}, 503));
+    expect(await code(accountExists('https://rpc.test', 'alice.testnet'))).toBe('HTTP_503');
+  });
 });
