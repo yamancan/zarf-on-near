@@ -36,6 +36,22 @@
         "PUBLIC_TOKEN_ID": "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af",
         "PUBLIC_CLAIM_ORIGIN": ""
       }
+    },
+    // Mainnet, prepared, not deployed (docs/deploy/mainnet-hosting.md). Empty PUBLIC_CONTRACT_ID makes
+    // every page say the site is not set up yet. Token: Circle USDC on NEAR mainnet.
+    "mainnet": {
+      "name": "zarf-near-claim",
+      "vars": {
+        "PUBLIC_GOOGLE_CLIENT_ID": "",
+        "PUBLIC_IMPLICIT_ACCOUNTS": "",
+        "PUBLIC_VERIFIER_URL": "https://zarf-near-verifier.sparkling-queen-5e77.workers.dev",
+        "PUBLIC_RELAYER_URL": "https://zarf-near-relayer.sparkling-queen-5e77.workers.dev",
+        "PUBLIC_NEAR_RPC_URL": "https://free.rpc.fastnear.com",
+        "PUBLIC_CONTRACT_ID": "",
+        "PUBLIC_EXPLORER_TX_URL": "https://nearblocks.io/txns/",
+        "PUBLIC_TOKEN_ID": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+        "PUBLIC_CLAIM_ORIGIN": ""
+      }
     }
   }
 }

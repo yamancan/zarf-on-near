@@ -32,6 +32,14 @@
       // Hosted origin only; for a local claim app add it with --var CLAIM_ORIGINS:...
       "vars": { "GOOGLE_CLIENT_ID": "", "CLAIM_ORIGINS": "https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev", "CONTRACT_ID": "zarf-near-1112.testnet", "NEAR_RPC_URL": "https://test.rpc.fastnear.com" },
       "ratelimits": [{ "name": "PER_IP", "namespace_id": "2003", "simple": { "limit": 20, "period": 60 } }]
+    },
+    // Mainnet, prepared, not deployed (docs/deploy/mainnet-hosting.md). `name` keeps the worker
+    // zarf-near-verifier (no -mainnet suffix). Empty CONTRACT_ID / GOOGLE_CLIENT_ID fail closed.
+    "mainnet": {
+      "name": "zarf-near-verifier",
+      "secrets": { "required": ["SIGNER_SEED"] },
+      "vars": { "GOOGLE_CLIENT_ID": "", "CLAIM_ORIGINS": "https://zarf-near-claim.sparkling-queen-5e77.workers.dev", "CONTRACT_ID": "", "NEAR_RPC_URL": "https://free.rpc.fastnear.com" },
+      "ratelimits": [{ "name": "PER_IP", "namespace_id": "2003", "simple": { "limit": 20, "period": 60 } }]
     }
   }
 }
