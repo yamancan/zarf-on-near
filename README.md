@@ -63,6 +63,10 @@ Read this before using it with real money.
   deposit address. 1Click's status for that address is public, so the claim can be linked to the
   destination address. Payout assets are pinned to Circle USDC on Base, Arbitrum and Ethereum, and
   the verifier refuses a quote that could lose more than 5% or refunds anywhere but the sender.
+  If the bridge does not complete the payout by its deadline, it refunds the campaign sender on
+  NEAR. A payout that ends in the bridge's FAILED state is not documented as refunded: the page
+  tells the recipient to contact the sender, who can ask NEAR Intents support with the deposit
+  address.
 - **Unclaimed funds go back to the sender** with `reclaim` after the campaign deadline.
 - **Storage is pre-paid by the sender** in NEAR (`prepay_deposit`): the campaign entry plus storage
   for each claim. The unused reservation returns to the sender's free pre-pay on `reclaim`, and

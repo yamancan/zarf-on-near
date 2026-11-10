@@ -83,7 +83,9 @@ KNOWN_DEPOSIT_TX | PROCESSING | SUCCESS | INCOMPLETE_DEPOSIT | REFUNDED | FAILED
 - **Refund destination (decided): back to the campaign sender on NEAR.**
   `refundType: ORIGIN_CHAIN`, `refundTo = get_campaign(campaign_id).sender`. The page reads
   it from the contract view for the quote; the verifier reads it from chain itself and
-  never from the request. A failed swap returns the USDC to the payer, who can pay again.
+  never from the request. If the bridge does not complete the payout by the request deadline,
+  it refunds the payer on NEAR (`REFUNDED`), who can pay again. 1Click does not document a
+  refund for the `FAILED` state.
   Nothing depends on a key the recipient may not hold: an exchange deposit address has no
   withdrawable Intents account, so the earlier `INTENTS` refund could strand funds for good.
   Checked 2026-11-11 with keyless dry quotes: an existing named account (`intents.near`) as
@@ -134,7 +136,7 @@ KNOWN_DEPOSIT_TX | PROCESSING | SUCCESS | INCOMPLETE_DEPOSIT | REFUNDED | FAILED
 | 1Click `KNOWN_DEPOSIT_TX` / `PROCESSING` | step 10 | "Paid on NEAR, swapping to {chain}…" with the NEAR tx link | keep polling. After 10 min: "Still processing", keep the page link |
 | `SUCCESS` | step 10 | "Paid on {chain}": `amountOutFormatted` USDC, `destinationChainTxHashes[0].explorerUrl` | done; clear the attempt |
 | `REFUNDED` | step 10 | "The swap failed and the funds went back to the sender. Ask them to send again." + `refundReason` | the sender re-funds; this commitment is already claimed on chain |
-| `INCOMPLETE_DEPOSIT` / `FAILED` | step 10 | "The swap failed": the deposit address and NEAR tx hash, for support | 1Click support. Not expected, because the deposit is exactly `amount` |
+| `INCOMPLETE_DEPOSIT` / `FAILED` | step 10 | "Not delivered": the deposit address and NEAR tx hash, for support | the recipient contacts the sender, who can ask NEAR Intents support with the deposit address; no refund is documented for `FAILED`. Not expected, because the deposit is exactly `amount` |
 
 The attempt in `sessionStorage` additionally holds `{depositAddress, destinationAsset,
 recipient, campaignSender, requestDeadline}`. A reload after sign-in keeps the quote but needs
