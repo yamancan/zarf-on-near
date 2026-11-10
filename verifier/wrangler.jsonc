@@ -26,7 +26,7 @@
     // empty until the owner creates the OAuth client, so every claim fails closed until then.
     "testnet": {
       "secrets": { "required": ["SIGNER_SEED"] },
-      "vars": { "GOOGLE_CLIENT_ID": "", "CLAIM_ORIGINS": "http://localhost:5173,http://127.0.0.1:5173", "CONTRACT_ID": "zarf-near-1111.testnet", "NEAR_RPC_URL": "https://rpc.testnet.near.org" }
+      "vars": { "GOOGLE_CLIENT_ID": "", "CLAIM_ORIGINS": "https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev,http://localhost:5173,http://127.0.0.1:5173", "CONTRACT_ID": "zarf-near-1111.testnet", "NEAR_RPC_URL": "https://rpc.testnet.near.org" }
     }
   }
 }

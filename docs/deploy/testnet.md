@@ -97,3 +97,31 @@ URI are enough for a first real claim), set the client id in the two testnet env
 
 The client id is public. A real claim then also needs a funded campaign from the sender account
 and its leaf list served at `PUBLIC_LEAVES_URL` (empty in the testnet env until hosting is decided).
+
+## Live on workers.dev (2026-11-11, testnet)
+
+Deployed with `wrangler deploy --env testnet` (Cloudflare account `f0b938c1…`, workers.dev
+subdomain `sparkling-queen-5e77`). Secrets were uploaded with `wrangler secret put`, piped from
+`~/.config/zarf-near/`; their values are never printed or stored in the repo.
+
+| Service | URL | Version |
+| --- | --- | --- |
+| Web (create + claim) | https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev | `123a37dd-bdf0-4329-a132-27a33e67e748` |
+| Verifier | https://zarf-near-verifier-testnet.sparkling-queen-5e77.workers.dev | `35cf22f9-3ebe-48a1-9c2a-a340bbde7385` |
+| Relayer | https://zarf-near-relayer-testnet.sparkling-queen-5e77.workers.dev | `b0b86112-8e40-4fec-86f9-4f865b5dfd44` |
+
+Smoke against the public URLs:
+
+| Check | Result |
+| --- | --- |
+| relayer `GET /health` | `{"allowance":null,"balance":"9998707874175780800000000","claim_only":true}` |
+| verifier `POST /claim`, no Google client yet | `500 {"error":"VERIFIER_MISCONFIGURED"}`: fails closed |
+| CORS preflight from the web origin (verifier, relayer) | `204`, `access-control-allow-origin: https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev` |
+| web CSP `connect-src` | `'self'`, the verifier, the relayer, `https://rpc.testnet.near.org` |
+| `/claim/999999/…` (headless Chromium, phone size) | one `get_campaign` to testnet; "Claim before: this campaign does not exist"; no console errors |
+| `/create` | `get_config` from testnet; the token is accepted, Connect is enabled; no console errors |
+
+Google sign-in stays off until the owner creates the OAuth client. Then add
+`https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev` as a JavaScript origin and
+`…/auth/google` as a redirect URI, set `GOOGLE_CLIENT_ID` (verifier) and `PUBLIC_GOOGLE_CLIENT_ID`
+(web) in the testnet env, and redeploy both.
