@@ -5,6 +5,12 @@
 /* As in the main repo's landing (apps/landing/src/app.css): font-sans is Saira. */
 @theme {
   --font-sans: 'Saira', ui-sans-serif, system-ui, sans-serif;
+  /*
+   * Typeface of every screen but the landing (claim, receipt, send, campaigns, privacy, errors). Saira by
+   * decision; claim.zarf.to and create.zarf.to fall back to the system stack. To match them, this ONE line
+   * becomes: --font-app: ui-sans-serif, system-ui, sans-serif;
+   */
+  --font-app: 'Saira', ui-sans-serif, system-ui, sans-serif;
 }
 
 /* The claim app's deeper fume ground (main repo apps/claim/src/app.css). */
@@ -40,19 +46,17 @@
 
 /* Base layer: Tailwind utilities and Zen components win over it. */
 @layer base {
-  a { color: var(--zen-fg); text-decoration: underline; text-underline-offset: 2px; }
   :focus-visible { outline: 2px solid var(--zen-fg); outline-offset: 2px; }
   code { word-break: break-all; font-family: ui-monospace, monospace; font-size: 0.9em; }
-  button:disabled { opacity: 0.4; cursor: not-allowed; }
   summary::-webkit-details-marker { display: none; }
   /* Zen's base gives every <p> 1rem muted text; here a paragraph takes its container's size and colour. */
   p { font-size: inherit; color: inherit; }
 }
 
 /*
- * Form controls: the Zen border (12% fg) is about 1.5:1 on the ground. Controls here keep the
- * 3:1 boundary the pre-preview app had (WCAG 1.4.11): 45% fg on both themes, and a visible focus ring
- * (ZenInput sets focus:outline-none).
+ * Form controls: the Zen border (12% fg) is about 1.5:1 on the ground. Controls here keep a 3:1
+ * boundary (WCAG 1.4.11): 45% fg on both themes. Focus thickens the border itself in fg (ZenInput sets
+ * focus:outline-none), so there is one frame, never a ring outside it.
  */
 :root {
   --zarf-control-border: oklch(from var(--zen-fg) l c h / 0.45);
@@ -61,6 +65,16 @@
   border: 1px solid var(--zarf-control-border) !important;
 }
 .control-border:focus-visible {
-  outline: 2px solid var(--zen-fg) !important;
-  outline-offset: 2px;
+  outline: none !important;
+  border-color: var(--zen-fg) !important;
+  box-shadow: inset 0 0 0 1px var(--zen-fg);
+}
+.control-border[aria-invalid='true'] {
+  border-color: var(--zen-error-content) !important;
+}
+
+/* The native date picker's glyph is black; on the dark ground it would vanish. */
+[data-theme='dark'] input[type='datetime-local']::-webkit-calendar-picker-indicator,
+[data-theme='glass-porcelain'] input[type='datetime-local']::-webkit-calendar-picker-indicator {
+  filter: invert(1);
 }

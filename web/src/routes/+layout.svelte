@@ -2,44 +2,88 @@
   import '../app.css';
   import { onMount } from 'svelte';
   import { page } from '$app/state';
+  import { env } from '$env/dynamic/public';
   import ZarfMark from '$lib/ZarfMark.svelte';
   import ThemeToggle from '$lib/zen/components/ThemeToggle.svelte';
-  import ZenBadge from '$lib/zen/components/ZenBadge.svelte';
   import { themeStore } from '$lib/zen/stores/themeStore.svelte';
 
   let { children } = $props();
   const NAV = [
-    { href: '/create', label: 'Send', wide: true },
-    { href: '/campaigns', label: 'Campaigns', wide: true },
-    { href: '/privacy', label: 'Privacy', wide: false },
+    { href: '/create', label: 'Send' },
+    { href: '/campaigns', label: 'Campaigns' },
   ];
+  // The one network label. Mainnet needs none.
+  const testnet = env.PUBLIC_CONTRACT_ID?.endsWith('.testnet') ?? false;
+  const landing = $derived(page.url.pathname === '/');
 
   onMount(() => themeStore.restore());
 </script>
 
-<div class="min-h-screen font-sans bg-zen-bg text-zen-fg flex flex-col">
-  <!-- ZarfNavbar (main repo), with the mark alone, no tile; sized to read like zarf.to's lockup -->
-  <header class="h-16 bg-zen-bg/80 backdrop-blur-xl border-b-[0.5px] border-zen-border-subtle flex items-center justify-between px-4 sm:px-6 sticky top-0 z-50">
-    <div class="flex items-center gap-3">
-      <a href="/" class="flex items-center gap-2 min-h-11 opacity-90 hover:opacity-100 transition-opacity no-underline" aria-label="Zarf home">
-        <ZarfMark size={18} />
-        <span class="text-base font-semibold tracking-tight">zarf.to</span>
+{#snippet lockup(small: boolean)}
+  <!-- Brand kit lockup: the mark as tall as the "f" of zarf.to, gap 0.4x the mark -->
+  <span class="flex items-center {small ? 'gap-[4px] text-xs' : 'gap-[5px] text-base'} font-semibold tracking-tight">
+    <ZarfMark size={small ? 9 : 12} />zarf.to
+  </span>
+{/snippet}
+
+<div class="min-h-screen {landing ? 'font-sans' : 'font-app'} bg-zen-bg text-zen-fg flex flex-col">
+  <!-- ZarfNavbar (main repo): logo and nav on the left, actions on the right, solid ground, one hairline -->
+  <header class="h-16 bg-zen-bg border-b-[0.5px] border-zen-border-subtle flex items-center justify-between px-6 sticky top-0 z-50">
+    <div class="flex items-center gap-5 md:gap-8">
+      <a href="/" class="group flex items-center min-h-11 opacity-80 hover:opacity-100 transition-opacity" aria-label="zarf.to home">
+        {@render lockup(false)}
       </a>
-      <ZenBadge size="sm">NEAR</ZenBadge>
+      <!-- Zarf hides the nav below md; here Send stays reachable on phones (critic P1-24) -->
+      <nav class="flex items-center gap-4 md:gap-6" aria-label="Main">
+        {#each NAV as n (n.href)}
+          <a
+            href={n.href}
+            aria-current={page.url.pathname.startsWith(n.href) ? 'page' : undefined}
+            class="inline-flex items-center min-h-11 text-xs font-medium transition-colors
+              {page.url.pathname.startsWith(n.href) ? 'text-zen-fg' : 'text-zen-fg-muted hover:text-zen-fg'}">{n.label}</a
+          >
+        {/each}
+      </nav>
     </div>
-    <nav class="flex items-center gap-1 sm:gap-2" aria-label="Main">
-      {#each NAV as n (n.href)}
-        <a
-          href={n.href}
-          aria-current={page.url.pathname.startsWith(n.href) ? 'page' : undefined}
-          class="{n.wide ? 'hidden sm:inline-flex' : 'inline-flex'} items-center min-h-11 px-2 text-xs font-medium tracking-wide no-underline transition-colors
-            {page.url.pathname.startsWith(n.href) ? 'text-zen-fg' : 'text-zen-fg-muted hover:text-zen-fg'}">{n.label}</a
-        >
-      {/each}
-      <div class="w-px h-4 bg-zen-border mx-1" aria-hidden="true"></div>
+    <div class="flex items-center gap-4">
+      {#if testnet}
+        <span class="hidden sm:inline text-[10px] font-medium uppercase tracking-[0.15em] text-zen-fg-muted">NEAR testnet</span>
+      {/if}
+      <a
+        href="https://x.com/zarfto"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="Follow Zarf on X"
+        class="hidden sm:inline-flex items-center justify-center min-h-11 text-zen-fg-subtle hover:text-zen-fg transition-colors"
+      >
+        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"></path>
+        </svg>
+      </a>
+      <div class="hidden sm:block w-px h-4 bg-zen-border" aria-hidden="true"></div>
       <ThemeToggle />
-    </nav>
+    </div>
   </header>
 
   <main id="main" class="flex-1 flex flex-col">{@render children()}</main>
+
+  <!-- Footer (main repo landing): wordmark, links, built-on line -->
+  <footer class="relative border-t border-zen-fg/5">
+    <div class="max-w-5xl mx-auto px-6 py-10 flex flex-col md:flex-row justify-between items-center gap-5">
+      <a href="/" class="flex items-center min-h-11 text-zen-fg-muted hover:text-zen-fg transition-colors" aria-label="zarf.to home">
+        {@render lockup(true)}
+      </a>
+      <div class="flex gap-6 text-xs font-medium text-zen-fg-muted">
+        <a href="/create" class="inline-flex items-center min-h-11 hover:text-zen-fg transition-colors">Send</a>
+        <a href="/campaigns" class="inline-flex items-center min-h-11 hover:text-zen-fg transition-colors">Campaigns</a>
+        <a href="/privacy" class="inline-flex items-center min-h-11 hover:text-zen-fg transition-colors">Privacy</a>
+      </div>
+      <div class="text-xs text-zen-fg-muted flex items-center gap-1.5">
+        <span>© 2026</span>
+        <span class="text-zen-fg/20" aria-hidden="true">·</span>
+        <span>Built on NEAR by</span>
+        <a href="https://trionlabs.dev" target="_blank" rel="noopener noreferrer" class="inline-flex items-center min-h-11 hover:text-zen-fg transition-colors">trionlabs.dev</a>
+      </div>
+    </div>
+  </footer>
 </div>

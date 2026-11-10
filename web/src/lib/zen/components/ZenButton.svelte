@@ -9,6 +9,10 @@
         variant?: 'primary' | 'secondary' | 'ghost' | 'tonal' | 'danger';
         size?: 'xs' | 'sm' | 'md' | 'lg';
         loading?: boolean;
+        /** zarf-near addition: render the same button as a link (no <button> nested in an <a>). */
+        href?: string;
+        target?: string;
+        rel?: string;
     }
 
     let {
@@ -18,6 +22,9 @@
         variant = 'primary',
         size = 'md',
         loading = false,
+        href,
+        target,
+        rel,
         disabled,
         class: className = '',
         popover: _popover, // Destructure popover to exclude it from rest
@@ -124,13 +131,7 @@
     const isDisabled = $derived(disabled || loading);
 </script>
 
-<button
-    class="{baseClasses} {sizeClasses[size]} {variantClasses[variant]} {className}"
-    data-variant={variant}
-    disabled={isDisabled}
-    aria-busy={loading || undefined}
-    {...rest}
->
+{#snippet content()}
     <!-- Loading overlay: absolutely positioned to preserve button dimensions -->
     {#if loading}
         <span class="absolute inset-0 flex items-center justify-center" aria-hidden="true">
@@ -179,4 +180,20 @@
             </span>
         {/if}
     </span>
+{/snippet}
+
+{#if href}
+    <a {href} {target} {rel} class="{baseClasses} {sizeClasses[size]} {variantClasses[variant]} no-underline {className}" data-variant={variant}>
+        {@render content()}
+    </a>
+{:else}
+<button
+    class="{baseClasses} {sizeClasses[size]} {variantClasses[variant]} {className}"
+    data-variant={variant}
+    disabled={isDisabled}
+    aria-busy={loading || undefined}
+    {...rest}
+>
+    {@render content()}
 </button>
+{/if}

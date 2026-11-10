@@ -8,7 +8,7 @@
  * @module stores/themeStore
  */
 
-// Copied from the main repo (web/packages/ui/lib/stores/themeStore.svelte.ts); only the imports differ.
+// Copied from the main repo (web/packages/ui/lib/stores/themeStore.svelte.ts); the imports and the no-saved-theme default differ.
 import { browser } from '$app/environment';
 
 export type Theme = 'dark' | 'light';
@@ -69,8 +69,11 @@ function restore() {
             const themeName = THEME_MAP[saved];
             document.documentElement.setAttribute('data-theme', themeName);
         } else {
-            // Default theme
-            persist(DEFAULT_THEME);
+            // zarf-near change: with nothing saved, follow the OS (as the judges' page does) and do not
+            // persist it, so the OS keeps deciding until the reader picks a theme. app.html does the same pre-paint.
+            const os: Theme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+            currentTheme = os;
+            document.documentElement.setAttribute('data-theme', THEME_MAP[os]);
         }
     } catch (error) {
         warn('[ThemeStore] Failed to restore theme:', error);
