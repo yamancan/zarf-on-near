@@ -8,7 +8,7 @@ vi.mock('../src/claimFlow', () => ({
 const { default: worker } = await import('../src/index');
 const { importSigner } = await import('../src/claim');
 
-const base = { GOOGLE_CLIENT_ID: 'c', CONTRACT_ID: 'zarf-near.testnet', NEAR_RPC_URL: 'https://rpc.test', CLAIM_ORIGINS: '' };
+const base = { GOOGLE_CLIENT_ID: 'c', CONTRACT_ID: 'zarf-near.testnet', NEAR_RPC_URL: 'https://rpc.test', CLAIM_ORIGINS: '', PER_IP: { limit: async () => ({ success: true }) } };
 const call = async (seed: string) => {
   const res = await worker.fetch(new Request('https://v.test/claim', { method: 'POST', body: '{}' }), { ...base, SIGNER_SEED: seed });
   return { status: res.status, body: await res.json() };

@@ -5,5 +5,6 @@
   "name": "zarf-near-verifier-demo",
   "main": "src/demo.ts",
   "compatibility_date": "2026-06-01",
-  "vars": { "GOOGLE_CLIENT_ID": "zarf-near-demo-client", "CLAIM_ORIGINS": "" }
+  "vars": { "GOOGLE_CLIENT_ID": "zarf-near-demo-client", "CLAIM_ORIGINS": "" },
+  "ratelimits": [{ "name": "PER_IP", "namespace_id": "2003", "simple": { "limit": 20, "period": 60 } }]
 }

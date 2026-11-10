@@ -18,7 +18,7 @@ const named = vectors.claims.valid.find((c) => c.name === 'named-account')!;
 const alice = vectors.campaigns.main.recipients.find((r) => r.commitment === named.call_args.commitment)!;
 const env = {
   GOOGLE_CLIENT_ID: 'zarf-near-demo-client', CONTRACT_ID: 'zarf-near.testnet', NEAR_RPC_URL: 'http://127.0.0.1:8545',
-  SIGNER_SEED: vectors.keys.signer_seed, CLAIM_ORIGINS: '',
+  SIGNER_SEED: vectors.keys.signer_seed, CLAIM_ORIGINS: '', PER_IP: { limit: async () => ({ success: true }) },
 };
 const post = (worker: { fetch(r: Request, e: typeof env): Promise<Response> }, path: string, body: unknown) =>
   worker.fetch(new Request(`https://v.test${path}`, { method: 'POST', body: JSON.stringify(body) }), env);

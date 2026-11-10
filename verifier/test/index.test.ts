@@ -5,7 +5,7 @@ import { MAX_BODY_BYTES } from '../src/worker';
 
 const env = {
   GOOGLE_CLIENT_ID: 'client-123', CONTRACT_ID: 'zarf-near.testnet', NEAR_RPC_URL: 'https://rpc.test', SIGNER_SEED: vectors.keys.signer_seed,
-  CLAIM_ORIGINS: 'http://localhost:5173, https://claim.example',
+  CLAIM_ORIGINS: 'http://localhost:5173, https://claim.example', PER_IP: { limit: async () => ({ success: true }) },
 };
 const req = (method: string, body?: string, origin = 'https://claim.example', path = '/claim', e = env) =>
   worker.fetch(new Request(`https://v.test${path}`, { method, body, headers: { Origin: origin } }), e);
@@ -43,6 +43,15 @@ describe('worker', () => {
     expect((await req('POST', big)).status).toBe(413);
     const lying = new Request('https://v.test/claim', { method: 'POST', body: '{}', headers: { 'Content-Length': String(MAX_BODY_BYTES + 1) } });
     expect((await worker.fetch(lying, env)).status).toBe(413);
+  });
+
+  it('500s VERIFIER_MISCONFIGURED when the PER_IP binding is missing (fails closed)', async () => {
+    const { PER_IP: _, ...unbound } = env;
+    for (const path of ['/claim', '/health']) {
+      const res = await worker.fetch(new Request(`https://v.test${path}`, { method: path === '/claim' ? 'POST' : 'GET', body: path === '/claim' ? '{}' : undefined }), unbound as typeof env);
+      expect(res.status).toBe(500);
+      expect(await res.json()).toEqual({ error: 'VERIFIER_MISCONFIGURED' });
+    }
   });
 
   it('429s when the per-IP limiter refuses, before reading the body', async () => {

@@ -10,7 +10,7 @@ export interface Env {
   NEAR_RPC_URL: string;
   CLAIM_ORIGINS: string; // comma-separated origins of the claim app
   SIGNER_SEED: string; // secret: hex of the 32-byte ed25519 seed
-  PER_IP?: { limit(o: { key: string }): Promise<{ success: boolean }> }; // Cloudflare rate-limit binding (wrangler.jsonc)
+  PER_IP: { limit(o: { key: string }): Promise<{ success: boolean }> }; // Cloudflare rate-limit binding (wrangler.jsonc); required
 }
 
 // A real claim body (id_token, 20 siblings, salt, ids) is ~4 KB.
@@ -42,7 +42,8 @@ export function makeVerifier(o: { jwks: JwksSource; issuers?: string[] }) {
       if (req.method !== (path === '/health' ? 'GET' : 'POST')) return json({ error: 'NOT_FOUND' }, 404);
       // Approximate and per colo (Cloudflare's binding): it caps abuse of the JWKS and RPC reads, nothing more.
       const ip = req.headers.get('CF-Connecting-IP') ?? 'unknown';
-      if (env.PER_IP && !(await env.PER_IP.limit({ key: ip })).success) return json({ error: 'RATE_LIMITED' }, 429);
+      if (!env.PER_IP) return json({ error: 'VERIFIER_MISCONFIGURED' }, 500); // fail closed, like the other config
+      if (!(await env.PER_IP.limit({ key: ip })).success) return json({ error: 'RATE_LIMITED' }, 429);
       if (path === '/health') {
         const seedOk = /^[0-9a-f]{64}$/.test(env.SIGNER_SEED ?? '');
         return json({
