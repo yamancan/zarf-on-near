@@ -58,6 +58,11 @@ Read this before using it with real money.
   the relayer is a convenience, not a trust point. We do not use NEP-366 meta-transactions because
   they need the recipient to sign a delegate action with their own NEAR key, and a recipient here
   proves who they are with Google: they may have no NEAR account or key at all.
+- **A cross-chain payout goes through a third party.** If the recipient picks USDC on another chain,
+  the destination address and the amount go to NEAR Intents 1Click, which pays out from a one-time
+  deposit address. 1Click's status for that address is public, so the claim can be linked to the
+  destination address. Payout assets are pinned to Circle USDC on Base, Arbitrum and Ethereum, and
+  the verifier refuses a quote that could lose more than 5% or refunds anywhere but the sender.
 - **Unclaimed funds go back to the sender** with `reclaim` after the campaign deadline.
 - **Storage is pre-paid by the sender** in NEAR (`prepay_deposit`): the campaign entry plus storage
   for each claim. The unused reservation returns to the sender's free pre-pay on `reclaim`, and
