@@ -1,8 +1,56 @@
 # Testnet deployment
 
-Public data only. Keys live on the deploy host in mode-600 local key stores, never in this repo.
+Public data only. Keys live on the deploy host, mode 600, never in this repo.
 
-## Accounts (created 2026-11-11 via the testnet faucet)
+## Live system: `zarf-near-1112.testnet`
+
+| Part | Where |
+| --- | --- |
+| Escrow contract | [`zarf-near-1112.testnet`](https://testnet.nearblocks.io/address/zarf-near-1112.testnet): no access keys at all (`view_access_key_list` is empty), code hash `5GdxDSB4sGW9Ewod4Q4Na613C2sLQjVfFjLbbZbKt6N8` |
+| Config (`get_config`) | `upgrade_delay_ns` 600 s, `resolve_delay_ns` 1 h, `min_lifetime_ns` 600 s, token Circle testnet USDC |
+| Verifier signer (Mode W owner key) | `2d10ebec1ec795cef82b8d357cc60d39d9119b99908741660b632fc5cf0d4e32` |
+| Relayer | `zarf-near-relayer-1111.testnet`, function-call key `ed25519:69m6cJwr6KqXhLr58BAUKoTWbtX1oMPtf5daiUbgQ9mm`: receiver `zarf-near-1112.testnet`, methods `["claim"]` |
+| Claim and send app | https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev |
+| Judges' page (1 test USDC to a Gmail) | https://zarf-near-faucet-testnet.sparkling-queen-5e77.workers.dev/try |
+| Verifier | https://zarf-near-verifier-testnet.sparkling-queen-5e77.workers.dev (`GET /health`) |
+| Relayer | https://zarf-near-relayer-testnet.sparkling-queen-5e77.workers.dev (`GET /health`) |
+| NEAR RPC | https://test.rpc.fastnear.com |
+
+The three Workers are deployed with `wrangler deploy --env testnet` from the committed release head. Secrets go in with `wrangler secret put`, piped from files on the deploy host;
+their values are never printed or stored in the repo.
+
+| Service | Version | From |
+| --- | --- | --- |
+| Web (create + claim) | `e0246f2c-95a1-4f81-8622-00f58120911d` | `a0d63d1` |
+| Verifier | `99b5d145-a15c-4bd3-9b75-190745efdeb8` | `a0d63d1` |
+| Relayer | `eab5f60f-03e4-4ed4-9fc5-daf51d9561e5` | `29327b7` (unchanged since) |
+
+Smoke against the public URLs:
+
+| Check | Result |
+| --- | --- |
+| verifier `GET /health` | `{"contract_id":"zarf-near-1112.testnet","signer":"2d10ebec…4e32","google_client_id_set":false}` |
+| relayer `GET /health` | `{"contract_id":"zarf-near-1112.testnet","allowance":null,"balance":"9997401738950342600000000","claim_only":true}` |
+| verifier, 40 requests over one connection | 21 × `200`, then 19 × `429 {"error":"RATE_LIMITED"}` (the limit is approximate and per machine) |
+| verifier `POST /claim` with a 20 KB body | `413 {"error":"TOO_LARGE"}` |
+| CORS preflight from `http://localhost:5173` / the web origin | no `access-control-allow-origin` / the web origin |
+| `/`, `/campaigns`, `/create`, `/privacy` | `200` |
+| `/claim/999999/…` with a valid fragment (headless Chromium) | "This campaign does not exist", no form, no console errors |
+| a spec vector link on campaign 0 | "This claim link does not match" (`LINK_MISMATCH`), no form |
+| a missing or damaged fragment | "This claim link is incomplete", no form |
+| claim form (RPC stubbed to a valid link) | Stellar and `0x` input refused; a missing named account blocks; "Account found" enables sign-in; "USDC on another chain" lists Base, Arbitrum, Ethereum as "mainnet only" |
+
+Google sign-in stays off until the owner creates the OAuth client. Then add
+`https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev` as a JavaScript origin and
+`…/auth/google` as a redirect URI, set `GOOGLE_CLIENT_ID` (verifier) and `PUBLIC_GOOGLE_CLIENT_ID`
+(web) in the testnet env, and redeploy both.
+
+## History: first deploy, `zarf-near-1111.testnet`
+
+The first escrow, superseded by 1112 (new config, same verifier signer, new relayer key). Kept for
+its transaction record.
+
+### Accounts (created 2026-11-11 via the testnet faucet)
 
 | Role | Account | Create tx |
 | --- | --- | --- |
@@ -14,7 +62,7 @@ Public data only. Keys live on the deploy host in mode-600 local key stores, nev
 Token: Circle testnet USDC `3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af`
 (verified on chain, see `docs/spikes/S1.md`).
 
-## Deploy (2026-11-11)
+### Deploy (2026-11-11)
 
 ```bash
 CONTRACT_ID=zarf-near-1111.testnet OWNER_ID=zarf-near-owner-1111.testnet \
@@ -37,7 +85,7 @@ cargo-near 0.23.0, `cargo near build non-reproducible-wasm --no-abi`.
 - Relayer function-call key: `ed25519:28QjUwJb6imTpgR2UHM4ijYNe7F6gaczoX6qBKLTwk9k`, receiver
   `zarf-near-1111.testnet`, methods `["claim"]`, allowance unlimited.
 
-## Views after deploy (block ~277206411)
+### Views after deploy (block ~277206411)
 
 ```text
 get_config:         {"network":"testnet","min_lifetime_ns":"600000000000","agent_ttl_ns":"604800000000000","resolve_delay_ns":"3600000000000","token_ids":["3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af"],"storage_byte_cost":"10000000000000000000"}
@@ -48,12 +96,12 @@ required_claim_gas: "55000000000000"
 
 `ft_storage_deposit` = 0.00125 NEAR, read from the token on chain (matches S1).
 
-## Open
+### Open
 
 - First real claim with Circle USDC (reviewer m2): record `total_gas_burnt` and per-receipt gas,
   and confirm it passes at exactly 55 Tgas. Needs the sender funded with test USDC (owner).
 
-## Local smoke (2026-11-11, `t8d-testnet-local`)
+### Local smoke (2026-11-11, `t8d-testnet-local`)
 
 The verifier, relayer and apps run locally against the live testnet contract. Nothing is deployed
 to Cloudflare; there is no domain and no Google client yet.
@@ -97,36 +145,3 @@ URI are enough for a first real claim), set the client id in the two testnet env
 
 The client id is public. A real claim then also needs a funded campaign from the sender account
 and the recipient's claim link (it carries the salt, amount and Merkle proof; nothing else is hosted).
-
-## Live on workers.dev (2026-11-11, testnet)
-
-Deployed with `wrangler deploy --env testnet` (Cloudflare account `f0b938c1…`, workers.dev
-subdomain `sparkling-queen-5e77`). Secrets were uploaded with `wrangler secret put`, piped from
-`~/.config/zarf-near/`; their values are never printed or stored in the repo.
-
-Redeployed from `02568c7` against the escrow `zarf-near-1112.testnet` (same verifier signer
-`2d10ebec…`; relayer `zarf-near-relayer-1111.testnet` with a new claim-only key for 1112).
-
-| Service | URL | Version |
-| --- | --- | --- |
-| Web (create + claim) | https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev | `781714e5-2ad0-4573-b94e-32ea076436cd` |
-| Verifier | https://zarf-near-verifier-testnet.sparkling-queen-5e77.workers.dev | `42ded7e0-a585-40e6-b48d-273b70f3cb3d` |
-| Relayer | https://zarf-near-relayer-testnet.sparkling-queen-5e77.workers.dev | `c47d9d86-d62c-4087-8dea-d314257a07ad` |
-
-Smoke against the public URLs:
-
-| Check | Result |
-| --- | --- |
-| verifier `GET /health` | `{"contract_id":"zarf-near-1112.testnet","signer":"2d10ebec…4e32","google_client_id_set":false}` |
-| relayer `GET /health` | `{"contract_id":"zarf-near-1112.testnet","allowance":null,"balance":"9997401738950342600000000","claim_only":true}` |
-| verifier `POST /claim` with a 20 KB body | `413 {"error":"TOO_LARGE"}` |
-| CORS preflight from `http://localhost:5173` / the web origin | no `access-control-allow-origin` / the web origin |
-| `/`, `/campaigns`, `/create`, `/privacy` | `200` |
-| `/claim/999999/…` with a valid fragment (headless Chromium) | "This campaign does not exist", no form, no console errors |
-| a spec vector link on campaign 0 | "This claim link does not match" (`LINK_MISMATCH`), no form |
-| a missing or damaged fragment | "This claim link is incomplete", no form |
-
-Google sign-in stays off until the owner creates the OAuth client. Then add
-`https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev` as a JavaScript origin and
-`…/auth/google` as a redirect URI, set `GOOGLE_CLIENT_ID` (verifier) and `PUBLIC_GOOGLE_CLIENT_ID`
-(web) in the testnet env, and redeploy both.
