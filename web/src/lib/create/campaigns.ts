@@ -18,6 +18,18 @@ export interface CampaignView {
 export type View = <T>(method: string, args: object) => Promise<T>;
 
 const PAGE = 100; // campaigns_of caps limit at 100
+export const RPC_CONCURRENCY = 8; // stay under public-RPC rate limits
+
+/** Promise.all with at most `limit` calls in flight; results keep the input order. */
+export async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    for (let i = next++; i < items.length; i = next++) out[i] = await fn(items[i]);
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
 
 /** Every campaign id of `sender`, in creation order (campaigns_of pages of 100). */
 export async function listCampaignIds(view: View, sender: string): Promise<string[]> {
@@ -31,7 +43,7 @@ export async function listCampaignIds(view: View, sender: string): Promise<strin
 
 export async function listCampaigns(view: View, sender: string): Promise<{ id: string; c: CampaignView }[]> {
   const ids = await listCampaignIds(view, sender);
-  const views = await Promise.all(ids.map((id) => view<CampaignView | null>('get_campaign', { campaign_id: id })));
+  const views = await mapLimit(ids, RPC_CONCURRENCY, (id) => view<CampaignView | null>('get_campaign', { campaign_id: id }));
   // Newest first; a campaign the view no longer returns is skipped, never shown as empty.
   return ids.map((id, i) => ({ id, c: views[i]! })).filter((r) => r.c && r.c.sender === sender).reverse();
 }
@@ -42,7 +54,7 @@ export type Counts = { claimed: number; pending: number; unclaimed: number } | n
 /** Claimed/pending/unclaimed from the published leaf list; null ("n/a") above COUNT_CAP leaves. */
 export async function claimCounts(commitments: string[], state: (commitment: string) => Promise<string>): Promise<Counts> {
   if (commitments.length > COUNT_CAP) return null;
-  const states = await Promise.all(commitments.map(state));
+  const states = await mapLimit(commitments, RPC_CONCURRENCY, state);
   const n = (s: string) => states.filter((x) => x === s).length;
   return { claimed: n('claimed'), pending: n('pending'), unclaimed: n('unclaimed') };
 }
@@ -77,4 +89,33 @@ export function formatNear(yocto: string): string {
   const whole = v / 10n ** 24n;
   const frac = ((v % 10n ** 24n) / 10n ** 19n).toString().padStart(5, '0').replace(/0+$/, '');
   return `${whole}${frac ? `.${frac}` : ''}`;
+}
+
+interface Outcome {
+  receipts_outcome?: { outcome?: { executor_id?: string; logs?: string[]; status?: { Failure?: unknown } } }[];
+}
+
+/** What a reclaim tx did, from our contract's NEP-297 events (spec: reclaimed / reclaim_reverted). */
+export function reclaimOutcome(
+  o: Outcome,
+  contractId: string,
+  campaignId: string,
+): { kind: 'reclaimed'; amount: string } | { kind: 'reverted' } | { kind: 'failed'; code: string } | { kind: 'released' } {
+  for (const r of o.receipts_outcome ?? []) {
+    if (r.outcome?.executor_id !== contractId) continue;
+    for (const log of r.outcome.logs ?? []) {
+      if (!log.startsWith('EVENT_JSON:')) continue;
+      try {
+        const e = JSON.parse(log.slice('EVENT_JSON:'.length));
+        if (e.standard !== 'zarf-near' || String(e.data?.[0]?.campaign_id) !== campaignId) continue;
+        if (e.event === 'reclaim_reverted') return { kind: 'reverted' };
+        if (e.event === 'reclaimed') return { kind: 'reclaimed', amount: String(e.data[0].amount) };
+      } catch {
+        // not our event
+      }
+    }
+  }
+  const failure = (o.receipts_outcome ?? []).find((r) => r.outcome?.status?.Failure !== undefined)?.outcome?.status?.Failure;
+  if (failure) return { kind: 'failed', code: /E1\d\d_[A-Z_]+/.exec(JSON.stringify(failure))?.[0] ?? 'FAILED' };
+  return { kind: 'released' }; // no transfer: only the storage reservation went back to the free pre-pay
 }

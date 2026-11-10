@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { env } from '$env/dynamic/public';
   import { getConfig, getPrepayBalance, txOutcome, type ContractConfig } from '$lib/create/chain';
-  import { claimCounts, formatNear, listCampaigns, reclaimable, reclaimTx, withdrawTx, type CampaignView, type Counts } from '$lib/create/campaigns';
+  import { claimCounts, formatNear, listCampaigns, reclaimable, reclaimOutcome, reclaimTx, withdrawTx, type CampaignView, type Counts } from '$lib/create/campaigns';
   import { formatAmount } from '$lib/create/recipients';
   import { myNearWallet, type SenderWallet } from '$lib/create/wallet';
   import { fetchLeaves, nearView } from '$lib/services';
@@ -75,16 +75,25 @@
   }
 
   /** Sends one tx, waits for its outcome, then re-reads everything from the chain. */
-  async function run(label: string, tx: ReturnType<typeof reclaimTx>) {
+  async function run(label: string, tx: ReturnType<typeof reclaimTx>, campaignId?: string) {
     error = note = '';
     busy = label;
     try {
       const [hash] = await wallet!.send([tx]);
       busy = 'Waiting for the transaction…';
-      const outcome = (await txOutcome(rpc!, hash, account!)) as { receipts_outcome?: { outcome?: { status?: { Failure?: unknown } } }[] };
-      const failure = outcome.receipts_outcome?.find((r) => r.outcome?.status?.Failure !== undefined)?.outcome?.status?.Failure;
-      const code = failure ? (/E1\d\d_[A-Z_]+/.exec(JSON.stringify(failure))?.[0] ?? 'FAILED') : null;
-      note = code ? `The transaction did not go through (${code}).` : 'Done.';
+      const outcome = (await txOutcome(rpc!, hash, account!)) as Parameters<typeof reclaimOutcome>[0];
+      if (campaignId) {
+        const r = reclaimOutcome(outcome, contract!, campaignId);
+        note =
+          r.kind === 'reclaimed' ? `Reclaimed ${formatAmount(BigInt(r.amount))} USDC.`
+          : r.kind === 'reverted' ? 'The transfer failed; your balance is back. Try again.'
+          : r.kind === 'failed' ? `The transaction did not go through (${r.code}).`
+          : 'Done: the unused storage reservation is back in your free pre-pay.';
+      } else {
+        const failure = outcome.receipts_outcome?.find((r) => r.outcome?.status?.Failure !== undefined)?.outcome?.status?.Failure;
+        const code = failure ? (/E1\d\d_[A-Z_]+/.exec(JSON.stringify(failure))?.[0] ?? 'FAILED') : null;
+        note = code ? `The transaction did not go through (${code}).` : 'Done.';
+      }
       if (env.PUBLIC_EXPLORER_TX_URL) note += ` Transaction: ${env.PUBLIC_EXPLORER_TX_URL}${hash}`;
     } catch (e) {
       error = `Wallet: ${(e as Error).message}. Check your campaigns below before trying again.`;
@@ -133,7 +142,7 @@
           <dt>In flight</dt><dd>{formatAmount(BigInt(r.c.in_flight))} USDC</dd>
           <dt>Storage reserved</dt><dd>{formatNear(r.c.storage_reserved)} NEAR</dd>
         </dl>
-        <button disabled={!can.ok || !!busy} onclick={() => run(`Reclaiming campaign ${r.id}…`, reclaimTx(account!, contract!, r.id))}>Reclaim</button>
+        <button disabled={!can.ok || !!busy} onclick={() => run(`Reclaiming campaign ${r.id}…`, reclaimTx(account!, contract!, r.id), r.id)}>Reclaim</button>
         {#if !can.ok}<p class="muted">{can.reason}</p>{/if}
       </section>
     {/each}

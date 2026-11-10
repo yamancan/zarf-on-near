@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { claimCounts, COUNT_CAP, formatNear, listCampaignIds, listCampaigns, reclaimable, reclaimTx, withdrawTx, type CampaignView, type View } from './campaigns';
+import { claimCounts, COUNT_CAP, formatNear, listCampaignIds, listCampaigns, mapLimit, reclaimable, reclaimOutcome, reclaimTx, RPC_CONCURRENCY, withdrawTx, type CampaignView, type View } from './campaigns';
 
 const campaign = (o: Partial<CampaignView> = {}): CampaignView => ({
   sender: 'alice.testnet', token: 'usdc.testnet', amount: '30000000', merkle_root: 'ab'.repeat(32), deadline_ns: '2000000000000000',
@@ -76,5 +76,53 @@ describe('transactions', () => {
     expect(formatNear('0')).toBe('0');
     expect(formatNear('10000000000000000000000')).toBe('0.01');
     expect(formatNear('1234567890000000000000000')).toBe('1.23456');
+  });
+});
+
+describe('mapLimit (RPC concurrency cap)', () => {
+  it(`never has more than ${RPC_CONCURRENCY} calls in flight and keeps order`, async () => {
+    let inFlight = 0, peak = 0;
+    const out = await mapLimit(Array.from({ length: 50 }, (_, i) => i), RPC_CONCURRENCY, async (i) => {
+      peak = Math.max(peak, ++inFlight);
+      await new Promise((r) => setTimeout(r, 1 + (i % 3)));
+      inFlight--;
+      return i * 2;
+    });
+    expect(out).toEqual(Array.from({ length: 50 }, (_, i) => i * 2));
+    expect(peak).toBe(RPC_CONCURRENCY);
+  });
+  it('handles fewer items than the limit, and none', async () => {
+    expect(await mapLimit([1, 2], 8, async (x) => x)).toEqual([1, 2]);
+    expect(await mapLimit([], 8, async (x) => x)).toEqual([]);
+  });
+  it('claimCounts reads at most 8 claim_states at a time', async () => {
+    let inFlight = 0, peak = 0;
+    await claimCounts(Array(40).fill('x'), async () => {
+      peak = Math.max(peak, ++inFlight);
+      await new Promise((r) => setTimeout(r, 1));
+      inFlight--;
+      return 'claimed';
+    });
+    expect(peak).toBeLessThanOrEqual(RPC_CONCURRENCY);
+  });
+});
+
+describe('reclaimOutcome', () => {
+  const ev = (event: string, data: object, executor = 'zarf-near.testnet') => ({
+    outcome: { executor_id: executor, logs: [`EVENT_JSON:${JSON.stringify({ standard: 'zarf-near', version: '1.0.0', event, data: [data] })}`] },
+  });
+  it('reclaimed with its amount', () => {
+    expect(reclaimOutcome({ receipts_outcome: [ev('reclaimed', { campaign_id: '12', amount: '10000000' })] }, 'zarf-near.testnet', '12')).toEqual({ kind: 'reclaimed', amount: '10000000' });
+  });
+  it('reclaim_reverted: the transfer failed and the balance is back', () => {
+    expect(reclaimOutcome({ receipts_outcome: [ev('reclaim_reverted', { campaign_id: '12', amount: '1', code: 'E115_TOKEN_TRANSFER_FAILED' })] }, 'zarf-near.testnet', '12')).toEqual({ kind: 'reverted' });
+  });
+  it('ignores events of another campaign or another account', () => {
+    const o = { receipts_outcome: [ev('reclaim_reverted', { campaign_id: '13' }), ev('reclaim_reverted', { campaign_id: '12' }, 'evil.testnet')] };
+    expect(reclaimOutcome(o, 'zarf-near.testnet', '12')).toEqual({ kind: 'released' });
+  });
+  it('a panic is failed with its code', () => {
+    const o = { receipts_outcome: [{ outcome: { executor_id: 'zarf-near.testnet', status: { Failure: { ActionError: { kind: { FunctionCallError: { ExecutionError: 'Smart contract panicked: E117_NOT_YET_RECLAIMABLE' } } } } } } }] };
+    expect(reclaimOutcome(o, 'zarf-near.testnet', '12')).toEqual({ kind: 'failed', code: 'E117_NOT_YET_RECLAIMABLE' });
   });
 });
