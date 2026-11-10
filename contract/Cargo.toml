@@ -1,0 +1,35 @@
+[package]
+name = "zarf-near"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+# Build: cargo near build non-reproducible-wasm --no-abi
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk = "=5.26.1"
+
+[features]
+# Integration tests only: makes on_claim panic to exercise resolve_pending.
+# The release wasm is built without it, and a test checks that.
+test-callback-panic = []
+
+[dev-dependencies]
+near-sdk = { version = "=5.26.1", features = ["unit-testing"] }
+
+[workspace]
+members = [".", "mock-ft"]
+# Separate toolchain (near-workspaces needs a newer Rust), see README.
+exclude = ["integration"]
+
+[profile.release]
+codegen-units = 1
+opt-level = "z"
+lto = true
+debug = false
+panic = "abort"
+overflow-checks = true
