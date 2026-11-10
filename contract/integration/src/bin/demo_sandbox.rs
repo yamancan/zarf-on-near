@@ -18,6 +18,7 @@ const VECTORS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../s
 const DAY_NS: u64 = 86_400 * 1_000_000_000;
 const MIN_LIFETIME_NS: u64 = 600 * 1_000_000_000; // testnet value (spec)
 const AGENT_TTL_NS: u64 = 7 * DAY_NS;
+const RESOLVE_DELAY_NS: u64 = 30 * 1_000_000_000; // short: sandbox only (testnet/mainnet use 1 h)
 
 fn wasm(name: &str) -> anyhow::Result<Vec<u8>> {
     let path = format!("{WASM_DIR}/{name}");
@@ -79,6 +80,7 @@ async fn seed() -> anyhow::Result<(near_workspaces::Worker<near_workspaces::netw
         .call(Function::new("new").args_json(json!({
             "owner_id": owner.id(), "network": "testnet", "token_ids": [ft.id()],
             "min_lifetime_ns": MIN_LIFETIME_NS.to_string(), "agent_ttl_ns": AGENT_TTL_NS.to_string(),
+            "resolve_delay_ns": RESOLVE_DELAY_NS.to_string(),
         })).gas(Gas::from_tgas(100)))
         .transact().await?.into_result()?;
 
