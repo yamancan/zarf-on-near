@@ -1,6 +1,6 @@
 # Clean clone -> `make test` and `make demo`. No secrets, no Google login.
 # Needs Node 24 and pnpm 10.30.3 (pinned per package); `pnpm install` needs network access.
-.PHONY: test demo install verifier relayer web scripts contract
+.PHONY: test demo demo-sandbox install verifier relayer web scripts contract
 
 PNPM_INSTALL := pnpm install --frozen-lockfile
 
@@ -49,3 +49,10 @@ demo:
 	cd relayer && $(PNPM_INSTALL)
 	@if [ -n "$$NEAR_RPC_URL" ]; then node scripts/demo.mjs; \
 	else echo "NEAR_RPC_URL is not set: running against a mocked NEAR RPC (--dry)"; node scripts/demo.mjs --dry; fi
+
+# The same demo against a local NEAR sandbox with the real contract (needs the Rust toolchain; the
+# first run compiles the contracts and can take ~15 min). DEMO_REQUIRE_RPC=1: never a mocked pass.
+demo-sandbox:
+	cd verifier && $(PNPM_INSTALL)
+	cd relayer && $(PNPM_INSTALL)
+	DEMO_REQUIRE_RPC=1 bash scripts/demo-sandbox.sh

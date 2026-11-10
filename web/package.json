@@ -5,6 +5,7 @@
   "type": "module",
   "packageManager": "pnpm@10.30.3",
   "scripts": {
+    "prepare": "svelte-kit sync",
     "dev": "vite dev",
     "build": "vite build",
     "preview": "wrangler dev",
@@ -26,5 +27,12 @@
     "vite": "^7.3.5",
     "vitest": "^4.1.7",
     "wrangler": "^4.95.0"
+  },
+  "pnpm": {
+    "ignoredBuiltDependencies": [
+      "esbuild",
+      "secp256k1",
+      "workerd"
+    ]
   }
 }

@@ -4,7 +4,7 @@
 //   node scripts/demo.mjs --dry   mocked NEAR RPC (exercises verifier + relayer end to end today)
 //   node scripts/demo.mjs         against a NEAR sandbox; reads the seam below from env
 //
-// Sandbox seam (set by the contract side's seed script):
+// Sandbox seam: printed by `make -C contract demo-sandbox`; `make demo-sandbox` sets it all up:
 //   NEAR_RPC_URL         sandbox JSON-RPC endpoint
 //   CONTRACT_ID          escrow account; its `network` init arg must equal NETWORK (default "testnet")
 //   RELAYER_ACCOUNT_ID   account holding a function-call key for CONTRACT_ID / ["claim"]

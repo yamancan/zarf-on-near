@@ -71,12 +71,16 @@ small NEAR drip.
 
 ## Run it
 
-No secrets and no Google login are needed. Node 24 and pnpm 10.30.3 (pinned in each
-`package.json` as `packageManager`); `pnpm install` needs network access.
+No secrets and no Google login are needed.
+
+Prerequisites: `git`, `make`, Node 24, and pnpm 10.30.3, which each `package.json` pins as
+`packageManager` (with Node 24, `corepack enable` once provides it). `pnpm install` needs network
+access.
 
 ```sh
-make test   # verifier, relayer, web and the demo harness: tests, type checks, build; then the contract's tests
-make demo   # the claim flow end to end
+make install   # optional: test and demo install what they need themselves
+make test      # verifier, relayer, web and the demo harness: tests, type checks, build; then the contract's tests
+make demo      # the claim flow end to end
 ```
 
 `make test` keeps going after a failure and ends with one summary line; it exits 1 only if
@@ -88,6 +92,9 @@ SUMMARY: verifier ✓ relayer ✓ web ✓ scripts ✓ contract NOT RUN (cargo mi
 
 `make test` runs the contract's tests (`contract/Makefile`: unit, then near-workspaces
 integration) when `cargo` is installed, and prints `SKIP contract: …` with the reason otherwise.
+For those you also need `rustup` and `cargo-near`: rustup installs the pinned toolchains (1.86.0
+for the contract, 1.95.0 for the integration tests) and the wasm target from each
+`rust-toolchain.toml`. The contract has **not yet been compiled**; its tests have not run yet.
 
 `make demo` starts the verifier and the relayer locally and plays one recipient's claim: a sign-in
 token, the verifier's checks and signature, the relayer's `claim` transaction, then it asserts
@@ -95,10 +102,15 @@ token, the verifier's checks and signature, the relayer's `claim` transaction, t
 token issuer is generated in memory at startup in place of Google; the release verifier never
 includes it and rejects its tokens (`verifier/test/demo.test.ts`).
 
-- With `NEAR_RPC_URL` and the other variables listed at the top of `scripts/demo.mjs`, it runs
-  against a NEAR sandbox with the deployed contract and a seeded campaign.
-- Without them it runs `--dry`: a mocked NEAR RPC stands in for the chain, so the TypeScript side
-  runs end to end but the contract does not. The output says so.
+- `make demo` runs `--dry`: a mocked NEAR RPC stands in for the chain. It still checks what the
+  chain would (the relayer's transaction signature, the verifier's signature, the merkle proof),
+  so the TypeScript side runs end to end, but the contract does not. The output says so.
+- `make demo-sandbox` runs the same claim against a local NEAR sandbox with the real contract
+  deployed and a campaign seeded (`scripts/demo-sandbox.sh`). It needs the Rust toolchain above;
+  the first run compiles the contracts and can take ~15 min. **Not yet run.** It never falls back
+  to the mocked chain.
+- The sandbox demo signs with the public test keys in `spec/vectors.json`. The contract refuses
+  those keys on mainnet, and `scripts/deploy-testnet.sh` refuses them too.
 
 ## Claim → evidence
 
