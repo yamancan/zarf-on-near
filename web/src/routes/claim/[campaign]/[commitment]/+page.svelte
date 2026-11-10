@@ -41,6 +41,7 @@
   let confirmed = $state(false);
   let error = $state('');
   let deadline = $state('loading…');
+  let checkError = $state('');
 
   const dest = $derived(classifyDestination(typed));
   const destination = $derived(mode === 'existing' ? (dest.kind === 'named' || dest.kind === 'implicit' ? dest.id : '') : (implicit?.accountId ?? ''));
@@ -109,6 +110,7 @@
     } catch (e) {
       check = 'error';
       deadline = `unavailable (${describeError(e)})`;
+      checkError = describeError(e);
     }
   }
 
@@ -214,7 +216,7 @@
       {:else if check === 'ended'}
         {@render terminal(Clock, 'muted', 'This campaign has ended', `Claims closed on ${deadline}. Ask the sender about it.`, false, false)}
       {:else if check === 'error'}
-        {@render terminal(AlertTriangle, 'error', 'Could not check this claim', `${deadline}. Try again in a minute.`, true, false)}
+        {@render terminal(AlertTriangle, 'error', 'Could not check this claim', `${checkError} Try again in a minute.`, true, false)}
       {:else if loaded && check === 'checking'}
         <div class="flex flex-col items-center gap-4 py-8">
           {@render medallion(Loader2, 'muted', true)}
