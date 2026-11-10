@@ -97,6 +97,7 @@
 {#if !resumed && (!ok || !attempt)}
   <h1>Nothing to show yet</h1>
   <p class="muted">Open your claim link to start.</p>
+  <p><a href="/">What is Zarf?</a></p>
 {:else if payout}
   <h1>
     {#if step === 'checking'}Checking your claim…{:else if step === 'paying' || step === 'settling'}Sending your tokens…{:else if step === 'done'}{bridgeView?.done && bridgeView.ok ? `Arrived on ${payout.chainName}` : bridgeView?.done ? 'Not delivered' : `Sending to ${payout.chainName}…`}{:else if step === 'unsettled'}Still settling{:else}Not claimed{/if}

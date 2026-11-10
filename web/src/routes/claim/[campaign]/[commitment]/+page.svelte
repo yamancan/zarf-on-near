@@ -164,30 +164,43 @@
   }
 </script>
 
+{#snippet next(newLink: boolean)}
+  {#if newLink}<p>Nothing was taken from you. Ask the sender for a new link.</p>{/if}
+  <p><a href="/">What is Zarf?</a></p>
+{/snippet}
+
 {#if !linkOk}
   <h1>This claim link is broken</h1>
   <p class="muted">Open the link from your email again, exactly as it was sent.</p>
+  {@render next(true)}
 {:else if loaded && !link}
   <h1>This claim link is incomplete</h1>
   <p class="muted">The part after <code>#</code> is missing or damaged. Open the full link from your email again.</p>
+  {@render next(true)}
 {:else if check === 'mismatch'}
   <h1>This claim link does not match</h1>
   <p class="error" role="alert">{describeError(new ClaimError('LINK_MISMATCH'))}</p>
+  {@render next(true)}
 {:else if check === 'unknown'}
   <h1>This campaign does not exist</h1>
   <p class="muted">There is no campaign {campaign} on this contract. Ask the sender for your link again.</p>
+  {@render next(true)}
 {:else if check === 'claimed'}
   <h1>Already claimed</h1>
   <p class="muted">The tokens for this link have been paid out.</p>
+  {@render next(false)}
 {:else if check === 'pending'}
   <h1>This claim is being paid</h1>
   <p class="muted">A claim for this link is in progress. Check again in a minute.</p>
+  {@render next(false)}
 {:else if check === 'ended'}
   <h1>This campaign has ended</h1>
   <p class="muted">Claims closed on {deadline}. Ask the sender about it.</p>
+  {@render next(false)}
 {:else if check === 'error'}
   <h1>Could not check this claim</h1>
   <p class="error" role="alert">{deadline}. Try again in a minute.</p>
+  {@render next(false)}
 {:else if loaded && check === 'checking'}
   <p class="muted" role="status">Checking your claim…</p>
 {:else if loaded}
