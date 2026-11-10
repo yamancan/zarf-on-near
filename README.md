@@ -10,7 +10,7 @@ never an email. Built for the NEAR Hackathon
 **Live on NEAR testnet** (test funds, no value):
 
 - Claim and send app: https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev
-- Judges' page, 1 test USDC to your Gmail: https://zarf-near-faucet-testnet.sparkling-queen-5e77.workers.dev/try
+- Judges' page, a small amount of test USDC to your Google account: https://zarf-near-faucet-testnet.sparkling-queen-5e77.workers.dev/try
 - Escrow contract: [`zarf-near-1112.testnet`](https://testnet.nearblocks.io/address/zarf-near-1112.testnet)
   (accounts, keys and versions: `docs/deploy/testnet.md`)
 
@@ -73,8 +73,9 @@ Read this before using it with real money.
   for each claim. The unused reservation returns to the sender's free pre-pay on `reclaim`, and
   `prepay_withdraw` sends free pre-pay back to the sender.
 
-Known limit: an account created in the browser ("Create one for me") receives the USDC but needs a
-little NEAR for gas before it can move it. Claims carry no NEAR drip. Gas for the claim itself
+Known limit: the recipient needs an existing NEAR account. An in-browser account option is built
+but switched off in every environment, since a new account has no NEAR to move the USDC on.
+Claims carry no NEAR drip. Gas for the claim itself
 is the relayer's: the contract requires 55 Tgas attached (`required_claim_gas`), and a claim
 measured about 11.6 Tgas burnt.
 
@@ -100,7 +101,7 @@ measured about 11.6 Tgas burnt.
 | Verifier | `verifier/` | Cloudflare Worker: Google ID token (RS256, JWKS, aud/iss/exp/email_verified, nonce = destination), HMAC commitment, merkle proof, chain checks, ed25519 signature |
 | Relayer | `relayer/` | Cloudflare Worker: submits verifier-signed `claim` calls with a claim-only function-call key; payout status from the contract's events |
 | Create app | `web/src/routes/create` | CSV → salts, commitments, tree; storage pre-pay + one `ft_transfer_call`; claim links carrying each recipient's salt, amount and Merkle proof (nothing else is published) |
-| Claim app | `web/src/routes/claim` | Destination (existing account or an in-browser implicit account), Google sign-in, verifier → relayer; the receipt trusts the relayer's event-based 200 (`claim_paid`) and polls `claim_state` only on a 202 |
+| Claim app | `web/src/routes/claim` | Destination: an existing NEAR account, checked on chain before sign-in (an in-browser account option is built but switched off). Cross-chain payout through NEAR Intents to USDC on Base, Arbitrum or Ethereum: shown on testnet as mainnet only, real on mainnet, not yet run end to end. Then Google sign-in, verifier → relayer; the receipt trusts the relayer's event-based 200 (`claim_paid`) and polls `claim_state` only on a 202 |
 
 ## Run it
 
