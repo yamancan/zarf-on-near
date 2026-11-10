@@ -1,27 +1,30 @@
 <script lang="ts">
+  import ZarfMark from '$lib/ZarfMark.svelte';
   let { children } = $props();
 </script>
 
+<header><a class="brand" href="/" aria-label="Zarf home"><ZarfMark /><span>Zarf</span></a></header>
 <main>{@render children()}</main>
 <footer class="muted"><a href="/privacy">Privacy and terms</a></footer>
 
 <style>
   :global(:root) {
-    --bg: #fafaf9;
-    --fg: #1c1917;
+    /* Paper Porcelain (light): Soot text on paper; Glass Porcelain (dark): Porcelain on fume. */
+    --bg: #f8f8fa;
+    --fg: #0b0a13;
     --muted: #78716c;
     --line: #d6d3d1;
-    --accent: #1c1917;
+    --accent: #0b0a13;
     --danger: #b91c1c;
     color-scheme: light dark;
   }
   @media (prefers-color-scheme: dark) {
     :global(:root) {
-      --bg: #0c0a09;
-      --fg: #f5f5f4;
+      --bg: #0a0a0b;
+      --fg: #dcdde5;
       --muted: #a8a29e;
       --line: #44403c;
-      --accent: #f5f5f4;
+      --accent: #dcdde5;
       --danger: #f87171;
     }
   }
@@ -31,10 +34,25 @@
     color: var(--fg);
     font: 16px/1.5 system-ui, sans-serif;
   }
+  header {
+    max-width: 28rem;
+    margin: 0 auto;
+    padding: 1.25rem 16px 0;
+  }
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    text-decoration: none;
+    font: 600 1.05rem/1 'Saira', ui-sans-serif, system-ui, sans-serif;
+    letter-spacing: -0.02em;
+  }
+  :global(a) { color: var(--fg); }
+  :global(h1), :global(h2), :global(h3) { font-family: 'Saira', ui-sans-serif, system-ui, sans-serif; font-weight: 600; letter-spacing: -0.01em; }
   main {
     max-width: 28rem;
     margin: 0 auto;
-    padding: 2rem 16px;
+    padding: 1.5rem 16px 2rem;
   }
   footer {
     max-width: 28rem;
