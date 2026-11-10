@@ -5,6 +5,7 @@ import { destinationNonce, hex, importSigner, isValidAccountId, leafHash, verify
 import { handleClaim, type ClaimDeps } from '../src/claimFlow';
 import { remoteJwks } from '../src/jwks';
 import { UpstreamError } from '../src/upstream';
+import recorded from './fixtures/1click-status-pending.json';
 import { jwksResponse, sign, testIssuer, type TestIssuer } from './jwtFixture';
 
 const { keys, context, campaigns, claims } = vectors;
@@ -24,6 +25,7 @@ const chain = (over: ChainOver = {}): ChainReader => ({
     over.missing || id !== campaigns.main.campaign_id
       ? null
       : {
+          sender: 'sender.testnet',
           merkle_root: over.root ?? campaigns.main.merkle_root,
           deadline_ns: over.deadline ?? context.deadline_ns,
           balance: over.balance ?? '1000000000',
@@ -170,5 +172,52 @@ describe('handleClaim', () => {
   it('fails closed when the chain read fails', async () => {
     const broken: ChainReader = { ...chain(), getNetwork: () => Promise.reject(new Error('rpc down')) };
     await expect(handleClaim(await request(), { ...deps, chain: broken })).rejects.toThrow(UpstreamError);
+  });
+});
+
+describe('handleClaim with a 1Click payout (intents)', () => {
+  const DEP = 'd'.repeat(64); // the 1Click deposit address is the signed destination
+  const asset = recorded.quoteResponse.quoteRequest.destinationAsset as string;
+  const recipient = recorded.quoteResponse.quoteRequest.recipient as string;
+  const later = new Date(NOW_MS + 2 * 3600_000).toISOString();
+  const status = (fn: (s: typeof recorded) => void = () => {}) => {
+    const s = structuredClone(recorded);
+    s.quoteResponse.quote.depositAddress = DEP;
+    s.quoteResponse.quote.deadline = later;
+    Object.assign(s.quoteResponse.quoteRequest, { amount: named.call_args.amount, deadline: later, refundTo: 'sender.testnet' });
+    fn(s);
+    return s;
+  };
+  const run = async (over: Partial<ClaimDeps>, req: Record<string, unknown> = {}) =>
+    handleClaim(
+      await request({ id_token: await token({}, DEP), destination: DEP, intents: { destination_asset: asset, recipient }, ...req }),
+      { ...deps, chain: chain({ network: 'mainnet' }), ...over },
+    );
+
+  it('signs when 1Click holds the matching unfunded quote, refunding to the campaign sender', async () => {
+    const seen: string[] = [];
+    const res = await run({ intentsStatus: async (a) => (seen.push(a), status()) });
+    expect(res.status).toBe(200);
+    expect(res.body.destination).toBe(DEP);
+    expect(seen).toEqual([DEP]);
+  });
+  it('409s with the check code when the quote does not match', async () => {
+    const res = await run({ intentsStatus: async () => status((s) => (s.quoteResponse.quoteRequest.refundTo = 'someone.near')) });
+    expect(res).toEqual({ status: 409, body: { error: 'INTENTS_WRONG_REFUND' } });
+  });
+  it('409s INTENTS_QUOTE_NOT_FOUND for an address 1Click does not know', async () => {
+    const intentsStatus = async () => { throw new (await import('../src/intents')).IntentsError('INTENTS_QUOTE_NOT_FOUND'); };
+    expect(await run({ intentsStatus })).toEqual({ status: 409, body: { error: 'INTENTS_QUOTE_NOT_FOUND' } });
+  });
+  it('throws UpstreamError(1click) when 1Click is down, signing nothing', async () => {
+    await expect(run({ intentsStatus: async () => { throw new Error('HTTP 503'); } })).rejects.toEqual(new UpstreamError('1click'));
+  });
+  it('refuses intents on a network other than mainnet, and a non-deposit destination', async () => {
+    const intentsStatus = vi.fn(async () => status());
+    expect(await run({ intentsStatus, chain: chain({ network: 'testnet' }) })).toEqual({ status: 400, body: { error: 'E108_INVALID_INPUT' } });
+    const named_ = named.call_args.destination;
+    expect(await run({ intentsStatus }, { destination: named_, id_token: await token({}, named_) })).toEqual({ status: 400, body: { error: 'E108_INVALID_INPUT' } });
+    expect(await run({ intentsStatus }, { intents: { destination_asset: asset } })).toEqual({ status: 400, body: { error: 'E108_INVALID_INPUT' } });
+    expect(intentsStatus).not.toHaveBeenCalled();
   });
 });

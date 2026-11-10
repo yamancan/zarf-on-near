@@ -1,6 +1,7 @@
 import type { ChainReader } from './chain';
 import { commitment, hex, isValidAccountId, leafHash, signClaim, unhex, verifyMerkleProof, type Signer } from './claim';
 import { TokenError, verifyGoogleIdToken } from './googleIdToken';
+import { checkIntentsStatus, fetchIntentsStatus, IntentsError } from './intents';
 import type { JwksSource } from './jwks';
 import { UpstreamError } from './upstream';
 
@@ -14,6 +15,7 @@ export interface ClaimDeps {
   chain: ChainReader;
   signer: Signer;
   measurementId?: string; // Mode T only: this agent's approved measurement id
+  intentsStatus?: (depositAddress: string) => Promise<unknown>; // 1Click GET /v0/status; tests stub it
   nowMs?: number;
 }
 
@@ -40,6 +42,14 @@ export async function handleClaim(input: unknown, d: ClaimDeps): Promise<ClaimRe
   if (!Array.isArray(proof) || proof.length > 20 || !proof.every((p) => typeof p === 'string' && HEX32.test(p))) return refuse(400, 'E108_INVALID_INPUT');
   if (typeof amount !== 'string') return refuse(400, 'E108_INVALID_INPUT');
   if (!U128.test(amount) || BigInt(amount) >> 128n) return refuse(400, 'E109_INVALID_AMOUNT');
+  // Cross-chain payout (T9b): `destination` is a 1Click deposit address; refunds go to the campaign sender.
+  const intents = b.intents == null ? null : (b.intents as Record<string, unknown>);
+  if (
+    intents &&
+    (typeof intents !== 'object' || typeof intents.destination_asset !== 'string' || typeof intents.recipient !== 'string' || !HEX32.test(destination))
+  ) {
+    return refuse(400, 'E108_INVALID_INPUT');
+  }
 
   const nowMs = d.nowMs ?? Date.now();
   let email: string;
@@ -57,6 +67,7 @@ export async function handleClaim(input: unknown, d: ClaimDeps): Promise<ClaimRe
     throw new UpstreamError('chain');
   });
   if (!campaign) return refuse(404, 'E110_UNKNOWN_CAMPAIGN');
+  if (intents && network !== 'mainnet') return refuse(400, 'E108_INVALID_INPUT'); // 1Click routes mainnet USDC only
   const nowNs = BigInt(Math.floor(nowMs)) * 1_000_000n;
   if (nowNs > BigInt(campaign.deadline_ns)) return refuse(409, 'E125_CAMPAIGN_ENDED');
   if (state === 'claimed') return refuse(409, 'E105_ALREADY_CLAIMED');
@@ -75,6 +86,19 @@ export async function handleClaim(input: unknown, d: ClaimDeps): Promise<ClaimRe
   if (BigInt(campaign.balance) < BigInt(amount)) return refuse(409, 'E129_INSUFFICIENT_BALANCE');
 
   const expires_at_ns = expiresNs.toString();
+  if (intents) {
+    let status: unknown;
+    try {
+      status = await (d.intentsStatus ?? fetchIntentsStatus)(destination);
+      checkIntentsStatus(status, {
+        depositAddress: destination, amount, destinationAsset: intents.destination_asset as string, recipient: intents.recipient as string,
+        campaignSender: campaign.sender, expiresAtNs: expires_at_ns,
+      });
+    } catch (e) {
+      if (e instanceof IntentsError) return refuse(409, e.code);
+      throw new UpstreamError('1click'); // nothing signed; the page can retry
+    }
+  }
   const signature = await signClaim(d.signer.key, {
     network, contract_id: d.contractId, campaign_id, commitment: c, amount, destination, expires_at_ns,
   });
