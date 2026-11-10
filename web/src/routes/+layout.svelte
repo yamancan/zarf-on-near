@@ -13,7 +13,7 @@
     --bg: #f8f8fa;
     --fg: #0b0a13;
     --muted: #78716c;
-    --line: #d6d3d1;
+    --line: #8a8580; /* form borders: 3:1 or more on the page (WCAG 1.4.11) */
     --accent: #0b0a13;
     --danger: #b91c1c;
     color-scheme: light dark;
@@ -23,7 +23,7 @@
       --bg: #0a0a0b;
       --fg: #dcdde5;
       --muted: #a8a29e;
-      --line: #44403c;
+      --line: #78716c;
       --accent: #dcdde5;
       --danger: #f87171;
     }
@@ -63,6 +63,7 @@
   :global(h2) { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
   :global(.muted) { color: var(--muted); font-size: 0.875rem; }
   :global(.error) { color: var(--danger); }
+  :global(:focus-visible) { outline: 2px solid var(--fg); outline-offset: 2px; }
   :global(code) { word-break: break-all; }
   :global(input[type='text']) {
     width: 100%;

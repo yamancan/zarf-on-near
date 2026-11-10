@@ -356,6 +356,8 @@
   }
 </script>
 
+<svelte:head><title>Send USDC · Zarf</title></svelte:head>
+
 <h1>Send tokens to emails</h1>
 <p class="muted"><a href="/campaigns">Your campaigns</a>: reclaim after the deadline, withdraw unused storage pre-pay.</p>
 <p class="muted">
@@ -409,7 +411,8 @@
 {:else}
   <h2>1. Recipients</h2>
   <p class="muted">One per line: <code>email,amount</code> in USDC. Use the exact address the recipient signs in to Google with.</p>
-  <textarea bind:value={csv} rows="8" placeholder={'email,amount\nalice@example.com,10\nbob@example.com,2.5'} aria-label="Recipients CSV" disabled={!!draft}></textarea>
+  <label for="recipients">Recipients (email,amount per line)</label>
+  <textarea id="recipients" bind:value={csv} rows="8" placeholder={'email,amount\nalice@example.com,10\nbob@example.com,2.5'} disabled={!!draft}></textarea>
   {#if parsed.rows.length}
     <p>{parsed.rows.length} recipients, {formatAmount(parsed.total)} USDC in total.</p>
   {/if}
@@ -423,7 +426,8 @@
   {/if}
 
   <h2>2. Deadline</h2>
-  <input type="datetime-local" bind:value={deadline} aria-label="Claim deadline" disabled={!!draft} />
+  <label for="deadline">Claim deadline</label>
+  <input id="deadline" type="datetime-local" bind:value={deadline} disabled={!!draft} />
   {#if minMs !== null && deadline && !deadlineOk}
     <p class="error">The deadline must be after {new Date(minMs).toLocaleString()}.</p>
   {/if}

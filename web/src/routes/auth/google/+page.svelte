@@ -20,6 +20,8 @@
   });
 </script>
 
+<svelte:head><title>Signing in · Zarf</title></svelte:head>
+
 {#if error}
   <h1>Sign-in did not finish</h1>
   <p class="error" role="alert">{error}</p>

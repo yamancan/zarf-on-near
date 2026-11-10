@@ -164,6 +164,8 @@
   }
 </script>
 
+<svelte:head><title>Claim your USDC · Zarf</title></svelte:head>
+
 {#snippet next(newLink: boolean)}
   {#if newLink}<p>Nothing was taken from you. Ask the sender for a new link.</p>{/if}
   <p><a href="/">What is Zarf?</a></p>

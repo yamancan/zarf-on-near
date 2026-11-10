@@ -93,6 +93,8 @@
   const fmtDate = (ns: string) => new Date(Number(BigInt(ns) / 1_000_000n)).toLocaleString();
 </script>
 
+<svelte:head><title>Your campaigns · Zarf</title></svelte:head>
+
 <h1>Your campaigns</h1>
 <p class="muted">
   After a campaign's deadline you can take back what was not claimed, plus the storage it reserved. <a href="/create">Create a campaign</a>

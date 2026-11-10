@@ -1,4 +1,4 @@
-<svelte:head><title>Privacy and terms · Zarf on NEAR</title></svelte:head>
+<svelte:head><title>Privacy and terms · Zarf</title></svelte:head>
 
 <h1>Privacy and terms</h1>
 <p class="muted">Operated by Trion Labs. Contact: [CONTACT EMAIL].</p>

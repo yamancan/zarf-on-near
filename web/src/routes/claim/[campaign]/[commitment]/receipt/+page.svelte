@@ -94,6 +94,8 @@
   });
 </script>
 
+<svelte:head><title>Your claim · Zarf</title></svelte:head>
+
 {#if !resumed && (!ok || !attempt)}
   <h1>Nothing to show yet</h1>
   <p class="muted">Open your claim link to start.</p>
