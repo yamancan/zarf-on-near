@@ -34,11 +34,23 @@ commitment_i    = HMAC-SHA256(key = salt_i, msg = canonical_email)      // 32 by
   the address Google returns in `email`.
 - The same email may appear twice. Different salts give different commitments, so each row
   is a separate allocation.
-- **The claim link carries the salt in the fragment:**
-  `https://<claim-host>/claim/<campaign_id>/<commitment>#s=<salt_hex>`.
-  The fragment never reaches a server. The claim app sends `salt` only in the POST to the
-  verifier, together with the id_token. The claim app removes the fragment with
+- **The claim link carries everything the recipient needs, in the fragment:**
+  `https://<claim-host>/claim/<campaign_id>/<commitment>#s=<salt_hex>&a=<amount>&p=<proof>`
+  - `s`: the 32-byte salt, 64 lowercase hex.
+  - `a`: the amount in base units, decimal (`u128`).
+  - `p`: the merkle proof, the sibling hashes concatenated in order (32 bytes each) and
+    encoded as base64url without padding. An empty proof is an empty string.
+  The fragment never reaches a server. The claim app sends `salt`, `amount` and `proof` only
+  in the POST to the verifier, together with the id_token. It removes the fragment with
   `history.replaceState` right after reading it, and the verifier never logs `salt`.
+- **The leaf list is not published.** The claim app rebuilds the root from
+  `(commitment, amount, proof)` and refuses the link (`LINK_MISMATCH`) if it differs from
+  `get_campaign().merkle_root`, before any sign-in. The sender keeps the full leaf list only
+  in the recovery file. This removes leaf hosting, keeps amounts private until claimed, and
+  means a leaked verifier key can claim only leaves whose links also leaked.
+- Before sign-in the claim app also reads `claim_state` and the deadline, and shows "already
+  claimed", "ended" or "unknown campaign" instead of the form. It shows the amount from the
+  link ("10 USDC is waiting for you") only after the root check passes.
 
 A leaked link lets its holder test one guessed email against one commitment; it does not
 let anyone claim without that Google account.
@@ -155,7 +167,7 @@ Trust-model consequences, to be stated in the README:
 
 ## Contract calls (JSON args)
 
-`new({ owner_id, network, token_ids, min_lifetime_ns, agent_ttl_ns, resolve_delay_ns })`. `network` and
+`new({ owner_id, guardian_id, network, token_ids, min_lifetime_ns, agent_ttl_ns, resolve_delay_ns, upgrade_delay_ns, initial_signers })`. `network` and
 `min_lifetime_ns` are immutable. `min_lifetime_ns` = 600 s on testnet and 30 days on mainnet.
 `ft_storage_deposit` is read from each allowed token's `storage_balance_bounds().min` when
 the token is allow-listed, and stored (USDC: 0.00125 NEAR).
@@ -199,8 +211,11 @@ for a claim stranded in `pending` because its callback never completed (out of g
   in-flight moves back to balance.
 - `evidence` is the `ft_transfer` receipt id the owner read the outcome from.
 - Emits `pending_resolved`.
-- Trust cost, stated in the README: a wrong `paid` can double-pay or block **one** claim; it
-  can't touch any other allocation. The callback is built so this should never be needed:
+- Trust cost, stated in the README: a wrong `paid` can block one claim (`paid: true` for a
+  transfer that failed) or **pay one claim twice** (`paid: false` for a transfer that
+  succeeded). A double payment comes out of the contract's shared token balance, so it can
+  leave a later withdrawal of the same token short, in any campaign. The owner is trusted
+  for this, as for upgrades. The callback is built so this should never be needed:
   static reserved gas, no result bytes read, no branch that can panic.
 
 Storage, per campaign (create app):
@@ -235,7 +250,7 @@ Storage, per campaign (create app):
   rest stays in the free pre-pay (withdrawable).
 - The create app deposits only the shortfall:
   `campaign_bytes_cost + leaf_count × per_claim_storage − prepay_balance_of(sender)`.
-- `get_config()` → `{ network, min_lifetime_ns, agent_ttl_ns, resolve_delay_ns, token_ids, storage_byte_cost }` (`storage_byte_cost` = `env::storage_byte_cost()`, yocto per byte; the create app adds one owner key's slack, 32 × this, to its shortfall), so the create form
+- `get_config()` → `{ network, min_lifetime_ns, agent_ttl_ns, resolve_delay_ns, upgrade_delay_ns, token_ids, storage_byte_cost }` (`storage_byte_cost` = `env::storage_byte_cost()`, yocto per byte; the create app adds one owner key's slack, 32 × this, to its shortfall), so the create form
   can refuse a too-early deadline before sending.
 - `refresh_token_storage({ token_id })`, owner only. Reads the token's
   `storage_balance_bounds().min` into `ft_storage_deposit`. Until it has run for a token,
@@ -343,10 +358,101 @@ The contract logs `EVENT_JSON:{"standard":"zarf-near","version":"1.0.0","event":
 
 The create app takes `campaign_id` from `campaign_created`.
 
+## Upgrades and ownership
+
+The contract is upgradeable, but only through its own code and only after a public delay.
+
+- **The escrow account holds no full-access key.** A full-access key could sign as the
+  escrow and call the token's `ft_transfer` directly, so it is custody. The deploy script
+  deletes every full-access key after deploy + `new`, and fails unless none remain. From then
+  on the only way to change the code is `apply_upgrade`.
+- `upgrade_delay_ns` is an immutable init arg, exposed by `get_config`. The owner's decision
+  (2026-11-11) is a delay of **at most 1 h**. Mainnet deploys use 1 h. On `mainnet`, `new`
+  refuses a value below 10 min or above 1 h (`E108`), so a typo can't deploy with no delay.
+- One hour is a short notice period. It only protects if someone is watching, so the
+  operator must alert on `pending_upgrade()`, `pending_owner()` and newly added owner keys
+  (the relayer's `/health` reports all three), and cancel within the hour.
+- `propose_upgrade({ code_hash, source })`, owner only. `source` is a short string naming the
+  public repository and commit the wasm was built from (≤ 200 ASCII bytes). Stores
+  `{ code_hash, source, ready_at_ns = now + upgrade_delay_ns }` and emits `upgrade_proposed`.
+  Only one proposal may be pending (`E108`). Builds are not reproducible yet, so `source`
+  tells reviewers what to read; it does not prove the hash. The README says so.
+- `cancel_upgrade()`, owner only. Emits `upgrade_cancelled`. With nothing pending → `E108`.
+- A malformed or uppercase `code_hash` → `E108`.
+- `apply_upgrade()`, owner only. Its input is the raw wasm (not JSON). It requires a pending
+  proposal (`E108`), `now >= ready_at_ns` (`E107`) and `sha256(input) == code_hash` (`E108`).
+  If the new wasm is larger than the current one, the call must attach at least
+  `(new_size − old_size) × storage_byte_cost` (`E128`), so the extra code storage is paid by
+  the owner and never from senders' pre-pay.
+  It then deploys the code to its own account and calls `migrate()` in the **same batch**,
+  so a failing migration rolls the deploy back. A private callback, `on_upgrade`, runs after
+  the batch. `apply_upgrade` first marks the proposal **applying**; while that flag is set,
+  `apply_upgrade` and `cancel_upgrade` are refused (`E108`), so an upgrade in flight can
+  neither run twice nor be reported as cancelled while it still lands. On success `on_upgrade`
+  clears the proposal and emits `upgrade_applied`. On failure it clears the flag, keeps the
+  proposal pending and emits `upgrade_failed { code_hash }`. `on_upgrade` acts only on the
+  proposal whose `code_hash` it was scheduled for.
+- `migrate()` is private and lives in the new code. State layout changes go there. Pending
+  claims must survive a migration. `migrate` must be idempotent, and every version must keep
+  `on_upgrade`, `on_claim`, `on_reclaim` and `on_token_storage` with the same names and
+  arguments: a callback scheduled by the old code runs on whatever code is live when it lands.
+- `pending_upgrade()` → `{ code_hash, source, ready_at_ns } | null`.
+- **Owner keys wait the same delay.** `add_owner_key` records
+  `active_from_ns = now + upgrade_delay_ns`, and a campaign's policy snapshot includes only
+  keys with `active_from_ns <= now` (and `valid_until_ns >= deadline_ns`). Otherwise a thief
+  with the owner key could register a signer and forge claims on every campaign created
+  from that moment, with no delay at all. `remove_agent` stays immediate: removal costs only
+  liveness. `new` takes `initial_signers: [{ signer, valid_until_ns }]`, active at once,
+  because nothing exists yet for them to attack. Measurement approvals (Mode T) follow the
+  same rule.
+- **If the owner key is compromised** (thief and team both hold it), each can cancel the
+  other's proposals, so upgrades and ownership changes freeze. Existing campaigns stay safe.
+  The response is: stop creating campaigns, let existing ones run to their deadlines, and
+  reclaim. Only an owner that is a multisig or DAO from the start avoids this.
+- **Guardian.** `guardian_id` is an optional, immutable init arg (`null` = no guardian),
+  exposed by `get_config`. It can only delay, never act:
+  - `cancel_upgrade()`, `cancel_owner()` and `remove_agent` on an owner key that is **not yet
+    active** may be called by the guardian as well as the owner;
+  - `freeze_proposals()`, guardian only, sets `frozen_until_ns = now + 7 days`. While frozen,
+    `propose_upgrade`, `propose_owner` and `add_owner_key` are refused (`E107`), and
+    `apply_upgrade` and `accept_owner` too. The owner cannot lift a freeze.
+  - It can never propose, apply, add keys, move funds or change any rule. A stolen guardian
+    key can only delay, but it can delay **indefinitely**: a freeze can be renewed, and the
+    guardian changes only through an upgrade, which a freeze blocks. Then no upgrade, owner
+    transfer or new signer key is possible; once the current signer keys expire, new
+    campaigns fail with `E127`. Existing campaigns still run to their deadline and reclaim.
+    This costs liveness, never funds, and is accepted: a cooldown between freezes would
+    also give a thief holding the owner key a window.
+  The guardian breaks the standoff described above: one cancel plus a freeze buys at least a
+  week to warn users, with a key that is not the owner's. It changes only through an upgrade.
+- There is no early reclaim while an upgrade is pending. Recipients' exit is to claim;
+  an early exit for senders would break the deadline promised to recipients.
+- **Ownership moves in two steps and waits the same delay:** `propose_owner({ new_owner })`
+  (owner) → after `upgrade_delay_ns`, `accept_owner()` (the new owner). `cancel_owner()`
+  (owner). A second `propose_owner` while one is pending → `E108`. `accept_owner` by the wrong
+  account or too early → `E107`; with nothing pending → `E108`. `cancel_owner` with nothing
+  pending → `E108`. Views: `get_owner()`, `pending_owner()`. An immediate transfer would let a thief
+  with the owner key lock the team out before anyone could cancel.
+- The owner is an ordinary NEAR account, so it can be a multisig or a DAO contract without
+  any change here.
+
+Events: `upgrade_proposed { code_hash, source, ready_at_ns }`, `upgrade_cancelled { code_hash }`,
+`upgrade_applied { code_hash }`, `upgrade_failed { code_hash }`, `owner_proposed { new_owner, ready_at_ns }`,
+`owner_changed { old_owner, new_owner }`.
+
+Trust statement for the README (accurate, not reassuring): the owner account can replace
+the contract's code, and with it move every escrowed token, one hour after announcing the new
+code's hash on chain. One hour is too short for users to react: recipients cannot be expected
+to claim within it, and senders cannot reclaim before the deadline. Protection therefore
+rests on the operator (and the guardian, if set) watching these announcements and cancelling
+a bad one within the hour. The README also states whether the owner is a single key or a
+multisig, whether a guardian is set, and that builds are not reproducible yet, so a proposed
+hash cannot be verified against source by third parties.
+
 ## Off-chain interfaces
 
-**Leaf list** (published by the create app, T7). It is fetched by the claim app from
-`<PUBLIC_LEAVES_URL>/<campaign_id>.json`:
+**Leaf list** (kept by the sender in the recovery file; **never published**, see the claim
+link above). Its shape, inside the recovery file:
 
 ```json
 { "campaign_id": "<u64>", "merkle_root": "<hex32>",
@@ -354,8 +460,7 @@ The create app takes `campaign_id` from `campaign_created`.
 ```
 
 - Leaves are in tree order.
-- The claim app recomputes the root and refuses the file if it differs from `get_campaign`.
-- Emails and salts never appear in it.
+- The recovery file adds, per leaf, the email and salt so the sender can rebuild every link.
 
 **Relayer** (T5). `POST /claim` takes exactly the verifier's 200 body (the contract's `claim`
 args) and refuses anything else. The transaction's final status can't tell a payout from a
