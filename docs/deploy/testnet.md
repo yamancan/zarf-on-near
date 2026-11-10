@@ -66,7 +66,7 @@ Token: Circle testnet USDC `3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520
 
 ```bash
 CONTRACT_ID=zarf-near-1111.testnet OWNER_ID=zarf-near-owner-1111.testnet \
-RELAYER_ID=zarf-near-relayer-1111.testnet scripts/deploy-testnet.sh
+RELAYER_ID=zarf-near-relayer-1111.testnet scripts/deploy-testnet.sh   # since renamed scripts/deploy.sh
 ```
 
 Built from revision `48cda04` (contract code = revision `5342b35`), Rust 1.86.0,
