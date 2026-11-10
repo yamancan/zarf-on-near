@@ -24,6 +24,11 @@ so `shade deploy` can drive it unchanged:
   `agents[hex(pk)]` passes the campaign's snapshotted policy, then
   `env::ed25519_verify`.
 
+Storage: `storage_costs.campaign_bytes_cost` today bounds only owner-policy snapshots. The
+attested path adds a `measurement_id` per approved measurement to each campaign snapshot, so
+the bound must grow by 32 B × (number of approved measurements), or become a per-policy
+value, before `policy: "attested"` campaigns are accepted.
+
 Build: `cargo near build non-reproducible-wasm --no-abi`, with `shade-attestation =0.2.0`,
 `near-sdk =5.26.1` and Rust 1.86.0, the pins from the framework. Local and whitelist mode
 exists only under `cfg(test)` / a test feature, never in the release WASM.
