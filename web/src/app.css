@@ -1,0 +1,78 @@
+@import 'tailwindcss';
+/* Zen design system, copied from the main repo (web/packages/ui/lib/styles), values unchanged. */
+@import './lib/zen/styles/index.css';
+
+/* As in the main repo's landing (apps/landing/src/app.css): font-sans is Saira. */
+@theme {
+  --font-sans: 'Saira', ui-sans-serif, system-ui, sans-serif;
+}
+
+/* The claim app's deeper fume ground (main repo apps/claim/src/app.css). */
+[data-theme='glass-porcelain'],
+[data-theme='dark'] {
+  --zen-bg: #0a0a0b;
+  --zen-bg-elevated: #131315;
+  --zen-bg-sunken: #1a1a1d;
+  --color-base-100: #0a0a0b;
+  --color-base-200: #131315;
+  --color-base-300: #1a1a1d;
+  background: #0a0a0b;
+  background-color: #0a0a0b;
+}
+
+/* Landing grain (main repo apps/landing/src/app.css), used only inside the hero. */
+.landing-grain {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='turbulence' baseFrequency='0.7' numOctaves='5' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='1'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+}
+[data-theme='dark'] .landing-grain,
+[data-theme='glass-porcelain'] .landing-grain {
+  opacity: 0.35;
+  mix-blend-mode: overlay;
+  filter: contrast(130%) brightness(115%) grayscale(100%);
+}
+[data-theme='light'] .landing-grain,
+[data-theme='paper-porcelain'] .landing-grain {
+  opacity: 0.06;
+  mix-blend-mode: multiply;
+  filter: contrast(115%) brightness(95%) grayscale(100%);
+}
+
+/*
+ * The pages not yet moved to Zen components (create, campaigns, receipt, privacy) keep their plain
+ * styles, now on Zen tokens and in the base layer so Tailwind utilities and Zen components win.
+ */
+@layer base {
+  :root {
+    --bg: var(--zen-bg);
+    --fg: var(--zen-fg);
+    --muted: var(--zen-fg-muted);
+    --line: var(--zen-border-strong);
+    --accent: var(--zen-fg);
+    --danger: var(--zen-error);
+  }
+  a { color: var(--fg); text-decoration: underline; }
+  h1, h2, h3 { font-weight: 600; letter-spacing: -0.01em; }
+  .legacy h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
+  .legacy h2 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
+  .legacy p { margin: 0 0 1rem; }
+  .muted { color: var(--muted); font-size: 0.875rem; }
+  .error { color: var(--danger); }
+  :focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+  code { word-break: break-all; }
+  .legacy input[type='text'] {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: transparent;
+  }
+  .legacy button {
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    border: 1px solid var(--accent);
+    cursor: pointer;
+  }
+  .legacy button.primary { background: var(--accent); color: var(--bg); width: 100%; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+}

@@ -87,19 +87,20 @@
 {:else if !assets}
   <p class="muted" role="status">Loading chains…</p>
 {:else}
-  <label for="chain">Chain</label>
-  <select id="chain" bind:value={key}>
+  <label for="chain" class="text-xs font-medium text-zen-fg-muted">Chain</label>
+  <select id="chain" bind:value={key} class="w-full bg-[oklch(from_var(--zen-bg)_l_c_h_/_0.5)] border-[0.5px] border-zen-border rounded-[var(--zen-radius-input)] px-4 py-3 text-sm text-zen-fg hover:border-zen-border-strong focus:outline-none focus:border-[oklch(from_var(--zen-primary)_l_c_h_/_0.5)]">
     {#each assets as a (a.chain.key)}<option value={a.chain.key}>USDC on {a.chain.name}</option>{/each}
   </select>
   {#if asset}
-    <p>
+    <p class="text-xs text-zen-fg-muted">
       If the payout cannot be completed, the USDC returns to <code>{refundTo}</code> on NEAR (the sender), not to this
       address.
     </p>
-    <label for="addr">Your {asset.chain.name} address</label>
+    <label for="addr" class="text-xs font-medium text-zen-fg-muted">Your {asset.chain.name} address</label>
     <input
       id="addr"
       type="text"
+      class="w-full bg-[oklch(from_var(--zen-bg)_l_c_h_/_0.5)] border-[0.5px] border-zen-border rounded-[var(--zen-radius-input)] px-4 py-3 text-sm text-zen-fg hover:border-zen-border-strong focus:outline-none focus:border-[oklch(from_var(--zen-primary)_l_c_h_/_0.5)]"
       bind:value={address}
       placeholder={asset.chain.placeholder}
       autocomplete="off"
@@ -108,7 +109,7 @@
       aria-invalid={!!addressError}
       aria-describedby="addr-note"
     />
-    <div id="addr-note">
+    <div id="addr-note" class="text-xs flex flex-col gap-2">
       {#if addressError}
         <p class="error" role="alert">{addressError}</p>
       {:else if quoting}
@@ -132,18 +133,9 @@
     padding-left: 1.25rem;
     margin: 0.25rem 0;
   }
-  select {
-    width: 100%;
-    padding: 0.75rem;
-    font: inherit;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: transparent;
-    color: inherit;
-  }
   .quote {
-    border: 1px solid var(--line);
-    border-radius: 8px;
+    border: 0.5px solid var(--zen-border);
+    border-radius: 12px;
     padding: 0.75rem;
   }
 </style>

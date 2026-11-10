@@ -1,34 +1,56 @@
-<svelte:head><title>Zarf: pay any email</title></svelte:head>
+<script lang="ts">
+  // Hero after the main repo's landing (packages/ui/lib/components/landing/Hero.svelte): same eyebrow,
+  // headline, CTA and status classes. Grain lives only in the hero; nothing is drawn behind the text.
+  import { ArrowRight } from 'lucide-svelte';
+  import ZenButton from '$lib/zen/components/ZenButton.svelte';
 
-<h1>Pay any email.</h1>
-<p>
-  Send USDC to an email address. The recipient opens a link, signs in with Google and receives it. The email never
-  goes on chain; our verifier sees it once, to check the claim.
-</p>
-<p><a class="cta primary" href="https://zarf-near-faucet-testnet.sparkling-queen-5e77.workers.dev/try">Try it: get 1 test USDC at your Gmail</a></p>
-<p><a class="cta" href="/create">Send USDC</a></p>
-<ol>
-  <li>You enter emails and amounts.</li>
-  <li>Each person gets a private link.</li>
-  <li>They sign in with Google and choose where the USDC goes.</li>
-</ol>
-<p class="muted"><a href="/campaigns">Your campaigns</a> · NEAR testnet: test funds with no value.</p>
+  const TRY_URL = 'https://zarf-near-faucet-testnet.sparkling-queen-5e77.workers.dev/try';
+</script>
 
-<style>
-  .cta {
-    display: block;
-    padding: 0.75rem 1rem;
-    border-radius: 8px;
-    border: 1px solid var(--accent);
-    color: var(--fg);
-    text-align: center;
-    text-decoration: none;
-  }
-  .cta.primary {
-    background: var(--accent);
-    color: var(--bg);
-  }
-  ol {
-    padding-left: 1.25rem;
-  }
-</style>
+<svelte:head><title>Zarf: send tokens to an email</title></svelte:head>
+
+<section class="relative w-full min-h-[calc(100vh-4rem)] flex flex-col items-center justify-center overflow-hidden">
+  <div class="landing-grain absolute inset-0 pointer-events-none z-0" aria-hidden="true"></div>
+
+  <div class="relative z-10 text-center max-w-4xl px-6 flex flex-col items-center gap-5 md:gap-6">
+    <span
+      class="inline-flex items-center gap-2 rounded-full border border-zen-fg/10 bg-zen-fg/[0.04] backdrop-blur-md pl-3.5 pr-4 py-1.5"
+    >
+      <span class="text-[10px] font-semibold tracking-[0.28em] uppercase text-zen-fg/55">Built on NEAR</span>
+    </span>
+
+    <h1 class="text-4xl sm:text-5xl md:text-6xl font-bold tracking-tighter text-zen-fg leading-[1.12] [text-wrap:balance]">
+      Send tokens to an email.
+    </h1>
+
+    <p class="text-base md:text-lg text-zen-fg/60 max-w-xl text-center leading-normal">
+      They claim with Google. The email never goes on chain.
+    </p>
+
+    <div class="flex flex-col sm:flex-row items-center gap-4 mt-6 w-full sm:w-auto">
+      <a href={TRY_URL} class="inline-block w-full sm:w-auto no-underline">
+        <ZenButton
+          variant="primary"
+          size="lg"
+          class="rounded-full !bg-zen-fg/90 backdrop-blur-sm !text-zen-bg hover:shadow-lg hover:shadow-zen-fg/10 w-full sm:w-auto"
+        >
+          Try it with your Gmail
+          {#snippet iconRight()}<ArrowRight class="w-3.5 h-3.5" />{/snippet}
+        </ZenButton>
+      </a>
+      <a href="/create" class="inline-block w-full sm:w-auto no-underline">
+        <ZenButton
+          variant="secondary"
+          size="lg"
+          class="rounded-full !bg-zen-fg/5 backdrop-blur-md !text-zen-fg/80 !border-zen-fg/10 w-full sm:w-auto"
+        >
+          Send USDC
+        </ZenButton>
+      </a>
+    </div>
+
+    <p class="inline-flex items-center gap-1.5 text-[11px] font-medium tracking-[0.15em] uppercase text-zen-fg/35">
+      Live on <span class="text-zen-fg/55">NEAR testnet</span>
+    </p>
+  </div>
+</section>
