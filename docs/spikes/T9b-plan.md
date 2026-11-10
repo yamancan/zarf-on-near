@@ -80,7 +80,7 @@ KNOWN_DEPOSIT_TX | PROCESSING | SUCCESS | INCOMPLETE_DEPOSIT | REFUNDED | FAILED
   credits USDC on <chain> to it without a memo or tag." No memo/tag field exists anywhere,
   so no memo network can ever be listed. Adding Solana, Stellar, XRP, TON or similar
   needs its own review, since a memo or tag can be required.
-- **Refund destination (reviewer M1, decided): back to the campaign sender on NEAR.**
+- **Refund destination (decided): back to the campaign sender on NEAR.**
   `refundType: ORIGIN_CHAIN`, `refundTo = get_campaign(campaign_id).sender`. The page reads
   it from the contract view for the quote; the verifier reads it from chain itself and
   never from the request. A failed swap returns the USDC to the payer, who can pay again.
@@ -93,7 +93,7 @@ KNOWN_DEPOSIT_TX | PROCESSING | SUCCESS | INCOMPLETE_DEPOSIT | REFUNDED | FAILED
 - Show the preview as "≈ {amountOutFormatted} USDC on {chain} (at least
   {minAmountOut/1e6}); network fee {withdrawFee/1e6} USDC; about {timeEstimate} s".
 
-## 4. Verifier wiring (`verifier/`, web-agent's tree; the smallest change)
+## 4. Verifier wiring (`verifier/`; the smallest change)
 
 - The request gains an optional `intents: { destination_asset, recipient }`. There is no
   refund field: the verifier passes `campaignSender = campaign.sender` from its own
