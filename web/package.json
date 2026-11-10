@@ -34,5 +34,8 @@
       "secp256k1",
       "workerd"
     ]
+  },
+  "dependencies": {
+    "@noble/hashes": "1.8.0"
   }
 }

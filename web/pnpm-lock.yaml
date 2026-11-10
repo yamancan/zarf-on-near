@@ -7,6 +7,10 @@ settings:
 importers:
 
   .:
+    dependencies:
+      '@noble/hashes':
+        specifier: 1.8.0
+        version: 1.8.0
     devDependencies:
       '@near-js/transactions':
         specifier: 2.5.1
