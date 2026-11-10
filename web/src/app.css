@@ -38,41 +38,29 @@
   filter: contrast(115%) brightness(95%) grayscale(100%);
 }
 
-/*
- * The pages not yet moved to Zen components (create, campaigns, receipt, privacy) keep their plain
- * styles, now on Zen tokens and in the base layer so Tailwind utilities and Zen components win.
- */
+/* Base layer: Tailwind utilities and Zen components win over it. */
 @layer base {
-  :root {
-    --bg: var(--zen-bg);
-    --fg: var(--zen-fg);
-    --muted: var(--zen-fg-muted);
-    --line: var(--zen-border-strong);
-    --accent: var(--zen-fg);
-    --danger: var(--zen-error);
-  }
-  a { color: var(--fg); text-decoration: underline; }
-  h1, h2, h3 { font-weight: 600; letter-spacing: -0.01em; }
-  .legacy h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
-  .legacy h2 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
-  .legacy p { margin: 0 0 1rem; }
-  .muted { color: var(--muted); font-size: 0.875rem; }
-  .error { color: var(--danger); }
-  :focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
-  code { word-break: break-all; }
-  .legacy input[type='text'] {
-    width: 100%;
-    padding: 0.75rem;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: transparent;
-  }
-  .legacy button {
-    padding: 0.75rem 1rem;
-    border-radius: 8px;
-    border: 1px solid var(--accent);
-    cursor: pointer;
-  }
-  .legacy button.primary { background: var(--accent); color: var(--bg); width: 100%; }
+  a { color: var(--zen-fg); text-decoration: underline; text-underline-offset: 2px; }
+  :focus-visible { outline: 2px solid var(--zen-fg); outline-offset: 2px; }
+  code { word-break: break-all; font-family: ui-monospace, monospace; font-size: 0.9em; }
   button:disabled { opacity: 0.4; cursor: not-allowed; }
+  summary::-webkit-details-marker { display: none; }
+  /* Zen's base gives every <p> 1rem muted text; here a paragraph takes its container's size and colour. */
+  p { font-size: inherit; color: inherit; }
+}
+
+/*
+ * Form controls: the Zen border (12% fg) is about 1.5:1 on the ground. Controls here keep the
+ * 3:1 boundary the pre-preview app had (WCAG 1.4.11): 45% fg on both themes, and a visible focus ring
+ * (ZenInput sets focus:outline-none).
+ */
+:root {
+  --zarf-control-border: oklch(from var(--zen-fg) l c h / 0.45);
+}
+.control-border {
+  border: 1px solid var(--zarf-control-border) !important;
+}
+.control-border:focus-visible {
+  outline: 2px solid var(--zen-fg) !important;
+  outline-offset: 2px;
 }
