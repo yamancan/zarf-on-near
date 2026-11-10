@@ -3,6 +3,7 @@
 </script>
 
 <main>{@render children()}</main>
+<footer class="muted"><a href="/privacy">Privacy and terms</a></footer>
 
 <style>
   :global(:root) {
@@ -34,6 +35,11 @@
     max-width: 28rem;
     margin: 0 auto;
     padding: 2rem 16px;
+  }
+  footer {
+    max-width: 28rem;
+    margin: 0 auto;
+    padding: 0 16px 2rem;
   }
   :global(h1) { font-size: 1.5rem; margin: 0 0 0.25rem; }
   :global(.muted) { color: var(--muted); font-size: 0.875rem; }
