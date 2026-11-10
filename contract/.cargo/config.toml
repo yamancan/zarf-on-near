@@ -1,0 +1,3 @@
+[resolver]
+# Pick dependency versions whose MSRV fits the pinned toolchain (1.86.0).
+incompatible-rust-versions = "fallback"
