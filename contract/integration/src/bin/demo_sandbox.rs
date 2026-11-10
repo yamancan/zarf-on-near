@@ -26,6 +26,26 @@ fn wasm(name: &str) -> anyhow::Result<Vec<u8>> {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Handlers first: a signal during setup drops `seed()` (and its sandbox) instead of
+    // killing the process before Drop can stop neard.
+    let mut term = signal(SignalKind::terminate())?;
+    let mut int = signal(SignalKind::interrupt())?;
+    let (_worker, env_block) = tokio::select! {
+        r = seed() => r?,
+        _ = term.recv() => return Ok(()),
+        _ = int.recv() => return Ok(()),
+    };
+    print!("{env_block}");
+    std::io::Write::flush(&mut std::io::stdout())?; // the wrapper script reads it from a file
+    // Returning drops the worker, which stops the sandbox process.
+    tokio::select! {
+        _ = term.recv() => {}
+        _ = int.recv() => {}
+    }
+    Ok(())
+}
+
+async fn seed() -> anyhow::Result<(near_workspaces::Worker<near_workspaces::network::Sandbox>, String)> {
     let vectors: Value = serde_json::from_str(VECTORS)?;
     let which = std::env::var("DEMO_VECTOR_CAMPAIGN").unwrap_or_else(|_| "single".into());
     let campaign = &vectors["campaigns"][&which];
@@ -96,22 +116,17 @@ async fn main() -> anyhow::Result<()> {
     let event: Value = serde_json::from_str(created.trim_start_matches("EVENT_JSON:"))?;
     let campaign_id = event["data"][0]["campaign_id"].as_str().unwrap().to_string();
 
-    println!("# zarf demo sandbox (test-only keys; never use on a real network)");
-    println!("export NEAR_RPC_URL={}", worker.rpc_addr());
-    println!("export CONTRACT_ID={}", escrow.id());
-    println!("export NETWORK=testnet");
-    println!("export RELAYER_ACCOUNT_ID={}", relayer.id());
-    println!("export RELAYER_KEY={relayer_key}");
-    println!("export DEMO_CAMPAIGN_ID={campaign_id}");
-    println!("export DEMO_VECTOR_CAMPAIGN={which}");
-    println!("export DEMO_DESTINATION={}", destination.id());
-    println!("# sandbox running; Ctrl-C or SIGTERM stops it");
-
-    // Returning drops the worker, which stops the sandbox process.
-    let mut term = signal(SignalKind::terminate())?;
-    tokio::select! {
-        _ = tokio::signal::ctrl_c() => {}
-        _ = term.recv() => {}
-    }
-    Ok(())
+    use std::fmt::Write;
+    let mut out = String::new();
+    writeln!(out, "# zarf demo sandbox (test-only keys; never use on a real network)")?;
+    writeln!(out, "export NEAR_RPC_URL={}", worker.rpc_addr())?;
+    writeln!(out, "export CONTRACT_ID={}", escrow.id())?;
+    writeln!(out, "export NETWORK=testnet")?;
+    writeln!(out, "export RELAYER_ACCOUNT_ID={}", relayer.id())?;
+    writeln!(out, "export RELAYER_KEY={relayer_key}")?;
+    writeln!(out, "export DEMO_CAMPAIGN_ID={campaign_id}")?;
+    writeln!(out, "export DEMO_VECTOR_CAMPAIGN={which}")?;
+    writeln!(out, "export DEMO_DESTINATION={}", destination.id())?;
+    writeln!(out, "# sandbox running; Ctrl-C or SIGTERM stops it")?;
+    Ok((worker, out))
 }

@@ -12,6 +12,8 @@ const WASM_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../target/near");
 const AMOUNT: u128 = 5_000_000;
 const DEPOSIT: u128 = 20_000_000;
 const HOUR_NS: u64 = 3_600 * 1_000_000_000;
+/// Short `resolve_delay_ns` so the stranded-callback test needn't fast-forward an hour.
+const RESOLVE_DELAY_NS: u64 = 30 * 1_000_000_000;
 const COMMITMENT: [u8; 32] = [0x42; 32];
 /// The vector signer seed (spec/vectors.json keys.signer_seed); test-only.
 const SIGNER_SEED: [u8; 32] = [1; 32];
@@ -32,6 +34,10 @@ fn sha(parts: &[&[u8]]) -> [u8; 32] {
 }
 fn leaf(c: &[u8; 32], amount: u128) -> [u8; 32] {
     sha(&[&[0x00], c, &amount.to_le_bytes()])
+}
+fn node(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
+    let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+    sha(&[&[0x01], lo, hi])
 }
 fn push_str(b: &mut Vec<u8>, s: &str) {
     b.push(s.len() as u8);
@@ -64,6 +70,7 @@ async fn setup(zarf_wasm: &str) -> anyhow::Result<Env> {
         .args_json(json!({
             "owner_id": owner.id(), "network": "testnet", "token_ids": [ft.id()],
             "min_lifetime_ns": "1000000000", "agent_ttl_ns": "604800000000000",
+            "resolve_delay_ns": RESOLVE_DELAY_NS.to_string(),
         }))
         .transact()
         .await?
@@ -106,8 +113,12 @@ async fn now_ns(e: &Env) -> anyhow::Result<u64> {
 
 /// One-leaf campaign (root = leaf, empty proof); returns its campaign id.
 async fn create(e: &Env, deadline_ns: u64) -> anyhow::Result<u64> {
+    create_with_root(e, deadline_ns, leaf(&COMMITMENT, AMOUNT)).await
+}
+
+async fn create_with_root(e: &Env, deadline_ns: u64, root: [u8; 32]) -> anyhow::Result<u64> {
     let msg = json!({
-        "merkle_root": hex(&leaf(&COMMITMENT, AMOUNT)),
+        "merkle_root": hex(&root),
         "deadline_ns": deadline_ns.to_string(), "policy": "owner", "leaf_count": 1,
     });
     let out = e
@@ -138,6 +149,16 @@ async fn claim_with_gas(
     dest: &Account,
     gas: Gas,
 ) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
+    claim_raw(e, id, dest.id().as_str(), &[], gas).await
+}
+
+async fn claim_raw(
+    e: &Env,
+    id: u64,
+    dest: &str,
+    proof: &[[u8; 32]],
+    gas: Gas,
+) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
     let expires = now_ns(e).await? + 10 * 60 * 1_000_000_000;
     let mut p = b"ZARF-NEAR-CLAIM-V1".to_vec();
     push_str(&mut p, "testnet");
@@ -145,7 +166,7 @@ async fn claim_with_gas(
     p.extend_from_slice(&id.to_le_bytes());
     p.extend_from_slice(&COMMITMENT);
     p.extend_from_slice(&AMOUNT.to_le_bytes());
-    push_str(&mut p, dest.id().as_str());
+    push_str(&mut p, dest);
     p.extend_from_slice(&expires.to_le_bytes());
     let key = SigningKey::from_bytes(&SIGNER_SEED);
     let sig = key.sign(&p).to_bytes();
@@ -153,7 +174,8 @@ async fn claim_with_gas(
         .call(e.zarf.id(), "claim")
         .args_json(json!({
             "campaign_id": id.to_string(), "commitment": hex(&COMMITMENT), "amount": AMOUNT.to_string(),
-            "proof": [], "destination": dest.id(), "expires_at_ns": expires.to_string(),
+            "proof": proof.iter().map(|x| hex(x)).collect::<Vec<_>>(), "destination": dest,
+            "expires_at_ns": expires.to_string(),
             "signer": hex(&key.verifying_key().to_bytes()), "signature": hex(&sig),
         }))
         .gas(gas)
@@ -250,15 +272,26 @@ async fn claim_succeeds_with_exactly_required_claim_gas() -> anyhow::Result<()> 
 #[tokio::test]
 async fn failed_callback_strands_claim_until_owner_resolves_it() -> anyhow::Result<()> {
     let e = setup("callback-panic/zarf_near.wasm").await?;
-    let deadline = now_ns(&e).await? + 30 * 1_000_000_000;
+    let deadline = now_ns(&e).await? + 10 * 1_000_000_000;
     let id = create(&e, deadline).await?;
     let bob = e.worker.dev_create_account().await?;
 
+    let claimed_at = now_ns(&e).await?;
     let out = claim(&e, id, &bob).await?;
     assert!(!out.is_success(), "the callback must have panicked");
     assert_eq!(ft_balance(&e, &bob).await?, AMOUNT, "the transfer itself succeeded");
     assert_eq!(state(&e, id).await?, "pending");
     assert_eq!(campaign(&e, id).await?["in_flight"], AMOUNT.to_string());
+
+    let resolve = |paid: bool| {
+        e.owner.call(e.zarf.id(), "resolve_pending").args_json(json!({
+            "campaign_id": id.to_string(), "commitment": hex(&COMMITMENT), "paid": paid,
+            "evidence": "receipt-id-from-explorer",
+        }))
+    };
+    // Before resolve_delay_ns has passed, the owner cannot settle it.
+    let early = resolve(true).transact().await?;
+    assert!(format!("{:?}", early.into_result().unwrap_err()).contains("E107_UNAUTHORIZED"));
 
     // Reclaim after the deadline never touches the in-flight amount.
     while now_ns(&e).await? <= deadline {
@@ -271,18 +304,8 @@ async fn failed_callback_strands_claim_until_owner_resolves_it() -> anyhow::Resu
     let c = campaign(&e, id).await?;
     assert_eq!((c["balance"].as_str(), c["in_flight"].as_str()), (Some("0"), Some(&*AMOUNT.to_string())));
 
-    let resolve = |paid: bool| {
-        e.owner.call(e.zarf.id(), "resolve_pending").args_json(json!({
-            "campaign_id": id.to_string(), "commitment": hex(&COMMITMENT), "paid": paid,
-            "evidence": "receipt-id-from-explorer",
-        }))
-    };
-    let early = resolve(true).transact().await?;
-    assert!(format!("{:?}", early.into_result().unwrap_err()).contains("E107_UNAUTHORIZED"));
-
-    let started = now_ns(&e).await?;
-    while now_ns(&e).await? < started + HOUR_NS {
-        e.worker.fast_forward(1_000).await?;
+    while now_ns(&e).await? < claimed_at + RESOLVE_DELAY_NS + 2_000_000_000 {
+        e.worker.fast_forward(5).await?;
     }
     let out = resolve(true).transact().await?;
     assert!(out.is_success(), "{out:?}");
@@ -300,4 +323,21 @@ fn release_wasm_has_no_test_callback_panic() {
     let has = |w: &[u8]| w.windows(needle.len()).any(|x| x == needle);
     assert!(has(&test), "the test build must carry the panic, or this check proves nothing");
     assert!(!has(&release));
+}
+
+#[tokio::test]
+async fn adverse_claim_fits_required_claim_gas() -> anyhow::Result<()> {
+    // Worst case for claim's own work: a 64-char implicit destination and 20 proof siblings.
+    let e = setup("release/zarf_near.wasm").await?;
+    let proof: Vec<[u8; 32]> = (0..20u8).map(|i| [i.wrapping_mul(37).wrapping_add(1); 32]).collect();
+    let root = proof.iter().fold(leaf(&COMMITMENT, AMOUNT), |h, s| node(&h, s));
+    let id = create_with_root(&e, now_ns(&e).await? + HOUR_NS, root).await?;
+    let need: String = e.zarf.view("required_claim_gas").await?.json()?;
+    let dest = "ab".repeat(32);
+    let out = claim_raw(&e, id, &dest, &proof, Gas::from_gas(need.parse()?)).await?;
+    println!("adverse: required_claim_gas = {need}, total burnt = {}", out.total_gas_burnt);
+    assert!(out.is_success(), "{out:?}");
+    let bal: String = e.ft.view("ft_balance_of").args_json(json!({ "account_id": dest })).await?.json()?;
+    assert_eq!(bal, AMOUNT.to_string());
+    Ok(())
 }
