@@ -156,6 +156,35 @@ export async function submitDeposit(depositAddress: string, txHash: string, fetc
   }).catch(() => undefined);
 }
 
+/** What the receipt needs to resume following a payout after a reload. Nothing here is secret. */
+export interface SavedPayout {
+  depositAddress: string;
+  txHash: string; // the NEAR claim tx
+  chainName: string;
+  recipient: string;
+  refundTo: string;
+  amountOutFormatted: string;
+}
+
+const payoutKey = (campaign: string, commitment: string) => `zarf-near:payout:${campaign}/${commitment}`;
+
+export function savePayout(campaign: string, commitment: string, p: SavedPayout, store?: Storage): void {
+  try {
+    (store ?? sessionStorage).setItem(payoutKey(campaign, commitment), JSON.stringify(p));
+  } catch {
+    // best effort: without it a reload only loses the live status, never the claim
+  }
+}
+
+export function loadPayout(campaign: string, commitment: string, store?: Storage): SavedPayout | null {
+  try {
+    const p = JSON.parse((store ?? sessionStorage).getItem(payoutKey(campaign, commitment)) ?? 'null') as SavedPayout | null;
+    return p && /^[0-9a-f]{64}$/.test(p.depositAddress) && typeof p.chainName === 'string' && typeof p.refundTo === 'string' ? p : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Receipt copy per 1Click status (UI/UX audit, finding 10). */
 export function describeStatus(s: StatusView, chainName: string, refundTo: string): { text: string; done: boolean; ok: boolean } {
   switch (s.status) {

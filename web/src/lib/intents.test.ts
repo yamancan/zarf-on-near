@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 // Subset of GET /v0/tokens recorded 2026-11-11; the status body is the verifier's recorded fixture.
 import tokens from './fixtures/1click-tokens.json';
 import pending from './fixtures/1click-status-pending.json';
-import { describeStatus, evmAddressError, getQuote, getStatus, lossBps, NEAR_USDC_ASSET, PAYOUT_CHAINS, QuoteError, resolveAssets } from './intents';
+import { describeStatus, evmAddressError, getQuote, getStatus, loadPayout, lossBps, savePayout, NEAR_USDC_ASSET, PAYOUT_CHAINS, QuoteError, resolveAssets } from './intents';
 
 const json = (body: unknown, status = 200) => vi.fn(async (_u: string, _i?: RequestInit) => new Response(JSON.stringify(body), { status }));
 
@@ -84,5 +84,29 @@ describe('getStatus and describeStatus', () => {
     expect(d('REFUNDED')).toMatchObject({ done: true, ok: false, text: 'Not delivered. The USDC went back to sender.near on NEAR.' });
     expect(d('FAILED')).toMatchObject({ done: true, ok: false });
     expect(d('INCOMPLETE_DEPOSIT').text).toMatch(/contact the sender/);
+  });
+});
+
+describe('savePayout / loadPayout (receipt reload)', () => {
+  const mem = () => {
+    const m = new Map<string, string>();
+    return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) } as unknown as Storage;
+  };
+  const p = { depositAddress: 'd'.repeat(64), txHash: 'tx', chainName: 'Base', recipient: '0x' + 'ab'.repeat(20), refundTo: 'sender.near', amountOutFormatted: '9.99' };
+  it('round-trips per campaign and commitment', () => {
+    const s = mem();
+    savePayout('7', 'c1', p, s);
+    expect(loadPayout('7', 'c1', s)).toEqual(p);
+    expect(loadPayout('7', 'c2', s)).toBeNull();
+  });
+  it('tolerates garbage and a storage that throws', () => {
+    const s = mem();
+    s.setItem('zarf-near:payout:7/c1', '{');
+    expect(loadPayout('7', 'c1', s)).toBeNull();
+    s.setItem('zarf-near:payout:7/c1', JSON.stringify({ ...p, depositAddress: 'alice.near' }));
+    expect(loadPayout('7', 'c1', s)).toBeNull();
+    const broken = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); } } as unknown as Storage;
+    expect(() => savePayout('7', 'c1', p, broken)).not.toThrow();
+    expect(loadPayout('7', 'c1', broken)).toBeNull();
   });
 });

@@ -82,6 +82,9 @@ async function run(final) {
   assert(seen.submit?.depositAddress === DEP, 'deposit submitted');
   if (final === 'SUCCESS') assert(/basescan\.org/.test(await p.locator('a[href*=basescan]').getAttribute('href')), 'Base explorer link');
   else assert(/went back to sender\.near on NEAR/.test(text), 'refund copy');
+  // A judge reloads: the receipt resumes following the payout from sessionStorage.
+  await p.reload();
+  await p.waitForFunction((t) => document.querySelector('h1')?.textContent?.includes(t), final === 'SUCCESS' ? 'Arrived on Base' : 'Not delivered', { timeout: 20000 });
   assert(!errs.length, `console errors: ${errs.join(' | ')}`);
   console.log(`${final}: PASS · ${text.split('\n').slice(0, 3).join(' / ')}`);
   await b.close();
