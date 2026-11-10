@@ -112,6 +112,8 @@ export function checkIntentsStatus(status: unknown, claim: IntentsClaim): void {
   if (s.status !== 'PENDING_DEPOSIT') fail('INTENTS_NOT_PENDING');
   if (qr.dry !== false) fail('INTENTS_MALFORMED');
   if ((qr.confidentiality ?? 'public') !== 'public') fail('INTENTS_MALFORMED');
+  // We never set a referral; a future referral payout must not ride on a claim.
+  if (qr.referral != null) fail('INTENTS_UNEXPECTED_FEE');
 
   if (qr.originAsset !== NEAR_USDC_ASSET) fail('INTENTS_WRONG_ORIGIN_ASSET');
   if (qr.depositType !== 'ORIGIN_CHAIN') fail('INTENTS_WRONG_DEPOSIT_TYPE');
