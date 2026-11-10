@@ -63,7 +63,7 @@ small NEAR drip.
 | Part | Path | What it does |
 | --- | --- | --- |
 | Spec | `spec/` | Byte-exact claim format (`claim.md`) and the shared test vectors (`vectors.json`) every layer must reproduce |
-| Contract | `contract/` | NEP-141 escrow (Rust, near-sdk 5.26.1): campaigns keyed by (sender, merkle_root), merkle-checked claims signed by a registered verifier key, pending/in-flight accounting with a `#[private]` callback, reclaim after the deadline, the owner's `resolve_pending` exit. Unit 52/52 (Rust 1.86) and near-workspaces integration 5/5 (Rust 1.95) pass. See `contract/README.md` |
+| Contract | `contract/` | NEP-141 escrow (Rust, near-sdk 5.26.1): campaigns keyed by (sender, merkle_root), merkle-checked claims signed by a registered verifier key, pending/in-flight accounting with a `#[private]` callback, reclaim after the deadline, the owner's `resolve_pending` exit. Unit 54/54 (Rust 1.86) and near-workspaces integration 6/6 (Rust 1.95) pass. See `contract/README.md` |
 | Verifier | `verifier/` | Cloudflare Worker: Google ID token (RS256, JWKS, aud/iss/exp/email_verified, nonce = destination), HMAC commitment, merkle proof, chain checks, ed25519 signature |
 | Relayer | `relayer/` | Cloudflare Worker: submits verifier-signed `claim` calls with a claim-only function-call key; payout status from the contract's events |
 | Create app | `web/src/routes/create` | CSV → salts, commitments, tree; storage pre-pay + one `ft_transfer_call`; claim links and the public leaf list |
@@ -95,8 +95,9 @@ integration) when `cargo` is installed, and prints `SKIP contract: …` with the
 For those you also need `rustup`, `cargo-near`, a C compiler and `perl` (the integration crate
 builds OpenSSL from source). rustup installs the pinned toolchains (1.86.0 for the contract, 1.95.0
 for the integration tests) and the wasm target from each `rust-toolchain.toml`. The contract's unit
-suite (52 tests) and its near-workspaces integration suite (5 tests) pass; the integration suite
-currently takes ~45 min, because one test waits out the one-hour `resolve_pending` window.
+suite (54 tests) and its near-workspaces integration suite (6 tests) pass; the integration step
+takes about 2-3 min including the wasm builds (the tests create the contract with a 30 s
+`resolve_delay_ns`, so the stranded-claim test does not wait the 1 h used on testnet and mainnet).
 
 `make demo` starts the verifier and the relayer locally and plays one recipient's claim: a sign-in
 token, the verifier's checks and signature, the relayer's `claim` transaction, then it asserts
