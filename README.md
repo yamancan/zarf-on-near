@@ -7,14 +7,22 @@ salted commitments, amounts, each campaign's merkle root and sender, and each cl
 never an email. Built for the NEAR Hackathon
 (build window ends 2026-11-14 23:59 UTC).
 
+**Live on NEAR testnet** (test funds, no value):
+
+- Claim and send app: https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev
+- Judges' page, 1 test USDC to your Gmail: https://zarf-near-faucet-testnet.sparkling-queen-5e77.workers.dev/try
+- Escrow contract: [`zarf-near-1112.testnet`](https://testnet.nearblocks.io/address/zarf-near-1112.testnet)
+  (accounts, keys and versions: `docs/deploy/testnet.md`)
+
 > Status: work in progress. Sections marked **TODO** are filled in before submission.
 
 ## Trust model
 
 Read this before using it with real money.
 
-- **The verifier sees the email.** At claim time it checks the Google ID token and the
-  recipient's salt, and signs the claim. This is not zero-knowledge.
+- **The verifier sees the email.** Trion Labs runs the verifier, and it sees the recipient's email
+  at claim time: it checks the Google ID token and the recipient's salt, and signs the claim. It
+  does not store the email. This is not zero-knowledge.
 - **The chain never sees an email.** Per recipient it stores
   `commitment = HMAC-SHA256(salt, canonical email)` and the amount (`spec/claim.md`). Amounts are
   public per commitment.
@@ -23,6 +31,14 @@ Read this before using it with real money.
   key can claim every allocation of the campaigns that accept it, up to each campaign's tree.
   A TEE-attested verifier (key registered through on-chain attestation) is on the roadmap, not
   built: nothing in this deployment is attested.
+- **The contract is upgradable, only behind a public delay.** The owner proposes a code hash, which
+  is visible on chain, and can apply it only after `upgrade_delay_ns`: 10 min on testnet, at most
+  1 h on mainnet (there `new` refuses a value outside 10 min to 1 h). Someone must watch for a proposal to make use
+  of that window.
+- **The escrow account has no full-access key.** Every full-access key is deleted after deploy and
+  `new` (`spec/claim.md`, "Upgrades and ownership"), so nobody can sign as the escrow and move its
+  tokens; the only way to change the code is the delayed upgrade. On testnet `zarf-near-1112.testnet` holds no access key
+  at all.
 - **Each campaign snapshots its accepted keys at creation.** Removing a snapshotted key
   (`remove_agent`) freezes that campaign's claims until `reclaim`. Revocation costs liveness,
   never funds.
@@ -69,7 +85,7 @@ small NEAR drip.
 | Part | Path | What it does |
 | --- | --- | --- |
 | Spec | `spec/` | Byte-exact claim format (`claim.md`) and the shared test vectors (`vectors.json`) every layer must reproduce |
-| Contract | `contract/` | NEP-141 escrow (Rust, near-sdk 5.26.1): campaigns keyed by (sender, merkle_root), merkle-checked claims signed by a registered verifier key, pending/in-flight accounting with a `#[private]` callback, reclaim after the deadline, the owner's `resolve_pending` exit. Unit 54/54 (Rust 1.86) and near-workspaces integration 6/6 (Rust 1.95) pass. See `contract/README.md` |
+| Contract | `contract/` | NEP-141 escrow (Rust, near-sdk 5.26.1): campaigns keyed by (sender, merkle_root), merkle-checked claims signed by a registered verifier key, pending/in-flight accounting with a `#[private]` callback, reclaim after the deadline, the owner's `resolve_pending` exit. Unit 71/71 (Rust 1.86) and near-workspaces integration 11/11 (Rust 1.95) pass. See `contract/README.md` |
 | Verifier | `verifier/` | Cloudflare Worker: Google ID token (RS256, JWKS, aud/iss/exp/email_verified, nonce = destination), HMAC commitment, merkle proof, chain checks, ed25519 signature |
 | Relayer | `relayer/` | Cloudflare Worker: submits verifier-signed `claim` calls with a claim-only function-call key; payout status from the contract's events |
 | Create app | `web/src/routes/create` | CSV → salts, commitments, tree; storage pre-pay + one `ft_transfer_call`; claim links carrying each recipient's salt, amount and Merkle proof (nothing else is published) |
@@ -101,7 +117,7 @@ integration) when `cargo` is installed, and prints `SKIP contract: …` with the
 For those you also need `rustup`, `cargo-near`, a C compiler and `perl` (the integration crate
 builds OpenSSL from source). rustup installs the pinned toolchains (1.86.0 for the contract, 1.95.0
 for the integration tests) and the wasm target from each `rust-toolchain.toml`. The contract's unit
-suite (54 tests) and its near-workspaces integration suite (6 tests) pass; the integration step
+suite (71 tests) and its near-workspaces integration suite (11 tests) pass; the integration step
 takes about 2-3 min including the wasm builds (the tests create the contract with a 30 s
 `resolve_delay_ns`, so the stranded-claim test does not wait the 1 h used on testnet and mainnet).
 
@@ -120,7 +136,7 @@ includes it and rejects its tokens (`verifier/test/demo.test.ts`).
   the relayer submits, the real contract pays out, and `claim_state` reads `claimed`. It never falls back
   to the mocked chain.
 - The sandbox demo signs with the public test keys in `spec/vectors.json`. The contract refuses
-  those keys on mainnet, and `scripts/deploy-testnet.sh` refuses them too.
+  those keys on mainnet, and `scripts/deploy.sh` refuses them too.
 
 ## Claim → evidence
 
@@ -148,12 +164,11 @@ error-code numbering. **No code is reused.** Zarf on Stellar proves Google sign-
 circuit verified by Soroban contracts. Neither runs on NEAR, so this repository replaces the proof
 with the verifier service described above.
 
-**Hackathon diff (Q-003).** Everything in this repository was built in the build window, starting
+**Hackathon diff.** Everything in this repository was built in the build window, starting
 from the first commit on 2026-11-07.
-History: [hackathon-submission](https://github.com/yamancan/zarf-on-near/tree/hackathon-submission)
-(**TODO:** create the `hackathon-submission` tag at submission).
+History: [hackathon-submission](https://github.com/yamancan/zarf-on-near/tree/hackathon-submission).
 
-**Libraries (Q-005).**
+**Libraries.**
 
 | Where | Library | Use |
 | --- | --- | --- |
@@ -161,6 +176,7 @@ History: [hackathon-submission](https://github.com/yamancan/zarf-on-near/tree/ha
 | relayer | none at runtime (Web Crypto) | NEAR transaction encoding and signing are written here |
 | relayer (tests only) | `@near-js/transactions` 2.5.1, `@near-js/crypto` 2.5.1 | reference implementation the transaction bytes are checked against |
 | web | `@sveltejs/kit`, `svelte`, `vite`, `@sveltejs/adapter-cloudflare` | apps |
+| web (claim, cross-chain step) | `@noble/hashes` 1.8.0 | keccak-256 for the EIP-55 address checksum |
 | web (create only) | `@near-wallet-selector/core` + `@near-wallet-selector/my-near-wallet` 10.1.4, `@near-js/transactions` 2.5.1, `buffer` 6.0.3 | sender wallet (MyNearWallet popup) |
 | all | `typescript`, `vitest`, `wrangler`, `svelte-check` | build and tests |
 | contract | `near-sdk` 5.26.1 (Rust 1.86.0) | the escrow; built with `cargo-near` |
@@ -169,8 +185,6 @@ History: [hackathon-submission](https://github.com/yamancan/zarf-on-near/tree/ha
 
 AI assistance: this code was written with Claude Code agents (implementation and review), with
 humans deciding design and scope.
-
-**Other entry (Q-015).** **TODO:** link `ad402-near`, which names this project in its README too.
 
 ## Roadmap
 
