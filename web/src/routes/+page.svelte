@@ -5,7 +5,7 @@
   Send USDC to an email address. The recipient opens a link, signs in with Google and receives it. The email never
   goes on chain; our verifier sees it once, to check the claim.
 </p>
-<p><a class="cta primary" href="https://zarf-near-faucet-testnet.sparkling-queen-5e77.workers.dev/try">Try it: get 1 test USDC at your Gmail</a></p>
+<p><a class="cta primary" href="https://zarf-near-faucet-testnet.sparkling-queen-5e77.workers.dev/try">Try it with your Gmail</a></p>
 <p><a class="cta" href="/create">Send USDC</a></p>
 <ol>
   <li>You enter emails and amounts.</li>
