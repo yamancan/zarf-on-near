@@ -11,7 +11,7 @@ const claim: IntentsClaim = {
   amount: '2000000',
   destinationAsset: 'nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near',
   recipient: '0x1111111111111111111111111111111111111112',
-  refundTo: '0x2527d02599ba641c19fea793cd0f167589a0f10d',
+  campaignSender: 'intents.near', // the recorded quote's refundTo: an existing named account
   expiresAtNs: (BigInt(ns(QR_DEADLINE)) - 1_000_000_000n).toString(), // 1 s before refunds begin
 };
 
@@ -61,7 +61,7 @@ describe('checkIntentsStatus', () => {
     ['recipient inside Intents', (s) => (s.quoteResponse.quoteRequest.recipientType = 'INTENTS'), 'INTENTS_WRONG_RECIPIENT'],
     ['virtual-chain reroute', (s) => (s.quoteResponse.quoteRequest.virtualChainRecipient = '0x' + '1'.repeat(40)), 'INTENTS_WRONG_RECIPIENT'],
     ['ft_transfer_call reroute', (s) => (s.quoteResponse.quoteRequest.customRecipientMsg = 'x.near'), 'INTENTS_WRONG_RECIPIENT'],
-    ['refund to origin chain', (s) => (s.quoteResponse.quoteRequest.refundType = 'ORIGIN_CHAIN'), 'INTENTS_WRONG_REFUND'],
+    ['refund inside Intents', (s) => (s.quoteResponse.quoteRequest.refundType = 'INTENTS'), 'INTENTS_WRONG_REFUND'],
     ['refund to someone else', (s) => (s.quoteResponse.quoteRequest.refundTo = 'attacker.near'), 'INTENTS_WRONG_REFUND'],
     ['refunds begin at expiry', (s) => (s.quoteResponse.quoteRequest.deadline = new Date(Number(BigInt(claim.expiresAtNs) / 1_000_000n)).toISOString()), 'INTENTS_QUOTE_EXPIRES_FIRST'],
     ['address inactive before expiry', (s) => (s.quoteResponse.quote.deadline = '2026-11-10T00:00:00.000Z'), 'INTENTS_QUOTE_EXPIRES_FIRST'],
@@ -96,7 +96,7 @@ describe('checkIntentsStatus', () => {
     expect(code(solQuote, { ...claim, recipient: sol })).toBeUndefined();
     expect(code(solQuote, { ...claim, recipient: sol.toLowerCase() })).toBe('INTENTS_WRONG_RECIPIENT');
     const nearRefund = mutate((s) => (s.quoteResponse.quoteRequest.refundTo = 'Alice.near'));
-    expect(code(nearRefund, { ...claim, refundTo: 'alice.near' })).toBe('INTENTS_WRONG_REFUND');
+    expect(code(nearRefund, { ...claim, campaignSender: 'alice.near' })).toBe('INTENTS_WRONG_REFUND');
   });
 
   it.each(['abc', '0x10', '1e18', '-1', ''])('refuses expiresAtNs %j with a coded error', (expiresAtNs) => {
@@ -107,8 +107,8 @@ describe('checkIntentsStatus', () => {
     expect(code(recorded, { ...claim, amount: '2e6' })).toBe('INTENTS_BAD_AMOUNT');
   });
 
-  it('refuses a refund account that differs from the claim', () => {
-    expect(code(recorded, { ...claim, refundTo: 'recipient.near' })).toBe('INTENTS_WRONG_REFUND');
+  it('refuses a refund to anyone but the campaign sender', () => {
+    expect(code(recorded, { ...claim, campaignSender: 'sender.near' })).toBe('INTENTS_WRONG_REFUND');
   });
 
   it('refuses a non-object body', () => {

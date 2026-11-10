@@ -5,8 +5,8 @@
 // is not verified (no published key); this check trusts TLS to 1click.chaindefuser.com.
 //
 // One quote per claim: a deposit address must receive exactly one EXACT_INPUT deposit. A second
-// claim paid to the same address is not part of the swap and ends up in a refund to `refundTo`,
-// not on the destination chain. `status == PENDING_DEPOSIT` narrows this but cannot close the
+// claim paid to the same address is not part of the swap and ends up refunded to the campaign
+// sender, not on the destination chain. `status == PENDING_DEPOSIT` narrows this but cannot close the
 // race between two in-flight claims, so the claim app must never reuse a deposit address.
 
 export const ONECLICK_API = 'https://1click.chaindefuser.com';
@@ -34,7 +34,7 @@ export interface IntentsClaim {
   amount: string; // leaf amount, u128 decimal, origin-asset base units
   destinationAsset: string; // 1Click asset id, e.g. nep141:base-0x8335…omft.near
   recipient: string; // address on the destination chain
-  refundTo: string; // NEAR Intents account that receives a refund
+  campaignSender: string; // get_campaign(id).sender, read from chain by the caller: refunds go back to the payer
   expiresAtNs: string; // u64 decimal
 }
 
@@ -96,8 +96,8 @@ function checkAppFees(fees: unknown): void {
 
 /**
  * Throws `IntentsError` unless the 1Click status for `claim.depositAddress` is an unfunded
- * EXACT_INPUT swap of exactly `claim.amount` NEAR USDC to `claim.recipient`, refunding to
- * `claim.refundTo` inside Intents, with bounded fees and slippage, and both deadlines
+ * EXACT_INPUT swap of exactly `claim.amount` NEAR USDC to `claim.recipient`, refunding on NEAR to
+ * the campaign sender, with bounded fees and slippage, and both deadlines
  * outliving the signature.
  */
 export function checkIntentsStatus(status: unknown, claim: IntentsClaim): void {
@@ -141,7 +141,9 @@ export function checkIntentsStatus(status: unknown, claim: IntentsClaim): void {
     fail('INTENTS_WRONG_RECIPIENT');
   }
 
-  if (qr.refundType !== 'INTENTS' || !sameAddress(qr.refundTo, claim.refundTo)) fail('INTENTS_WRONG_REFUND');
+  // A failed swap must return to the payer on NEAR, never to a key the recipient may not hold
+  // (an exchange deposit address has no withdrawable Intents account).
+  if (qr.refundType !== 'ORIGIN_CHAIN' || qr.refundTo !== claim.campaignSender) fail('INTENTS_WRONG_REFUND');
 
   // quote.deadline: address goes inactive and "funds may be lost"; quoteRequest.deadline: refunds begin.
   if (!DECIMAL.test(claim.expiresAtNs)) fail('INTENTS_BAD_DEADLINE');

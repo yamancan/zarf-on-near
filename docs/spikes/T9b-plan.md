@@ -17,7 +17,7 @@ claim page                                           1Click                     
 4. dry quote (preview)          ──POST /v0/quote dry:true──▶ amountOut, minAmountOut, fees
 5. user confirms                ──POST /v0/quote dry:false─▶ depositAddress (64-hex implicit), deadlines
 6. nonce = sha256(depositAddress); attempt saved with {quote, intents fields}; Google redirect
-7. callback → POST /claim {…, destination: depositAddress, intents: {destination_asset, recipient, refund_to}}
+7. callback → POST /claim {…, destination: depositAddress, intents: {destination_asset, recipient}}
                                                       ◀─GET /v0/status── verifier: checkIntentsStatus, then sign
 8. relayer submits claim; contract storage_deposits the deposit address on USDC, then ft_transfer
 9. app (optional) POST /v0/deposit/submit {depositAddress, txHash}
@@ -48,7 +48,7 @@ POST /v0/quote
   "originAsset": "nep141:17208628…33a1", "depositType": "ORIGIN_CHAIN",
   "destinationAsset": "<assetId>", "amount": "<leaf amount, base units>",
   "recipient": "<0x… as typed>", "recipientType": "DESTINATION_CHAIN",
-  "refundTo": "<same 0x…, lowercased>", "refundType": "INTENTS",
+  "refundTo": "<get_campaign(id).sender>", "refundType": "ORIGIN_CHAIN",
   "deadline": "<now + 60 min, ISO>" }
 → 201 { "quote": { "amountOut", "amountOutFormatted", "minAmountOut", "withdrawFee",
                    "timeEstimate" }, "quoteRequest": {…}, "signature": "ed25519:…" }
@@ -74,36 +74,46 @@ KNOWN_DEPOSIT_TX | PROCESSING | SUCCESS | INCOMPLETE_DEPOSIT | REFUNDED | FAILED
 ## 3. Picker rules
 
 - The address must match `^0x[0-9a-fA-F]{40}$`. If it is mixed-case, check the EIP-55
-  checksum and refuse it on a mismatch (a typo guard). Send `recipient` as typed and
-  `refundTo` lowercased, because Intents account ids are lowercase.
+  checksum and refuse it on a mismatch (a typo guard). Send `recipient` as typed.
 - **Exchange deposit addresses:** allowed only because every listed chain is EVM and
   memo-free. The copy reads: "If this is an exchange address, make sure the exchange
   credits USDC on <chain> to it without a memo or tag." No memo/tag field exists anywhere,
   so no memo network can ever be listed. Adding Solana, Stellar, XRP, TON or similar
-  needs its own review, since a memo or tag can be required and a refund to a non-EVM
-  Intents account is unverified.
-- **Refund destination:** `refundType: INTENTS`, `refundTo` = the same EVM address. The
-  copy names this: "If the swap fails, the USDC goes to your NEAR Intents account for this
-  address." It is unverified that the wallet can withdraw from it (S3 "Not verified"); the
-  T9 mainnet test must check that with the owner's wallet before the copy promises it.
+  needs its own review, since a memo or tag can be required.
+- **Refund destination (reviewer M1, decided): back to the campaign sender on NEAR.**
+  `refundType: ORIGIN_CHAIN`, `refundTo = get_campaign(campaign_id).sender`. The page reads
+  it from the contract view for the quote; the verifier reads it from chain itself and
+  never from the request. A failed swap returns the USDC to the payer, who can pay again.
+  Nothing depends on a key the recipient may not hold: an exchange deposit address has no
+  withdrawable Intents account, so the earlier `INTENTS` refund could strand funds for good.
+  Checked 2026-11-11 with keyless dry quotes: an existing named account (`intents.near`) as
+  an `ORIGIN_CHAIN` refundTo → 201 with `refundFee 0`; a nonexistent named account → 400.
+  A sender always holds USDC, so it is registered on USDC and pays no `refundFee` (S3 saw
+  4465 base units only for an unregistered implicit account).
 - Show the preview as "≈ {amountOutFormatted} USDC on {chain} (at least
   {minAmountOut/1e6}); network fee {withdrawFee/1e6} USDC; about {timeEstimate} s".
 
 ## 4. Verifier wiring (`verifier/`, web-agent's tree; the smallest change)
 
-- The request gains an optional `intents: { destination_asset, recipient, refund_to }`.
+- The request gains an optional `intents: { destination_asset, recipient }`. There is no
+  refund field: the verifier passes `campaignSender = campaign.sender` from its own
+  `get_campaign` read.
   When it is present:
   1. require `destination` to be 64-hex (the deposit address);
   2. after `E102` (so the amount is the merkle-proven leaf amount) and before signing,
      `checkIntentsStatus(await fetchIntentsStatus(destination), { depositAddress:
-     destination, amount, destinationAsset, recipient, refundTo, expiresAtNs })`, using the
-     same `expiresNs` that gets signed;
-  3. `IntentsError` → `409 { error: e.code }`. A fetch failure or timeout →
-     `UpstreamError('1click')` → `503 UPSTREAM_UNAVAILABLE`.
+     destination, amount, destinationAsset, recipient, campaignSender, expiresAtNs })`, using
+     the same `expiresNs` that gets signed;
+  3. `IntentsError` → `409 { error: e.code }`. A fetch failure or the per-request 10 s
+     timeout (`fetchIntentsStatus` sets `AbortSignal.timeout`) → `UpstreamError('1click')` →
+     `503 UPSTREAM_UNAVAILABLE`.
+  - 1Click's keyless rate limits are not documented. Judge traffic could hit them, at which
+    point both the page's quote and the verifier's status call fail. Unknown; an API key
+    from the partner dashboard is the fallback.
 - When `intents` is absent nothing changes, and implicit accounts from "create one for me"
   still work.
-- On **testnet** `intents` is refused (`400 E108_INVALID_INPUT`), because the origin asset
-  is mainnet USDC.
+- When the contract's `get_network()` is not `mainnet`, `intents` is refused
+  (`400 E108_INVALID_INPUT`), because the origin asset is mainnet USDC.
 - Tests: one stubbed `fetchFn` path per outcome (pass, mismatch code, 404, 503). The
   existing `intents.test.ts` already pins every field rule.
 
@@ -123,11 +133,11 @@ KNOWN_DEPOSIT_TX | PROCESSING | SUCCESS | INCOMPLETE_DEPOSIT | REFUNDED | FAILED
 | Claim stuck `pending` (callback failed) | `claim_state` | "Payment is being settled" | the owner's `resolve_pending` after `resolve_delay_ns` (1 h) |
 | 1Click `KNOWN_DEPOSIT_TX` / `PROCESSING` | step 10 | "Paid on NEAR, swapping to {chain}…" with the NEAR tx link | keep polling. After 10 min: "Still processing", keep the page link |
 | `SUCCESS` | step 10 | "Paid on {chain}": `amountOutFormatted` USDC, `destinationChainTxHashes[0].explorerUrl` | done; clear the attempt |
-| `REFUNDED` | step 10 | "The swap failed; {refundedAmountFormatted} USDC went to your NEAR Intents account ({refundTo})" + `refundReason` | withdraw through NEAR Intents with that wallet (unverified, see §3) |
+| `REFUNDED` | step 10 | "The swap failed and the funds went back to the sender. Ask them to send again." + `refundReason` | the sender re-funds; this commitment is already claimed on chain |
 | `INCOMPLETE_DEPOSIT` / `FAILED` | step 10 | "The swap failed": the deposit address and NEAR tx hash, for support | 1Click support. Not expected, because the deposit is exactly `amount` |
 
 The attempt in `sessionStorage` additionally holds `{depositAddress, destinationAsset,
-recipient, refundTo, requestDeadline}`. A reload after sign-in keeps the quote but needs
+recipient, campaignSender, requestDeadline}`. A reload after sign-in keeps the quote but needs
 a fresh Google token, the same as today.
 
 ## 6. Smallest web/ change list (for the implementer)
@@ -137,8 +147,8 @@ a fresh Google token, the same as today.
    function takes `fetchFn` for tests; recorded fixtures go in `lib/fixtures/`.
 2. `lib/claim.ts`: extend `Attempt` with an optional `intents` block. `destinationNonce`
    stays as is (the deposit address is an AccountId).
-3. Claim page: a third destination mode, "USDC on another chain" (only when
-   `PUBLIC_NETWORK === 'mainnet'`); the picker, preview and confirm steps (§3); the leaf
+3. Claim page: a third destination mode, "USDC on another chain", shown only when the
+   contract's `get_network()` (already read on the page) returns `mainnet`. Add the picker, preview and confirm steps (§3); the leaf
    amount loaded before sign-in (move `fetchLeaves` + `checkedProof` up from the receipt
    page); and `destination` = `depositAddress` for the nonce.
 4. Receipt page: pass `intents` in `requestSignature`; after the relayer, fire and forget
@@ -159,13 +169,27 @@ to the owner's Base address. Record:
 - the Base tx (`explorerUrl`);
 - the fee actually charged.
 
-Before the README's refund copy goes live, also check that a refunded Intents balance
-can be withdrawn with that EVM wallet. No mainnet funds or accounts until the owner
-provides them.
+No mainnet funds or accounts until the owner provides them. `scripts/intents-mainnet-smoke.sh`
+exercises the riskiest step (a real deposit to a 1Click address reaching Base) before the
+escrow is involved.
+
+## 8. Residual trust (README wording later)
+
+- **The claim page decides which address gets paid.** Its integrity (static hosting,
+  strict CSP, no third-party scripts) is the trust root for the destination. A compromised
+  page can quote an attacker's address and bind the nonce to that quote, or leave `intents`
+  out and name any NEAR account.
+- **The verifier's intents check confirms consistency, not intent.** It proves the quote
+  1Click holds matches what the page sent: amount, asset, recipient, refund to the sender,
+  deadlines. It cannot know what the recipient meant to type.
+- The 1Click quote signature is not verified; the check trusts TLS to
+  `1click.chaindefuser.com`.
 
 ## Not verified
 
-- Withdrawing an `INTENTS` refund with an EVM wallet (needs mainnet funds).
+- A real `REFUNDED` swap returning to a named sender account (needs mainnet funds; the
+  dry quote accepts the shape).
+- 1Click's keyless rate limits.
 - That `arb/USDC` and `eth/USDC` exist in `/v0/tokens` (they are resolved at runtime and
   hidden if missing); only `base/USDC` was seen in S3.
 - 1Click behaviour when the deposit lands after the request `deadline` but before

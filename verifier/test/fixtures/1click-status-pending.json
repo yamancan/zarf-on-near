@@ -1,7 +1,7 @@
 {
   "status": "PENDING_DEPOSIT",
-  "updatedAt": "2026-11-10T20:20:39.274Z",
-  "correlationId": "bd578c88-a9ae-479c-b077-09b2a4106798",
+  "updatedAt": "2026-11-11T13:02:16.499Z",
+  "correlationId": "dae67ce5-0cbe-48fc-83f8-680523864b51",
   "swapDetails": {
     "depositedAmount": null,
     "depositedAmountUsd": null,
@@ -25,8 +25,8 @@
     "destinationChainTxHashes": []
   },
   "quoteResponse": {
-    "timestamp": "2026-11-10T20:20:38.848Z",
-    "signature": "ed25519:2w1Vtu2eGkW915XGgoACy25hpoWpoK3f1CXzPEkceqrhBAL62BNPQeWJCtWZVNGyiz5iGsmkyXDihFdHyR3keZX2",
+    "timestamp": "2026-11-11T13:02:16.076Z",
+    "signature": "ed25519:3kS4dLJnhLVrT9EPD2M5WpNtMe3VkWFBpuZQv63GvwYNSWWnpr1ciGcGQdk6wT7rvYD76d3g5T13MxwvQRY3JoNf",
     "quoteRequest": {
       "dry": false,
       "swapType": "EXACT_INPUT",
@@ -36,11 +36,11 @@
       "depositType": "ORIGIN_CHAIN",
       "destinationAsset": "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
       "amount": "2000000",
-      "refundTo": "0x2527d02599ba641c19fea793cd0f167589a0f10d",
-      "refundType": "INTENTS",
+      "refundTo": "intents.near",
+      "refundType": "ORIGIN_CHAIN",
       "recipient": "0x1111111111111111111111111111111111111112",
       "recipientType": "DESTINATION_CHAIN",
-      "deadline": "2026-11-10T21:20:38.000Z",
+      "deadline": "2026-11-11T14:02:15.000Z",
       "appFees": [
         {
           "limitOrderId": null,
@@ -56,15 +56,15 @@
     "quote": {
       "amountIn": "2000000",
       "amountInFormatted": "2.0",
-      "amountInUsd": "1.999160000000",
+      "amountInUsd": "1.999310000000",
       "minAmountIn": "2000000",
-      "amountOut": "1997365",
-      "amountOutFormatted": "1.997365",
-      "amountOutUsd": "1.996526106700",
-      "minAmountOut": "1977391",
-      "timeWhenInactive": "2026-11-13T21:20:38.000Z",
-      "depositAddress": "0bc8660751c464e0e45f9964368d260f952672824fd564d593bb84e78bb0acc1",
-      "deadline": "2026-11-13T21:20:38.000Z",
+      "amountOut": "1997364",
+      "amountOutFormatted": "1.997364",
+      "amountOutUsd": "1.996674909420",
+      "minAmountOut": "1977390",
+      "timeWhenInactive": "2026-11-14T14:02:15.000Z",
+      "depositAddress": "0a9de9e05a33b51733673a4b7a954ad04d532baf3a93572e2c0053446e12d586",
+      "deadline": "2026-11-14T14:02:15.000Z",
       "timeEstimate": 22,
       "refundFee": "0",
       "withdrawFee": "2400"
