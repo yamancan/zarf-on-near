@@ -167,7 +167,7 @@ export async function handleHealth(d: Pick<RelayDeps, 'rpc' | 'relayerAccountId'
     const [ak, account] = await Promise.all([viewAccessKey(d.rpc, d.relayerAccountId, d.key.publicKeyStr), viewAccount(d.rpc, d.relayerAccountId)]);
     const fc = ak.permission === 'FullAccess' ? null : ak.permission.FunctionCall;
     // allowance null = unlimited (still claim-only); balance in yoctoNEAR
-    return { status: 200, body: { allowance: fc ? fc.allowance : null, balance: account.amount, claim_only: !!fc && fc.receiver_id === d.contractId && fc.method_names.join() === 'claim' } };
+    return { status: 200, body: { contract_id: d.contractId, allowance: fc ? fc.allowance : null, balance: account.amount, claim_only: !!fc && fc.receiver_id === d.contractId && fc.method_names.join() === 'claim' } };
   } catch (e) {
     if (!(e instanceof RpcError)) throw e;
     console.log('rpc_unavailable');

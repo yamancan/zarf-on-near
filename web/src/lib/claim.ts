@@ -19,11 +19,44 @@ export const isHex32 = (s: string): boolean => /^[0-9a-f]{64}$/.test(s);
 export const destinationNonce = async (destination: string): Promise<string> =>
   hex(await crypto.subtle.digest('SHA-256', enc.encode(destination)));
 
-/** The per-recipient salt from the claim link fragment `#s=<hex32>`, or null. */
-export function saltFromFragment(hash: string): string | null {
-  const s = new URLSearchParams(hash.replace(/^#/, '')).get('s');
-  return s && isHex32(s) ? s : null;
+/** spec "claim link": the proof is the sibling hashes concatenated (32 bytes each), base64url, no padding. */
+export function encodeProof(proof: string[]): string {
+  const bytes = Uint8Array.from(proof.join('').match(/../g) ?? [], (x) => parseInt(x, 16));
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
+
+/** Inverse of encodeProof; null if it is not base64url of whole 32-byte siblings, or longer than 20. */
+export function decodeProof(p: string): string[] | null {
+  if (!/^[A-Za-z0-9_-]*$/.test(p)) return null;
+  let raw: string;
+  try {
+    raw = atob(p.replace(/-/g, '+').replace(/_/g, '/'));
+  } catch {
+    return null;
+  }
+  if (raw.length % 32 !== 0 || raw.length > 20 * 32) return null;
+  const h = hex(Uint8Array.from(raw, (c) => c.charCodeAt(0)));
+  if (encodeProof(h.match(/.{64}/g) ?? []) !== p) return null; // canonical encoding only
+  return h.match(/.{64}/g) ?? [];
+}
+
+export interface LinkSecret {
+  salt: string; // hex32
+  amount: string; // u128, decimal, > 0
+  proof: string[]; // hex32 siblings
+}
+
+/** The claim link fragment `#s=<hex32>&a=<u128>&p=<base64url>`, or null if any part is missing or malformed. */
+export function parseLinkFragment(hash: string): LinkSecret | null {
+  const q = new URLSearchParams(hash.replace(/^#/, ''));
+  const salt = q.get('s'), amount = q.get('a'), p = q.get('p');
+  if (!salt || !isHex32(salt) || !amount || !/^[1-9]\d{0,38}$/.test(amount) || BigInt(amount) >> 128n || p === null) return null;
+  const proof = decodeProof(p);
+  return proof ? { salt, amount, proof } : null;
+}
+
+/** The link's fragment for one recipient (the order of spec/vectors.json `links`). */
+export const linkFragment = (l: LinkSecret): string => `s=${l.salt}&a=${l.amount}&p=${encodeProof(l.proof)}`;
 
 /** OAuth `state`: the claim plus a random per-attempt value, so a callback from another attempt is refused. */
 export const claimState = (campaign: string, commitment: string, attemptId: string): string =>
@@ -58,6 +91,8 @@ export interface Attempt {
   campaign: string;
   commitment: string;
   salt: string;
+  amount: string;
+  proof: string[];
   destination: string;
   attemptId: string;
 }

@@ -218,10 +218,10 @@ describe('handleRelay', () => {
 });
 
 describe('handleHealth', () => {
-  it('reports allowance (null = unlimited), balance and whether the key is claim-only: numbers only', async () => {
+  it('reports allowance (null = unlimited), balance and whether the key is claim-only, and the contract it serves', async () => {
     const s = stubRpc();
     expect(await handleHealth({ rpc: s.rpc, relayerAccountId: 'relayer.testnet', key, perIp: allow, contractId: context.contract_id }, 'ip')).toEqual({
-      status: 200, body: { allowance: null, balance: '4200000000000000000000000', claim_only: true },
+      status: 200, body: { contract_id: context.contract_id, allowance: null, balance: '4200000000000000000000000', claim_only: true },
     });
   });
   it('flags a full-access key', async () => {

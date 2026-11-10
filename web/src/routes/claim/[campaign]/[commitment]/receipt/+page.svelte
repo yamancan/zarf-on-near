@@ -3,8 +3,7 @@
   import { page } from '$app/state';
   import { env } from '$env/dynamic/public';
   import { clearAttempt, isImplicitAccount, loadAttempt, signedIn } from '$lib/claim';
-  import { checkedProof } from '$lib/merkle';
-  import { canRetry, ClaimError, describeError, fetchLeaves, getCampaign, getClaimState, outcomeAfterRelay, requestSignature, submitClaim } from '$lib/services';
+  import { canRetry, ClaimError, describeError, getClaimState, outcomeAfterRelay, requestSignature, submitClaim } from '$lib/services';
 
   const attempt = loadAttempt();
   const idToken = signedIn.idToken;
@@ -20,18 +19,14 @@
     if (!ok || !attempt) return;
     signedIn.idToken = null; // single use from here on
     try {
-      const [list, campaign] = await Promise.all([
-        fetchLeaves(env.PUBLIC_LEAVES_URL, attempt.campaign),
-        getCampaign(env.PUBLIC_NEAR_RPC_URL, env.PUBLIC_CONTRACT_ID, attempt.campaign),
-      ]);
-      if (!campaign) throw new ClaimError('E110_UNKNOWN_CAMPAIGN');
-      const found = await checkedProof(list, campaign.merkle_root, attempt.commitment);
+      // Amount and proof come from the link, already checked against the chain root on the claim page;
+      // the verifier checks them again against get_campaign before it signs.
       const args = await requestSignature(env.PUBLIC_VERIFIER_URL, {
         id_token: idToken,
         campaign_id: attempt.campaign,
         commitment: attempt.commitment,
-        amount: found.amount,
-        proof: found.proof,
+        amount: attempt.amount,
+        proof: attempt.proof,
         destination: attempt.destination,
         salt: attempt.salt,
       });

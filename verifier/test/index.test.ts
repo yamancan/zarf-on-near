@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import vectors from '../../spec/vectors.json';
 import worker from '../src/index';
+import { MAX_BODY_BYTES } from '../src/worker';
 
 const env = {
   GOOGLE_CLIENT_ID: 'client-123', CONTRACT_ID: 'zarf-near.testnet', NEAR_RPC_URL: 'https://rpc.test', SIGNER_SEED: vectors.keys.signer_seed,
@@ -13,6 +14,7 @@ describe('worker', () => {
   it('404s other routes and methods', async () => {
     expect((await req('POST', '{}', undefined, '/x')).status).toBe(404);
     expect((await req('GET')).status).toBe(404);
+    expect((await req('POST', '{}', undefined, '/health')).status).toBe(404);
   });
 
   it('answers the CORS preflight for a configured origin only', async () => {
@@ -34,6 +36,31 @@ describe('worker', () => {
     const res = await req('POST', 'not json', 'http://localhost:5173');
     expect(res.status).toBe(400);
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('http://localhost:5173');
+  });
+
+  it('413s a body over MAX_BODY_BYTES, by header or by length', async () => {
+    const big = JSON.stringify({ pad: 'x'.repeat(MAX_BODY_BYTES) });
+    expect((await req('POST', big)).status).toBe(413);
+    const lying = new Request('https://v.test/claim', { method: 'POST', body: '{}', headers: { 'Content-Length': String(MAX_BODY_BYTES + 1) } });
+    expect((await worker.fetch(lying, env)).status).toBe(413);
+  });
+
+  it('429s when the per-IP limiter refuses, before reading the body', async () => {
+    const keys: string[] = [];
+    const PER_IP = { limit: async ({ key }: { key: string }) => (keys.push(key), { success: false }) };
+    const r = new Request('https://v.test/claim', { method: 'POST', body: '{}', headers: { 'CF-Connecting-IP': '203.0.113.7' } });
+    const res = await worker.fetch(r, { ...env, PER_IP });
+    expect(res.status).toBe(429);
+    expect(await res.json()).toEqual({ error: 'RATE_LIMITED' });
+    expect(keys).toEqual(['203.0.113.7']);
+  });
+
+  it('GET /health names the contract and the public signer, never a secret', async () => {
+    const res = await req('GET', undefined, undefined, '/health');
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({ contract_id: 'zarf-near.testnet', signer: vectors.keys.signer, google_client_id_set: true });
+    expect(JSON.stringify(body)).not.toContain(env.SIGNER_SEED);
   });
 
   it('400s a bad destination before any token work', async () => {

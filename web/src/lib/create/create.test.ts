@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import vectors from '../../../../spec/vectors.json';
-import { proofFor } from '../merkle';
-import { buildDraft, claimLink, commitment, leafList, newSalt, recoveryFile } from './campaign';
+import { parseLinkFragment } from '../claim';
+import { buildDraft, claimLink, commitment, mailtoHref, newSalt, recoveryFile } from './campaign';
 import {
   campaignIdFrom, checkCreation, failedWith, fundCampaign, fundingTxs, LookupPending, minDeadlineMs, NotCreated, OutcomeUnclear, ownerKeySlack,
   NotSent, prepayShortfall, resolveByRoot, SendUncertain, settleAfterUncertain, mayCreate, readMarker, MARKER_TTL_MS, type FundDeps, type Outcome,
@@ -104,14 +104,13 @@ describe('parseRecipients', () => {
 });
 
 describe('the CSV path creates campaigns.main end to end', () => {
-  it('pasted CSV -> rows -> salts -> root, leaf list, and the ft_transfer_call for the full total', async () => {
+  it('pasted CSV -> rows -> salts -> root, proofs, and the ft_transfer_call for the full total', async () => {
     const c = campaigns.main;
     const { rows, rejected, total } = parseRecipients(csvOf(c.recipients));
     expect(rejected).toEqual([]);
     const draft = await buildDraft(rows, saltsOf(c.recipients));
     expect(draft.merkleRoot).toBe(c.merkle_root);
     expect(draft.total).toBe(total.toString());
-    expect(leafList(c.campaign_id, draft).leaves).toEqual(c.recipients.map(({ commitment, amount }) => ({ commitment, amount })));
     const [transfer] = fundingTxs({
       sender: 'alice.testnet', contractId: 'zarf-near.testnet', tokenId: 'usdc.testnet', merkleRoot: draft.merkleRoot,
       deadlineNs: vectors.context.deadline_ns, leafCount: draft.recipients.length, total: draft.total, shortfall: 0n,
@@ -143,22 +142,32 @@ describe('buildDraft reproduces the spec campaigns', () => {
 });
 
 describe('outputs', () => {
-  it('leaf list per spec: no emails, no salts, and the claim app can prove every leaf from it', async () => {
-    const c = campaigns.main;
+  it.each(Object.keys(vectors.links) as (keyof typeof vectors.links)[])('%s: claim links equal spec/vectors.json links', async (name) => {
+    const c = campaigns[name];
     const draft = await buildDraft(rowsOf(c.recipients), saltsOf(c.recipients));
-    const file = leafList(c.campaign_id, draft);
-    expect(Object.keys(file)).toEqual(['campaign_id', 'merkle_root', 'leaves']);
-    expect(JSON.stringify(file)).not.toMatch(/@|salt/);
-    for (const v of vectors.claims.valid.filter((x) => x.campaign === 'main')) {
-      expect((await proofFor(file.leaves, v.call_args.commitment))!.proof).toEqual(v.call_args.proof);
-    }
+    expect(draft.recipients.map((r) => claimLink('https://claim.example', c.campaign_id, r))).toEqual(
+      vectors.links[name].map((l) => `https://claim.example${l}`),
+    );
   });
-  it('claim link carries the salt only in the fragment', () => {
-    const r = { email: 'a@example.com', amount: '1', salt: 'ab'.repeat(32), commitment: 'cd'.repeat(32) };
+  it('the salt, amount and proof ride only in the fragment', () => {
+    const r = { email: 'a@example.com', amount: '1', salt: 'ab'.repeat(32), commitment: 'cd'.repeat(32), proof: ['ef'.repeat(32)] };
     const link = new URL(claimLink('https://claim.example', '7', r));
     expect(link.pathname).toBe(`/claim/7/${r.commitment}`);
-    expect(link.hash).toBe(`#s=${r.salt}`);
     expect(link.search).toBe('');
+    expect(parseLinkFragment(link.hash)).toEqual({ salt: r.salt, amount: '1', proof: r.proof });
+  });
+  it('a 20-sibling link survives copy, the CSV export and the mailto body unchanged', () => {
+    const proof = Array.from({ length: 20 }, (_, i) => i.toString(16).padStart(2, '0').repeat(32));
+    const r = { email: 'a+b@example.com', amount: '340282366920938463463374607431768211455', salt: 'ab'.repeat(32), commitment: 'cd'.repeat(32), proof };
+    const link = claimLink('https://claim.example', '18446744073709551615', r);
+    const want = { salt: r.salt, amount: r.amount, proof };
+    const csvLine = `${r.email},1,${link}`; // as the create page writes it
+    const fromCsv = csvLine.split(',').slice(2).join(',');
+    expect(fromCsv).toBe(link);
+    const body = new URL(mailtoHref(r, link)).searchParams.get('body')!;
+    const fromMail = body.split('\n').find((l) => l.startsWith('https://'))!;
+    expect(fromMail).toBe(link);
+    for (const l of [link, fromCsv, fromMail]) expect(parseLinkFragment(new URL(l).hash)).toEqual(want);
   });
   it('recovery file holds what rebuilding the links needs', async () => {
     const c = campaigns.single;
@@ -166,8 +175,8 @@ describe('outputs', () => {
     const f = JSON.parse(recoveryFile(draft, '123', { contractId: 'zarf-near.testnet', network: 'testnet', claimOrigin: 'https://claim.example' }));
     expect(f).toMatchObject({ kind: 'zarf-near-recovery-v1', contract_id: 'zarf-near.testnet', network: 'testnet', merkle_root: c.merkle_root, deadline_ns: '123' });
     expect(f.how_to_recover).toContain(`campaign_created event logged by zarf-near.testnet with merkle_root ${c.merkle_root}`);
-    expect(f.how_to_recover).toContain('https://claim.example/claim/<campaign_id>/<commitment>#s=<salt>');
-    expect(f.recipients[0]).toMatchObject({ salt: c.recipients[0].salt, commitment: c.recipients[0].commitment });
+    expect(f.how_to_recover).toContain('https://claim.example/claim/<campaign_id>/<commitment>#s=<salt>&a=<amount>&p=');
+    expect(f.recipients[0]).toMatchObject({ salt: c.recipients[0].salt, commitment: c.recipients[0].commitment, proof: [] });
   });
 });
 

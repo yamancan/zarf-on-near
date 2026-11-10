@@ -96,7 +96,7 @@ URI are enough for a first real claim), set the client id in the two testnet env
 - `web/wrangler.jsonc`, `env.testnet.vars`: `"PUBLIC_GOOGLE_CLIENT_ID": "<client id>.apps.googleusercontent.com"`
 
 The client id is public. A real claim then also needs a funded campaign from the sender account
-and its leaf list served at `PUBLIC_LEAVES_URL` (empty in the testnet env until hosting is decided).
+and the recipient's claim link (it carries the salt, amount and Merkle proof; nothing else is hosted).
 
 ## Live on workers.dev (2026-11-11, testnet)
 

@@ -18,7 +18,7 @@ export function connectOrigins(urls: (string | undefined)[]): string {
 export const handle: Handle = async ({ event, resolve }) => {
   const res = await resolve(event);
   const csp = res.headers.get('Content-Security-Policy');
-  const extra = connectOrigins([env.PUBLIC_VERIFIER_URL, env.PUBLIC_RELAYER_URL, env.PUBLIC_NEAR_RPC_URL, env.PUBLIC_LEAVES_URL]);
+  const extra = connectOrigins([env.PUBLIC_VERIFIER_URL, env.PUBLIC_RELAYER_URL, env.PUBLIC_NEAR_RPC_URL]);
   if (csp && extra) res.headers.set('Content-Security-Policy', csp.replace("connect-src 'self'", `connect-src 'self' ${extra}`));
   // The claim path carries campaign + commitment; never leak it to Google or anyone else.
   res.headers.set('Referrer-Policy', 'no-referrer');

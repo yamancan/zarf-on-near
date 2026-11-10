@@ -1,7 +1,7 @@
-// spec/claim.md merkle tree, built in the browser from the published leaf list to get a proof.
+// spec/claim.md merkle tree: the create app builds it (root + every proof); the claim app rebuilds
+// the root from the one leaf and proof in its link.
 
 import { hex } from './claim';
-import { ClaimError, type LeafList } from './services';
 
 export interface Leaf {
   commitment: string; // hex32
@@ -9,7 +9,7 @@ export interface Leaf {
 }
 
 const unhex = (s: string) => Uint8Array.from(s.match(/../g) ?? [], (x) => parseInt(x, 16));
-const sha256 = async (...parts: Uint8Array[]) => {
+const sha256 = async (...parts: Uint8Array[]): Promise<Uint8Array> => {
   const all = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
   let off = 0;
   for (const p of parts) {
@@ -34,32 +34,29 @@ function lessOrEqual(a: Uint8Array, b: Uint8Array): boolean {
 const leafHash = (l: Leaf) => sha256(Uint8Array.of(0), unhex(l.commitment), u128le(l.amount));
 const nodeHash = (a: Uint8Array, b: Uint8Array) => (lessOrEqual(a, b) ? sha256(Uint8Array.of(1), a, b) : sha256(Uint8Array.of(1), b, a));
 
-/** The leaf for `commitment`, its proof, and the tree root; null if the commitment is not in the list. */
-export async function proofFor(leaves: Leaf[], commitment: string): Promise<{ amount: string; proof: string[]; root: string } | null> {
-  let index = leaves.findIndex((l) => l.commitment === commitment);
-  if (index < 0) return null;
-  const amount = leaves[index].amount;
-  let level: Uint8Array[] = await Promise.all(leaves.map(leafHash));
-  const proof: string[] = [];
+/** The root and, for every leaf in order, its proof (siblings leaf → root; a carried-up odd tail has none). */
+export async function buildTree(leaves: Leaf[]): Promise<{ root: string; proofs: string[][] }> {
+  if (!leaves.length) throw new Error('a tree has at least one leaf');
+  const proofs: string[][] = leaves.map(() => []);
+  let level = await Promise.all(leaves.map(leafHash));
+  let index = leaves.map((_, i) => i); // each leaf's position on the current level
   while (level.length > 1) {
-    const sibling = index ^ 1;
-    if (sibling < level.length) proof.push(hex(level[sibling])); // the odd tail is carried up: no sibling
+    const at = level;
+    index.forEach((pos, leaf) => {
+      const sib = pos ^ 1;
+      if (sib < at.length) proofs[leaf].push(hex(at[sib]));
+    });
     const next: Promise<Uint8Array>[] = [];
-    for (let i = 0; i < level.length; i += 2) next.push(i + 1 < level.length ? nodeHash(level[i], level[i + 1]) : Promise.resolve(level[i]));
+    for (let i = 0; i < at.length; i += 2) next.push(i + 1 < at.length ? nodeHash(at[i], at[i + 1]) : Promise.resolve(at[i]));
     level = await Promise.all(next);
-    index >>= 1;
+    index = index.map((pos) => pos >> 1);
   }
-  return { amount, proof, root: hex(level[0]) };
+  return { root: hex(level[0]), proofs };
 }
 
-/** Root of a non-empty leaf list (the tree from the first leaf's proof walk). */
-export const treeRoot = async (leaves: Leaf[]): Promise<string> => (await proofFor(leaves, leaves[0].commitment))!.root;
-
-/** Proof for `commitment` from a published list, refused unless the list rebuilds the root the contract holds. */
-export async function checkedProof(list: LeafList, chainRoot: string, commitment: string): Promise<{ amount: string; proof: string[] }> {
-  // Whole-list check first: a stale or edited list is LEAVES_MISMATCH, whatever it contains.
-  if (list.merkle_root !== chainRoot || (await treeRoot(list.leaves)) !== chainRoot) throw new ClaimError('LEAVES_MISMATCH');
-  const found = await proofFor(list.leaves, commitment);
-  if (!found) throw new ClaimError('NOT_IN_LIST');
-  return { amount: found.amount, proof: found.proof };
+/** spec: h = leaf; for s in proof: h = node(h, s). The claim app compares this with get_campaign's root. */
+export async function rootFromProof(commitment: string, amount: string, proof: string[]): Promise<string> {
+  let h = await leafHash({ commitment, amount });
+  for (const s of proof) h = await nodeHash(h, unhex(s));
+  return hex(h);
 }

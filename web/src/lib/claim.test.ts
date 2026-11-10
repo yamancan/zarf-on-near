@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import vectors from '../../../spec/vectors.json';
 import {
   claimState, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isImplicitAccount, isValidAccountId, loadAttempt, newAttemptId,
-  parseCallback, saltFromFragment, saveAttempt, clearAttempt,
+  decodeProof, encodeProof, parseCallback, parseLinkFragment, saveAttempt, clearAttempt,
 } from './claim';
 
 const main = vectors.campaigns.main;
@@ -28,12 +28,40 @@ describe('isValidAccountId', () => {
 
 describe('claim link', () => {
   const salt = main.recipients[0].salt;
-  it('reads the salt from the fragment', () => {
-    expect(saltFromFragment(`#s=${salt}`)).toBe(salt);
-    expect(saltFromFragment(`s=${salt}`)).toBe(salt);
+  const valid = vectors.claims.valid;
+  const linksOf = Object.entries(vectors.links).flatMap(([name, ls]) => ls.map((l) => ({ name, l })));
+  it.each(linksOf)('$name: parses $l into the spec claim args', ({ name, l }) => {
+    const [path, hash] = l.split('#');
+    const commitment = path.split('/')[3];
+    const c = valid.find((v) => v.campaign === name && v.call_args.commitment === commitment);
+    const r = vectors.campaigns[name as keyof typeof vectors.campaigns].recipients.find((x) => x.commitment === commitment)!;
+    const got = parseLinkFragment(`#${hash}`)!;
+    expect(got.salt).toBe(r.salt);
+    expect(got.amount).toBe(r.amount);
+    if (c) expect(got.proof).toEqual(c.call_args.proof);
+    expect(encodeProof(got.proof)).toBe(new URLSearchParams(hash).get('p'));
   });
-  it.each(['', '#', '#s=', '#s=abc', `#s=${main.recipients[0].commitment.toUpperCase()}`, `#x=${salt}`])('rejects fragment %j', (h) =>
-    expect(saltFromFragment(h)).toBeNull());
+  it('an empty proof is an empty p=', () => {
+    expect(encodeProof([])).toBe('');
+    expect(decodeProof('')).toEqual([]);
+  });
+  const ok = `s=${salt}&a=1&p=`;
+  it.each([
+    '', '#', `#s=${salt}`, `#s=${salt}&a=1`, `#s=${'AB'.repeat(32)}&a=1&p=`, `#s=abc&a=1&p=`, '#a=1&p=',
+    `#s=${salt}&a=0&p=`, `#s=${salt}&a=01&p=`, `#s=${salt}&a=-1&p=`, `#s=${salt}&a=1.5&p=`,
+    `#s=${salt}&a=${1n << 128n}&p=`, `#s=${salt}&a=1&p=AAAA`, `#s=${salt}&a=1&p=${'A'.repeat(43)}=`,
+    `#s=${salt}&a=1&p=${encodeProof(Array(21).fill('ab'.repeat(32)))}`,
+  ])('rejects fragment %j', (h) => expect(parseLinkFragment(h)).toBeNull());
+  it('accepts the largest u128 and 20 siblings', () => {
+    const proof = Array(20).fill('ab'.repeat(32));
+    expect(parseLinkFragment(`#${ok}`)).toEqual({ salt, amount: '1', proof: [] });
+    expect(parseLinkFragment(`#s=${salt}&a=${(1n << 128n) - 1n}&p=${encodeProof(proof)}`)?.proof).toEqual(proof);
+  });
+  it('rejects a non-canonical base64url proof (trailing bits set)', () => {
+    const p = encodeProof(['ab'.repeat(32)]); // 43 chars: the last one carries 2 unused bits
+    const flipped = p.slice(0, -1) + String.fromCharCode(p.charCodeAt(42) + 1);
+    expect(decodeProof(flipped)).toBeNull();
+  });
   it('recognises implicit accounts', () => {
     expect(isImplicitAccount(vectors.keys.signer)).toBe(true);
     expect(isImplicitAccount('alice.testnet')).toBe(false);
@@ -83,7 +111,7 @@ describe('attempt storage', () => {
   it('round-trips and tolerates garbage', () => {
     const s = mem();
     expect(loadAttempt(s)).toBeNull();
-    const a = { campaign: '7', commitment: 'c', salt: 's', destination: 'alice.testnet', attemptId: 'x' };
+    const a = { campaign: '7', commitment: 'c', salt: 's', amount: '1', proof: [], destination: 'alice.testnet', attemptId: 'x' };
     saveAttempt(a, s);
     expect(loadAttempt(s)).toEqual(a);
     clearAttempt(s);

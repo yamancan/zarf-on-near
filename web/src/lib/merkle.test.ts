@@ -1,48 +1,34 @@
 import { describe, expect, it } from 'vitest';
 import vectors from '../../../spec/vectors.json';
-import { checkedProof, proofFor } from './merkle';
-import { ClaimError } from './services';
+import { buildTree, rootFromProof } from './merkle';
 
 const leavesOf = (name: keyof typeof vectors.campaigns) =>
   vectors.campaigns[name].recipients.map((r) => ({ commitment: r.commitment, amount: r.amount }));
 
-describe('proofFor (from the published leaf list)', () => {
-  it.each(vectors.claims.valid)('reproduces the proof and root of $name', async (c) => {
-    const name = c.campaign as keyof typeof vectors.campaigns;
-    const got = await proofFor(leavesOf(name), c.call_args.commitment);
-    expect(got).toEqual({ amount: c.call_args.amount, proof: c.call_args.proof, root: vectors.campaigns[name].merkle_root });
+describe('buildTree (create app)', () => {
+  it.each(Object.keys(vectors.campaigns) as (keyof typeof vectors.campaigns)[])('%s: spec root', async (name) => {
+    expect((await buildTree(leavesOf(name))).root).toBe(vectors.campaigns[name].merkle_root);
   });
-  it('returns null for a commitment not in the list', async () => {
-    expect(await proofFor(leavesOf('main'), '00'.repeat(32))).toBeNull();
+  it.each(vectors.claims.valid)('gives the spec proof for $name', async (c) => {
+    const name = c.campaign as keyof typeof vectors.campaigns;
+    const i = vectors.campaigns[name].recipients.findIndex((r) => r.commitment === c.call_args.commitment);
+    expect((await buildTree(leavesOf(name))).proofs[i]).toEqual(c.call_args.proof);
+  });
+  it('refuses an empty tree', async () => {
+    await expect(buildTree([])).rejects.toThrow();
   });
 });
 
-describe('checkedProof (list vs on-chain root)', () => {
-  const main = vectors.campaigns.main;
-  const c = vectors.claims.valid.find((v) => v.campaign === 'main')!.call_args;
-  const list = () => ({ campaign_id: main.campaign_id, merkle_root: main.merkle_root, leaves: leavesOf('main') });
-  const code = (p: Promise<unknown>) => p.then(() => 'OK', (e) => (e instanceof ClaimError ? e.code : String(e)));
-
-  it('returns amount and proof when the list rebuilds the chain root', async () => {
-    expect(await checkedProof(list(), main.merkle_root, c.commitment)).toEqual({ amount: c.amount, proof: c.proof });
+describe('rootFromProof (claim app)', () => {
+  it.each(vectors.claims.valid)('rebuilds the campaign root for $name', async (c) => {
+    const name = c.campaign as keyof typeof vectors.campaigns;
+    expect(await rootFromProof(c.call_args.commitment, c.call_args.amount, c.call_args.proof)).toBe(vectors.campaigns[name].merkle_root);
   });
-  it('refuses a list whose leaves were tampered with', async () => {
-    const l = list();
-    l.leaves[l.leaves.length - 1] = { ...l.leaves[l.leaves.length - 1], amount: '999999999' };
-    expect(await code(checkedProof(l, main.merkle_root, c.commitment))).toBe('LEAVES_MISMATCH');
-  });
-  it('refuses when the chain holds another root', async () => {
-    expect(await code(checkedProof(list(), '00'.repeat(32), c.commitment))).toBe('LEAVES_MISMATCH');
-  });
-  it('refuses a file whose declared root differs from the chain', async () => {
-    expect(await code(checkedProof({ ...list(), merkle_root: '00'.repeat(32) }, main.merkle_root, c.commitment))).toBe('LEAVES_MISMATCH');
-  });
-  it('a stale list (another campaign version) is LEAVES_MISMATCH even for a commitment it lacks', async () => {
-    const stale = { ...list(), leaves: leavesOf('main').slice(0, 3) };
-    stale.merkle_root = main.merkle_root; // claims the current root, but its leaves rebuild an older tree
-    expect(await code(checkedProof(stale, main.merkle_root, main.recipients[4].commitment))).toBe('LEAVES_MISMATCH');
-  });
-  it('refuses a commitment not in the list', async () => {
-    expect(await code(checkedProof(list(), main.merkle_root, '11'.repeat(32)))).toBe('NOT_IN_LIST');
+  it('a changed amount or sibling gives another root (LINK_MISMATCH)', async () => {
+    const c = vectors.claims.valid.find((v) => v.campaign === 'main')!.call_args;
+    const root = vectors.campaigns.main.merkle_root;
+    expect(await rootFromProof(c.commitment, (BigInt(c.amount) + 1n).toString(), c.proof)).not.toBe(root);
+    expect(await rootFromProof(c.commitment, c.amount, ['00'.repeat(32), ...c.proof.slice(1)])).not.toBe(root);
+    expect(await rootFromProof(c.commitment, c.amount, c.proof.slice(1))).not.toBe(root);
   });
 });

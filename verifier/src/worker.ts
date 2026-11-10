@@ -10,7 +10,11 @@ export interface Env {
   NEAR_RPC_URL: string;
   CLAIM_ORIGINS: string; // comma-separated origins of the claim app
   SIGNER_SEED: string; // secret: hex of the 32-byte ed25519 seed
+  PER_IP?: { limit(o: { key: string }): Promise<{ success: boolean }> }; // Cloudflare rate-limit binding (wrangler.jsonc)
 }
+
+// A real claim body (id_token, 20 siblings, salt, ids) is ~4 KB.
+export const MAX_BODY_BYTES = 16 * 1024;
 
 function cors(req: Request, env: Env): Record<string, string> {
   const origin = req.headers.get('Origin') ?? '';
@@ -27,16 +31,37 @@ export function makeVerifier(o: { jwks: JwksSource; issuers?: string[] }) {
     async fetch(req: Request, env: Env): Promise<Response> {
       const headers = cors(req, env);
       const json = (body: unknown, status: number) => Response.json(body, { status, headers });
-      if (new URL(req.url).pathname !== '/claim') return json({ error: 'NOT_FOUND' }, 404);
+      const path = new URL(req.url).pathname;
+      if (path !== '/claim' && path !== '/health') return json({ error: 'NOT_FOUND' }, 404);
       if (req.method === 'OPTIONS') {
         return new Response(null, {
           status: 204,
           headers: { ...headers, 'Access-Control-Allow-Methods': 'POST', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Max-Age': '600' },
         });
       }
-      if (req.method !== 'POST') return json({ error: 'NOT_FOUND' }, 404);
+      if (req.method !== (path === '/health' ? 'GET' : 'POST')) return json({ error: 'NOT_FOUND' }, 404);
+      // Approximate and per colo (Cloudflare's binding): it caps abuse of the JWKS and RPC reads, nothing more.
+      const ip = req.headers.get('CF-Connecting-IP') ?? 'unknown';
+      if (env.PER_IP && !(await env.PER_IP.limit({ key: ip })).success) return json({ error: 'RATE_LIMITED' }, 429);
+      if (path === '/health') {
+        const seedOk = /^[0-9a-f]{64}$/.test(env.SIGNER_SEED ?? '');
+        return json({
+          contract_id: env.CONTRACT_ID || null,
+          signer: seedOk ? (await importSigner(env.SIGNER_SEED)).signer : null, // the public key the contract registry names
+          google_client_id_set: !!env.GOOGLE_CLIENT_ID,
+        }, 200);
+      }
 
-      const body = await req.json().catch(() => null);
+      if (Number(req.headers.get('Content-Length') ?? 0) > MAX_BODY_BYTES) return json({ error: 'TOO_LARGE' }, 413);
+      // shortcut: a chunked body is read whole before the length check; Cloudflare caps it at 100 MB.
+      const text = await req.text();
+      if (text.length > MAX_BODY_BYTES) return json({ error: 'TOO_LARGE' }, 413);
+      let body: unknown = null;
+      try {
+        body = JSON.parse(text);
+      } catch {
+        // falls through to E108
+      }
       if (!body || typeof body !== 'object') return json({ error: 'E108_INVALID_INPUT' }, 400);
       // A malformed seed must fail here, not get cached as a rejected import that looks like an outage.
       if (!/^[0-9a-f]{64}$/.test(env.SIGNER_SEED ?? '') || !env.CONTRACT_ID || !env.GOOGLE_CLIENT_ID || !env.NEAR_RPC_URL) {

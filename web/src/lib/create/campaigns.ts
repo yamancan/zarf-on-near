@@ -48,16 +48,8 @@ export async function listCampaigns(view: View, sender: string): Promise<{ id: s
   return ids.map((id, i) => ({ id, c: views[i]! })).filter((r) => r.c && r.c.sender === sender).reverse();
 }
 
-export const COUNT_CAP = 200;
-export type Counts = { claimed: number; pending: number; unclaimed: number } | null;
-
-/** Claimed/pending/unclaimed from the published leaf list; null ("n/a") above COUNT_CAP leaves. */
-export async function claimCounts(commitments: string[], state: (commitment: string) => Promise<string>): Promise<Counts> {
-  if (commitments.length > COUNT_CAP) return null;
-  const states = await mapLimit(commitments, RPC_CONCURRENCY, state);
-  const n = (s: string) => states.filter((x) => x === s).length;
-  return { claimed: n('claimed'), pending: n('pending'), unclaimed: n('unclaimed') };
-}
+/** Paid out so far: what was funded minus what is left or still in flight. */
+export const claimedAmount = (c: CampaignView): bigint => BigInt(c.amount) - BigInt(c.balance) - BigInt(c.in_flight);
 
 /** spec: reclaim iff now > deadline_ns, and there is a balance or a reservation left (else E117/E118). */
 export function reclaimable(c: CampaignView, nowMs: number): { ok: true } | { ok: false; reason: string } {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { claimCounts, COUNT_CAP, formatNear, listCampaignIds, listCampaigns, mapLimit, reclaimable, reclaimOutcome, reclaimTx, RPC_CONCURRENCY, withdrawTx, type CampaignView, type View } from './campaigns';
+import { claimedAmount, formatNear, listCampaignIds, listCampaigns, mapLimit, reclaimable, reclaimOutcome, reclaimTx, RPC_CONCURRENCY, withdrawTx, type CampaignView, type View } from './campaigns';
 
 const campaign = (o: Partial<CampaignView> = {}): CampaignView => ({
   sender: 'alice.testnet', token: 'usdc.testnet', amount: '30000000', merkle_root: 'ab'.repeat(32), deadline_ns: '2000000000000000',
@@ -33,16 +33,9 @@ describe('listCampaignIds / listCampaigns', () => {
   });
 });
 
-describe('claimCounts', () => {
-  it('counts claim_state per commitment', async () => {
-    const s: Record<string, string> = { a: 'claimed', b: 'pending', c: 'unclaimed', d: 'claimed' };
-    expect(await claimCounts(['a', 'b', 'c', 'd'], async (x) => s[x])).toEqual({ claimed: 2, pending: 1, unclaimed: 1 });
-  });
-  it(`is n/a (null) above ${COUNT_CAP} leaves, without reading the chain`, async () => {
-    let reads = 0;
-    expect(await claimCounts(Array(COUNT_CAP + 1).fill('x'), async () => (reads++, 'claimed'))).toBeNull();
-    expect(reads).toBe(0);
-    expect(await claimCounts(Array(COUNT_CAP).fill('x'), async () => 'claimed')).toEqual({ claimed: COUNT_CAP, pending: 0, unclaimed: 0 });
+describe('claimedAmount', () => {
+  it('is amount minus balance minus in_flight', () => {
+    expect(claimedAmount({ amount: '100', balance: '60', in_flight: '15' } as CampaignView)).toBe(25n);
   });
 });
 
@@ -94,16 +87,6 @@ describe('mapLimit (RPC concurrency cap)', () => {
   it('handles fewer items than the limit, and none', async () => {
     expect(await mapLimit([1, 2], 8, async (x) => x)).toEqual([1, 2]);
     expect(await mapLimit([], 8, async (x) => x)).toEqual([]);
-  });
-  it('claimCounts reads at most 8 claim_states at a time', async () => {
-    let inFlight = 0, peak = 0;
-    await claimCounts(Array(40).fill('x'), async () => {
-      peak = Math.max(peak, ++inFlight);
-      await new Promise((r) => setTimeout(r, 1));
-      inFlight--;
-      return 'claimed';
-    });
-    expect(peak).toBeLessThanOrEqual(RPC_CONCURRENCY);
   });
 });
 

@@ -56,28 +56,6 @@ export async function nearView<T>(rpcUrl: string, contractId: string, method: st
 export const getCampaign = async (rpcUrl: string | undefined, contractId: string | undefined, campaignId: string) =>
   nearView<Campaign | null>(need(rpcUrl, 'PUBLIC_NEAR_RPC_URL'), need(contractId, 'PUBLIC_CONTRACT_ID'), 'get_campaign', { campaign_id: campaignId });
 
-/** spec/claim.md "Leaf list": `<PUBLIC_LEAVES_URL>/<campaign_id>.json`, published by the create app. */
-export interface LeafList {
-  campaign_id: string;
-  merkle_root: string;
-  leaves: { commitment: string; amount: string }[];
-}
-
-export async function fetchLeaves(baseUrl: string | undefined, campaignId: string): Promise<LeafList> {
-  const res = await fetch(`${need(baseUrl, 'PUBLIC_LEAVES_URL')}/${campaignId}.json`);
-  if (!res.ok) throw new ClaimError('LEAVES_UNAVAILABLE');
-  const f = await res.json().catch(() => null);
-  const ok =
-    typeof f?.campaign_id === 'string' &&
-    /^[0-9a-f]{64}$/.test(f.merkle_root) &&
-    Array.isArray(f.leaves) &&
-    f.leaves.length > 0 &&
-    f.leaves.every((l: { commitment?: unknown; amount?: unknown }) => /^[0-9a-f]{64}$/.test(String(l?.commitment)) && /^[1-9]\d{0,38}$/.test(String(l?.amount)));
-  if (!ok) throw new ClaimError('LEAVES_INVALID');
-  if (f.campaign_id !== campaignId) throw new ClaimError('LEAVES_MISMATCH');
-  return f;
-}
-
 export const requestSignature = async (verifierUrl: string | undefined, body: Record<string, unknown>) =>
   postJson<ClaimArgs>(`${need(verifierUrl, 'PUBLIC_VERIFIER_URL')}/claim`, body);
 
@@ -103,15 +81,12 @@ const MESSAGES: Record<string, string> = {
   EXPIRED: 'Your Google sign-in expired. Open your claim link and sign in again.',
   BAD_NONCE: 'This sign-in was for a different destination. Open your claim link and start again.',
   EMAIL_NOT_VERIFIED: 'Google says this email is not verified.',
-  NOT_IN_LIST: 'This claim is not in the published campaign list.',
-  LEAVES_MISMATCH: 'The published campaign list does not match the contract. Nothing was sent.',
-  LEAVES_INVALID: 'The published campaign list is damaged. Nothing was sent; contact the sender.',
-  LEAVES_UNAVAILABLE: 'The campaign list could not be loaded. Try again in a minute.',
   UPSTREAM_UNAVAILABLE: 'A service we depend on is not answering. Try again in a minute.',
   E101_INVALID_SIGNATURE: 'The verifier is not authorised for this campaign right now. Try again later or contact the sender.',
   E129_INSUFFICIENT_BALANCE: 'This campaign is underfunded; contact the sender.',
   BAD_DESTINATION: 'That is not a valid NEAR account. Open your claim link and start again.',
   RATE_LIMITED: 'Too many attempts. Wait a minute and try again.',
+  LINK_MISMATCH: 'This claim link does not match the campaign on chain. Ask the sender for your link again.',
   E115_TOKEN_TRANSFER_FAILED: 'The transfer failed and your claim is open again. Open your claim link to try again.',
 };
 

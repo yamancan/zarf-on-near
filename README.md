@@ -29,13 +29,15 @@ Read this before using it with real money.
 - **The owner's emergency exit can affect one claim.** `resolve_pending` settles a claim stuck in
   `pending` after an hour. A wrong answer can double-pay or block that **one** claim; it cannot
   touch any other allocation.
-- **The salt is in the claim link's fragment** (`#s=`), which the claim site's server never
+- **The salt is in the claim link's fragment** (`#s=<salt>&a=<amount>&p=<proof>`), which the claim site's server never
   receives. At claim time it goes only to the verifier, which never logs it. The sender's recovery
   file and link list hold every salt. A leaked link lets its holder test one guessed email against
   one commitment; it does not let anyone claim without that Google account.
 - **The relayer pays gas and nothing else.** It signs with a NEAR function-call key limited to the
   contract's `claim` method and attaches no deposit. It refuses claims that our verifier did not
   sign. The destination is inside the verifier's signature, so the relayer cannot redirect funds.
+  Gas is spent only after a valid verifier signature; the per-IP rate limits on the verifier and
+  relayer only shed noise and are not a security property (Cloudflare's limits are approximate).
 - **Unclaimed funds go back to the sender** with `reclaim` after the campaign deadline.
 - **Storage is pre-paid by the sender** in NEAR (`prepay_deposit`): the campaign entry plus storage
   for each claim. The unused reservation returns to the sender's free pre-pay on `reclaim`, and
@@ -49,13 +51,13 @@ small NEAR drip.
 
 ```
  sender                         recipient
-   │ CSV of emails + amounts       │ opens /claim/<campaign>/<commitment>#s=<salt>
+   │ CSV of emails + amounts       │ opens /claim/<campaign>/<commitment>#s=…&a=…&p=…
    ▼                               ▼
  web /create ──ft_transfer_call──▶ contract ◀──claim(signed args)── relayer
    │  salts, commitments,           (escrow)                          ▲
    │  merkle root, claim links         ▲                              │ signed claim args
    │                                   │ views                        │
-   └──────── leaf list file ──────▶ web /claim ──id_token + salt──▶ verifier
+   └──── claim link (proof inside) ─▶ web /claim ──id_token + salt──▶ verifier
                                     choose destination → Google sign-in
                                     (nonce = sha256(destination))
 ```
@@ -66,7 +68,7 @@ small NEAR drip.
 | Contract | `contract/` | NEP-141 escrow (Rust, near-sdk 5.26.1): campaigns keyed by (sender, merkle_root), merkle-checked claims signed by a registered verifier key, pending/in-flight accounting with a `#[private]` callback, reclaim after the deadline, the owner's `resolve_pending` exit. Unit 54/54 (Rust 1.86) and near-workspaces integration 6/6 (Rust 1.95) pass. See `contract/README.md` |
 | Verifier | `verifier/` | Cloudflare Worker: Google ID token (RS256, JWKS, aud/iss/exp/email_verified, nonce = destination), HMAC commitment, merkle proof, chain checks, ed25519 signature |
 | Relayer | `relayer/` | Cloudflare Worker: submits verifier-signed `claim` calls with a claim-only function-call key; payout status from the contract's events |
-| Create app | `web/src/routes/create` | CSV → salts, commitments, tree; storage pre-pay + one `ft_transfer_call`; claim links and the public leaf list |
+| Create app | `web/src/routes/create` | CSV → salts, commitments, tree; storage pre-pay + one `ft_transfer_call`; claim links carrying each recipient's salt, amount and Merkle proof (nothing else is published) |
 | Claim app | `web/src/routes/claim` | Destination (existing account or an in-browser implicit account), Google sign-in, verifier → relayer; the receipt trusts the relayer's event-based 200 (`claim_paid`) and polls `claim_state` only on a 202 |
 
 ## Run it
@@ -125,7 +127,7 @@ includes it and rejects its tokens (`verifier/test/demo.test.ts`).
 | A Google sign-in only pays the destination chosen before it | `verifier/test/googleIdToken.test.ts` (`BAD_NONCE`), `web/src/lib/claim.test.ts` (nonce vectors) |
 | Another person's Google account or claim link cannot claim | `verifier/test/claimFlow.test.ts` (`COMMITMENT_MISMATCH`) |
 | Before signing, the verifier checks: the Google token and the destination; that the campaign exists and its deadline has not passed; that the commitment is neither claimed nor pending; HMAC(salt, email) = commitment; the merkle proof against the on-chain root; that its key is in the campaign snapshot and its registry entry outlives the signature; that the balance covers the amount. It does not pre-check the contract's storage (E128) or gas (E130) checks | `verifier/test/claimFlow.test.ts` |
-| No email or salt goes on chain or into the public leaf list | `web/src/lib/create/create.test.ts` (leaf list test); `spec/claim.md` |
+| No email or salt goes on chain; a claim link whose proof does not rebuild the on-chain root is refused before sign-in (`LINK_MISMATCH`) | `spec/claim.md`; `web/src/lib/merkle.test.ts` (`rootFromProof`), `web/src/lib/claim.test.ts` (link vectors) |
 | The relayer can only call `claim`, never with a deposit, and refuses claims our verifier did not sign | `relayer/test/relay.test.ts`, `relayer/test/near.test.ts` (transaction bytes checked against `@near-js/transactions`) |
 | A reverted transfer is never shown as paid | `relayer/test/relay.test.ts` (`claim_reverted`), `web/src/lib/services.test.ts` (`settleClaim`) |
 | A draft can be funded at most once: (sender, merkle_root) is an idempotency key (E132), and after a lost wallet response the app checks `campaign_by_root` before any resend | `web/src/lib/create/create.test.ts` (`fundCampaign`, `resolveByRoot`, `mayCreate`); `contract/src/tests.rs` (`duplicate_root_is_e132_and_changes_nothing`) |

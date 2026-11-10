@@ -2,10 +2,10 @@
   import { onMount } from 'svelte';
   import { env } from '$env/dynamic/public';
   import { getConfig, getPrepayBalance, txOutcome, type ContractConfig } from '$lib/create/chain';
-  import { claimCounts, formatNear, listCampaigns, reclaimable, reclaimOutcome, reclaimTx, withdrawTx, type CampaignView, type Counts } from '$lib/create/campaigns';
+  import { claimedAmount, formatNear, listCampaigns, reclaimable, reclaimOutcome, reclaimTx, withdrawTx, type CampaignView } from '$lib/create/campaigns';
   import { formatAmount } from '$lib/create/recipients';
   import { myNearWallet, type SenderWallet } from '$lib/create/wallet';
-  import { fetchLeaves, nearView } from '$lib/services';
+  import { nearView } from '$lib/services';
 
   const rpc = env.PUBLIC_NEAR_RPC_URL;
   const contract = env.PUBLIC_CONTRACT_ID;
@@ -15,7 +15,7 @@
   let wallet: SenderWallet | null = null;
   let walletReady = $state(false);
   let account = $state<string | null>(null);
-  let rows = $state<{ id: string; c: CampaignView; counts: Counts | 'loading' }[] | null>(null);
+  let rows = $state<{ id: string; c: CampaignView }[] | null>(null);
   let freePrepay = $state('0');
   let busy = $state('');
   let error = $state('');
@@ -46,20 +46,7 @@
     try {
       const [list, free] = await Promise.all([listCampaigns(view, account!), getPrepayBalance(rpc!, contract!, account!)]);
       freePrepay = free;
-      rows = list.map((r) => ({ ...r, counts: 'loading' as const }));
-      // Counts are a nicety: from the public leaf list plus claim_state; "n/a" if either is unavailable.
-      list.forEach(async (r, i) => {
-        let counts: Counts = null;
-        try {
-          const file = await fetchLeaves(env.PUBLIC_LEAVES_URL, r.id);
-          if (file.merkle_root === r.c.merkle_root) {
-            counts = await claimCounts(file.leaves.map((l) => l.commitment), (commitment) => view<string>('claim_state', { campaign_id: r.id, commitment }));
-          }
-        } catch {
-          counts = null;
-        }
-        if (rows?.[i]?.id === r.id) rows[i].counts = counts;
-      });
+      rows = list;
     } catch {
       error = 'Could not load your campaigns. Try again in a minute.';
     }
@@ -134,10 +121,7 @@
         <h3>Campaign {r.id} · {formatAmount(BigInt(r.c.amount))} USDC</h3>
         <dl>
           <dt>Deadline</dt><dd>{fmtDate(r.c.deadline_ns)}</dd>
-          <dt>Claims</dt>
-          <dd>
-            {#if r.counts === 'loading'}…{:else if r.counts === null}n/a{:else}{r.counts.claimed} claimed, {r.counts.unclaimed} unclaimed{r.counts.pending ? `, ${r.counts.pending} pending` : ''}{/if}
-          </dd>
+          <dt>Claimed</dt><dd>{formatAmount(claimedAmount(r.c))} USDC</dd>
           <dt>Balance</dt><dd>{formatAmount(BigInt(r.c.balance))} USDC</dd>
           <dt>In flight</dt><dd>{formatAmount(BigInt(r.c.in_flight))} USDC</dd>
           <dt>Storage reserved</dt><dd>{formatNear(r.c.storage_reserved)} NEAR</dd>

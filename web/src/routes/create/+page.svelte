@@ -1,13 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { env } from '$env/dynamic/public';
-  import { buildDraft, claimLink, leafList, recoveryFile, type Draft } from '$lib/create/campaign';
+  import { buildDraft, claimLink, LONG_LINKS_ABOVE, mailtoHref, recoveryFile, type Draft } from '$lib/create/campaign';
   import { getCampaignByRoot, getCampaignView, getConfig, getPrepayBalance, getStorageCosts, txOutcome, type ContractConfig } from '$lib/create/chain';
   import {
     checkCreation, fundCampaign, LookupPending, mayCreate, minDeadlineMs, NotCreated, NotSent, OutcomeUnclear, readMarker, resolveByRoot,
     settleAfterUncertain, type UnresolvedMarker,
   } from '$lib/create/funding';
-  import { downloadPublisher, saveFile } from '$lib/create/publish';
+  import { saveFile } from '$lib/create/publish';
   import { formatAmount, parseRecipients } from '$lib/create/recipients';
   import { myNearWallet, type SenderWallet } from '$lib/create/wallet';
 
@@ -29,7 +29,6 @@
   let busy = $state('');
   let error = $state('');
   let result = $state<{ campaignId: string; txHash: string } | null>(null);
-  let publishTodo = $state<string | null>(null);
   let copied = $state(false);
   // A funding tx that was sent: while set, Create stays off until its outcome is known.
   let sentTx = $state<string | null>(null);
@@ -95,11 +94,11 @@
   const deadlineOk = $derived(minMs !== null && Number.isFinite(deadlineMs) && deadlineMs > minMs);
   const ready = $derived(parsed.rows.length > 0 && parsed.rejected.length === 0 && deadlineOk && !!account);
   const claimOrigin = env.PUBLIC_CLAIM_ORIGIN || (typeof location === 'undefined' ? '' : location.origin);
-  const links = $derived(
-    result && draft
-      ? draft.recipients.map((r) => `${r.email},${formatAmount(BigInt(r.amount))},${claimLink(claimOrigin, result!.campaignId, r)}`)
-      : [],
+  const linkRows = $derived(
+    result && draft ? draft.recipients.map((r) => ({ r, link: claimLink(claimOrigin, result!.campaignId, r) })) : [],
   );
+  const links = $derived(linkRows.map(({ r, link }) => `${r.email},${formatAmount(BigInt(r.amount))},${link}`));
+  let copiedRow = $state(-1);
 
   onMount(async () => {
     if (!rpc || !contract || !token) {
@@ -178,7 +177,6 @@
     txState = null;
     setMarker(null);
     saveFunding({ txHash: r.txHash, sender: sentFrom ?? account!, draft: draft!, deadline, campaignId: r.campaignId });
-    publishTodo = (await downloadPublisher(env.PUBLIC_LEAVES_URL).publish(leafList(r.campaignId, draft!))).todo;
   }
 
   const byRoot = () => ({
@@ -342,7 +340,7 @@
     clearFunding();
     setMarker(null);
     draft = result = null;
-    sentTx = sentFrom = txState = publishTodo = null;
+    sentTx = sentFrom = txState = null;
     pinned = recoverySaved = recoveryAck = copied = false;
     csv = error = '';
   }
@@ -350,6 +348,11 @@
   async function copyAll() {
     await navigator.clipboard.writeText(links.join('\n'));
     copied = true;
+  }
+
+  async function copyOne(i: number) {
+    await navigator.clipboard.writeText(linkRows[i].link);
+    copiedRow = i;
   }
 </script>
 
@@ -376,7 +379,6 @@
   {#if env.PUBLIC_EXPLORER_TX_URL && result.txHash}
     <p><a href="{env.PUBLIC_EXPLORER_TX_URL}{result.txHash}" target="_blank" rel="noopener noreferrer">View the transaction</a></p>
   {/if}
-  {#if publishTodo}<p><strong>One more step:</strong> {publishTodo}</p>{/if}
 
   <h2>Claim links</h2>
   <p class="error">
@@ -384,6 +386,18 @@
     private: anyone holding a link can test whether it matches an email they guess. Without the links (or your
     recovery file) nobody can claim, and you can only reclaim after the deadline.
   </p>
+  {#if linkRows.length > LONG_LINKS_ABOVE}
+    <p class="error" role="alert">Long links: some apps may cut them; send by email or copy carefully.</p>
+  {/if}
+  <ul class="links">
+    {#each linkRows as { r, link }, i (r.commitment)}
+      <li>
+        <span>{r.email} · {formatAmount(BigInt(r.amount))} USDC</span>
+        <button onclick={() => copyOne(i)}>{copiedRow === i ? 'Copied' : 'Copy'}</button>
+        <a href={mailtoHref(r, link)}>Email</a>
+      </li>
+    {/each}
+  </ul>
   <textarea readonly rows="8" aria-label="Claim links">{links.join('\n')}</textarea>
   <p>
     <button onclick={copyAll}>{copied ? 'Copied' : 'Copy all'}</button>
@@ -477,6 +491,20 @@
     border-radius: 8px;
     background: transparent;
     color: inherit;
+  }
+  .links {
+    list-style: none;
+    padding: 0;
+  }
+  .links li {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 4px 0;
+  }
+  .links span {
+    flex: 1;
+    overflow-wrap: anywhere;
   }
   h2 {
     font-size: 1.1rem;

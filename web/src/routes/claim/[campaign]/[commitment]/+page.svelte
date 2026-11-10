@@ -4,18 +4,23 @@
   import { env } from '$env/dynamic/public';
   import {
     claimState, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isValidAccountId, loadAttempt, newAttemptId,
-    saltFromFragment, saveAttempt,
+    parseLinkFragment, saveAttempt, type LinkSecret,
   } from '$lib/claim';
-  import { describeError, getCampaign } from '$lib/services';
+  import { rootFromProof } from '$lib/merkle';
+  import { ClaimError, describeError, getCampaign, getClaimState } from '$lib/services';
+  import { formatAmount } from '$lib/create/recipients';
   import { createImplicitAccount, keyFile, type ImplicitAccount } from '$lib/implicit';
 
   const campaign = page.params.campaign!;
   const commitment = page.params.commitment!;
   const linkOk = isCampaignId(campaign) && isHex32(commitment);
-  // Pending the owner's decision on gas for in-browser accounts; on unless PUBLIC_IMPLICIT_ACCOUNTS=off.
-  const implicitEnabled = env.PUBLIC_IMPLICIT_ACCOUNTS !== 'off';
+  // Off unless PUBLIC_IMPLICIT_ACCOUNTS=on: a fresh implicit account has no NEAR to move the tokens on.
+  const implicitEnabled = env.PUBLIC_IMPLICIT_ACCOUNTS === 'on';
 
-  let salt = $state<string | null>(null);
+  let link = $state<LinkSecret | null>(null);
+  // The link's own leaf and proof must rebuild the root the contract holds, before any sign-in.
+  // Every state but 'ok' replaces the form: nothing is asked of the recipient that cannot succeed.
+  let check = $state<'checking' | 'ok' | 'mismatch' | 'unknown' | 'ended' | 'claimed' | 'pending' | 'error'>('checking');
   let loaded = $state(false);
   let mode = $state<'existing' | 'new'>('existing');
   let typed = $state('');
@@ -26,23 +31,36 @@
   let deadline = $state('loading…');
 
   const destination = $derived(mode === 'existing' ? typed.trim().toLowerCase() : (implicit?.accountId ?? ''));
-  const ready = $derived(!!salt && isValidAccountId(destination) && (mode === 'existing' || (exported && confirmed)));
+  const ready = $derived(!!link && check === 'ok' && isValidAccountId(destination) && (mode === 'existing' || (exported && confirmed)));
 
   onMount(() => {
     const prev = loadAttempt();
-    salt = saltFromFragment(location.hash) ?? (prev?.campaign === campaign && prev.commitment === commitment ? prev.salt : null);
+    const same = prev?.campaign === campaign && prev.commitment === commitment && prev.salt && prev.amount && Array.isArray(prev.proof);
+    link = parseLinkFragment(location.hash) ?? (same ? { salt: prev!.salt, amount: prev!.amount, proof: prev!.proof } : null);
     // Keep the salt out of the address bar and synced history; this tab's sessionStorage holds it.
     if (location.hash) history.replaceState(history.state, '', location.pathname); // $app/navigation's replaceState throws before the router is up
-    if (salt && linkOk) saveAttempt({ campaign, commitment, salt, destination: '', attemptId: '' });
+    if (link && linkOk) saveAttempt({ campaign, commitment, ...link, destination: '', attemptId: '' });
     loaded = true;
-    if (linkOk) loadDeadline();
+    if (link && linkOk) checkLink(link);
   });
 
-  async function loadDeadline() {
+  async function checkLink(l: LinkSecret) {
     try {
       const c = await getCampaign(env.PUBLIC_NEAR_RPC_URL, env.PUBLIC_CONTRACT_ID, campaign);
-      deadline = c ? new Date(Number(BigInt(c.deadline_ns) / 1_000_000n)).toLocaleString() : 'this campaign does not exist';
+      if (!c) {
+        check = 'unknown';
+        return;
+      }
+      deadline = new Date(Number(BigInt(c.deadline_ns) / 1_000_000n)).toLocaleString();
+      if ((await rootFromProof(commitment, l.amount, l.proof)) !== c.merkle_root) {
+        check = 'mismatch';
+        return;
+      }
+      const state = await getClaimState(env.PUBLIC_NEAR_RPC_URL, env.PUBLIC_CONTRACT_ID, campaign, commitment);
+      if (state !== 'unclaimed') check = state;
+      else check = BigInt(Date.now()) * 1_000_000n > BigInt(c.deadline_ns) ? 'ended' : 'ok';
     } catch (e) {
+      check = 'error';
       deadline = `unavailable (${describeError(e)})`;
     }
   }
@@ -77,7 +95,7 @@
       return;
     }
     const attemptId = newAttemptId();
-    saveAttempt({ campaign, commitment, salt: salt!, destination, attemptId });
+    saveAttempt({ campaign, commitment, ...link!, destination, attemptId });
     location.href = googleAuthUrl({
       clientId,
       redirectUri: `${location.origin}/auth/google`,
@@ -90,12 +108,32 @@
 {#if !linkOk}
   <h1>This claim link is broken</h1>
   <p class="muted">Open the link from your email again, exactly as it was sent.</p>
-{:else if loaded && !salt}
+{:else if loaded && !link}
   <h1>This claim link is incomplete</h1>
-  <p class="muted">The part after <code>#</code> is missing. Open the full link from your email again.</p>
+  <p class="muted">The part after <code>#</code> is missing or damaged. Open the full link from your email again.</p>
+{:else if check === 'mismatch'}
+  <h1>This claim link does not match</h1>
+  <p class="error" role="alert">{describeError(new ClaimError('LINK_MISMATCH'))}</p>
+{:else if check === 'unknown'}
+  <h1>This campaign does not exist</h1>
+  <p class="muted">There is no campaign {campaign} on this contract. Ask the sender for your link again.</p>
+{:else if check === 'claimed'}
+  <h1>Already claimed</h1>
+  <p class="muted">The tokens for this link have been paid out.</p>
+{:else if check === 'pending'}
+  <h1>This claim is being paid</h1>
+  <p class="muted">A claim for this link is in progress. Check again in a minute.</p>
+{:else if check === 'ended'}
+  <h1>This campaign has ended</h1>
+  <p class="muted">Claims closed on {deadline}. Ask the sender about it.</p>
+{:else if check === 'error'}
+  <h1>Could not check this claim</h1>
+  <p class="error" role="alert">{deadline}. Try again in a minute.</p>
+{:else if loaded && check === 'checking'}
+  <p class="muted" role="status">Checking your claim…</p>
 {:else if loaded}
-  <h1>Claim your tokens</h1>
-  <p class="muted">Campaign {campaign}. Claim before: {deadline}</p>
+  <h1><strong>{formatAmount(BigInt(link!.amount))} USDC</strong> is waiting for you</h1>
+  <p class="muted">Claim by {deadline}.</p>
 
   <h2>Where should they go?</h2>
   {#if implicitEnabled}
