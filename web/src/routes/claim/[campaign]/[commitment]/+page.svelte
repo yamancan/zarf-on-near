@@ -3,7 +3,7 @@
   import { page } from '$app/state';
   import { env } from '$env/dynamic/public';
   import {
-    classifyDestination, claimState, deadlineText, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isValidAccountId, loadAttempt, loadReceipt, loadStarted,
+    classifyDestination, claimState, deadlineText, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isValidAccountId, loadAttempt, loadReceipt,
     middle, newAttemptId, parseLinkFragment, saveAttempt, timeLeft, type LinkSecret,
   } from '$lib/claim';
   import { rootFromProof } from '$lib/merkle';
@@ -50,8 +50,6 @@
   let checkError = $state('');
   // A claim this browser finished earlier (receipt page): lets "Already claimed" show what was paid.
   const paid = loadReceipt(env.PUBLIC_CONTRACT_ID ?? '', campaign, commitment);
-  // A claim this browser sent whose answer was lost: "Already claimed" can still say where it went.
-  const started = paid ? null : loadStarted(env.PUBLIC_CONTRACT_ID ?? '', campaign, commitment);
   const MODES = $derived([
     ['existing', 'NEAR account'],
     ['chain', 'Another chain'], // shown on testnet too, its chains marked "mainnet only" (canonical choice 9)
@@ -224,7 +222,7 @@
         {@render terminal(SearchX, 'muted', 'Campaign not found', 'Ask the sender for your link again.', 'home')}
       {:else if check === 'claimed'}
         <div class="flex flex-col items-center text-center gap-4 py-2">
-          <ClaimRecord r={paid} amount={link!.amount} title="Already claimed" contract={env.PUBLIC_CONTRACT_ID ?? ''} {campaign} {commitment} {started} />
+          <ClaimRecord r={paid} amount={link!.amount} title="Already claimed" contract={env.PUBLIC_CONTRACT_ID ?? ''} {campaign} {commitment} />
         </div>
       {:else if check === 'pending'}
         {@render terminal(Clock, 'muted', 'This claim is being paid', 'It usually settles within a minute.', 'recheck')}

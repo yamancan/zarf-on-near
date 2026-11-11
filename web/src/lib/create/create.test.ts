@@ -525,6 +525,7 @@ describe('readRecoveryFile (Open a backup file)', () => {
       (f: any) => (f.recipients[0].email = 'mallory@gmail.com'),
       (f: any) => (f.recipients[2].proof = f.recipients[2].proof.slice(1)),
       (f: any) => (f.merkle_root = 'ab'.repeat(32)),
+      (f: any) => (f.recipients[0].proof = Array(21).fill('ab'.repeat(32))), // over the 20-level cap
     ]) {
       const f = JSON.parse(file);
       mutate(f);

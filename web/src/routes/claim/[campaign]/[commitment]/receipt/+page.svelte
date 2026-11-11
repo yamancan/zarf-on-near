@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { page } from '$app/state';
   import { env } from '$env/dynamic/public';
-  import { claimedAt, clearAttempt, saveStarted, confirmRemembered, isImplicitAccount, loadAttempt, loadReceipt, middle, saveReceipt, settleReceipt, shownAmount, signedIn, type Receipt } from '$lib/claim';
+  import { claimedAt, clearAttempt, confirmRemembered, isImplicitAccount, loadAttempt, loadReceipt, middle, saveReceipt, settleReceipt, shownAmount, signedIn, type Receipt } from '$lib/claim';
   import { UNIT } from '$lib/network';
   import ClaimRecord from '$lib/ClaimRecord.svelte';
   import { canRetry, ClaimError, describeError, errorCode, failureHeading, getClaimState, isUnmapped, relayAndSettle, requestSignature, submitClaim } from '$lib/services';
@@ -104,7 +104,6 @@
         ...(attempt.intents ? { intents: { destination_asset: attempt.intents.assetId, recipient: attempt.intents.recipient } } : {}),
       });
       step = 'paying';
-      saveStarted(contract, attempt.campaign, attempt.commitment, { destination: attempt.intents?.recipient ?? attempt.destination, at: Date.now() });
       // A reverted transfer (409 E115) and other refusals throw; a lost answer follows the chain (relayAndSettle).
       const settled = await relayAndSettle(
         () => submitClaim(env.PUBLIC_RELAYER_URL, args).then((r) => ((txHash = r.txHash), (step = 'settling'), r)),

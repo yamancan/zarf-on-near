@@ -171,7 +171,7 @@ export function timeLeft(deadlineMs: number, nowMs: number): string {
 export interface Receipt {
   amount: string; // USDC base units (the link's amount)
   destination: string; // the NEAR account, or for a cross-chain payout the address on that chain
-  txHash: string; // the NEAR claim tx
+  txHash: string; // the NEAR claim tx; '' when the relayer's answer was lost (the chain still said claimed)
   at?: number; // when this browser saw the claim land (ms)
   chainName?: string; // set for a cross-chain payout
   bridge?: BridgeOutcome; // set for a cross-chain payout
@@ -210,7 +210,7 @@ export function loadReceipt(contract: string, campaign: string, commitment: stri
     const s = store ?? localStorage;
     const key = receiptKey(contract, campaign, commitment);
     const r = JSON.parse(s.getItem(key) ?? 'null') as Receipt | null;
-    if (!r || !/^[1-9]\d{0,38}$/.test(r.amount) || typeof r.destination !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(r.txHash)) return null;
+    if (!r || !/^[1-9]\d{0,38}$/.test(r.amount) || typeof r.destination !== 'string' || typeof r.txHash !== 'string' || (r.txHash !== '' && !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(r.txHash))) return null;
     if (!(typeof r.savedAt === 'number' && now - r.savedAt < RECEIPT_TTL_MS)) {
       s.removeItem(key); // expired, or from before records had a date
       return null;
@@ -259,26 +259,3 @@ export const middle = (s: string, keep = 6): string => (s.length > keep * 2 + 1 
 /** "9.99558" -> "9.99": display only, never rounds up an amount the recipient may not get. */
 export const twoDecimals = (s: string): string => s.replace(/^(\d+)(\.\d{1,2})?\d*$/, (_, w, f = '') => w + (f && f !== '.00' ? f : ''));
 
-/** Written just before the relayer is called: where this browser sent the claim (nothing secret). */
-export interface Started {
-  destination: string;
-  at: number; // ms
-}
-const startedKey = (contract: string, campaign: string, commitment: string) => `zarf-near:started:${contract}/${campaign}/${commitment}`;
-
-export function saveStarted(contract: string, campaign: string, commitment: string, s: Started, store?: Storage): void {
-  try {
-    (store ?? localStorage).setItem(startedKey(contract, campaign, commitment), JSON.stringify(s));
-  } catch {
-    // best effort: without it "Already claimed" cannot say where this browser sent it
-  }
-}
-
-export function loadStarted(contract: string, campaign: string, commitment: string, store?: Storage, now = Date.now()): Started | null {
-  try {
-    const s = JSON.parse((store ?? localStorage).getItem(startedKey(contract, campaign, commitment)) ?? 'null') as Started | null;
-    return s && typeof s.destination === 'string' && s.destination && typeof s.at === 'number' && now - s.at < RECEIPT_TTL_MS ? s : null;
-  } catch {
-    return null;
-  }
-}

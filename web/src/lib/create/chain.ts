@@ -22,7 +22,7 @@ export const getCampaignByRoot = (rpcUrl: string, contractId: string, sender: st
   nearView<string | null>(rpcUrl, contractId, 'campaign_by_root', { sender, merkle_root: merkleRoot });
 
 export const getCampaignView = (rpcUrl: string, contractId: string, campaignId: string) =>
-  nearView<{ merkle_root: string; amount: string; sender: string } | null>(rpcUrl, contractId, 'get_campaign', { campaign_id: campaignId });
+  nearView<{ merkle_root: string; amount: string; sender: string; deadline_ns: string } | null>(rpcUrl, contractId, 'get_campaign', { campaign_id: campaignId });
 
 /** view_account: the account's NEAR balance and the bytes it stores (it must keep storage_usage × byte cost). */
 export async function getAccount(rpcUrl: string, accountId: string): Promise<{ amount: string; storage_usage: number }> {

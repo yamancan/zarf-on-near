@@ -249,7 +249,7 @@
     error = errorTitle = errorCode = '';
     if (!file) return;
     try {
-      const { draft: d, deadlineNs } = await readRecoveryFile(await file.text(), { contractId: contract!, network: config!.network });
+      const { draft: d } = await readRecoveryFile(await file.text(), { contractId: contract!, network: config!.network });
       if (!account) await connect();
       if (!account) {
         error = 'Connect the wallet that sent this campaign to open its backup.';
@@ -262,8 +262,14 @@
         error = `No campaign from ${account} uses this backup. If you sent it from another account, connect that one.`;
         return;
       }
+      // The deadline comes from the contract's record, not from the file (the file is only trusted for the links).
+      const c = await getCampaignView(rpc!, contract!, id).catch(() => null);
+      if (!c) {
+        error = 'Could not reach NEAR. Try again in a minute.';
+        return;
+      }
       draft = d;
-      deadline = toLocalInput(Number(BigInt(deadlineNs) / 1_000_000n));
+      deadline = toLocalInput(Number(BigInt(c.deadline_ns) / 1_000_000n));
       recoverySaved = recoveryAck = true; // the sender holds the file they just opened
       result = { campaignId: id, txHash: '' }; // the funding tx is not in the file; the done page hides its link
     } catch (e) {

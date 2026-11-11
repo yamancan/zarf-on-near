@@ -5,7 +5,7 @@
   import { onMount } from 'svelte';
   import { env } from '$env/dynamic/public';
   import { AlertTriangle, ArrowUpRight, Check, Clock, Undo2 } from 'lucide-svelte';
-  import { claimedAt, middle, shownAmount, type Receipt, type Started } from '$lib/claim';
+  import { claimedAt, middle, shownAmount, type Receipt } from '$lib/claim';
   import { needsRecheck, nextStep, notReturnedYet, recheckReceipt } from '$lib/intents';
   import BridgeDetails from '$lib/BridgeDetails.svelte';
   import { formatAmount } from '$lib/create/recipients';
@@ -14,8 +14,8 @@
   import Medallion from '$lib/Medallion.svelte';
   import ZenButton from '$lib/zen/components/ZenButton.svelte';
 
-  let { r, amount, title, contract, campaign, commitment, started = null }: {
-    r: Receipt | null; amount: string; title?: string; contract: string; campaign: string; commitment: string; started?: Started | null;
+  let { r, amount, title, contract, campaign, commitment }: {
+    r: Receipt | null; amount: string; title?: string; contract: string; campaign: string; commitment: string;
   } = $props();
   // svelte-ignore state_referenced_locally
   let rec = $state(r); // updated from the bridge's answers
@@ -57,9 +57,7 @@
   unit={shown.unit}
   struck={kind === 'refunded'}
 />
-{#if !rec && started}
-  <p class="text-sm text-zen-fg-muted max-w-xs" role="status">This browser sent it to <span class="font-mono text-zen-fg" title={started.destination}>{middle(started.destination, 8)}</span> on {claimedAt(started.at)}.</p>
-{:else if !rec}
+{#if !rec}
   <p class="text-sm text-zen-fg-muted max-w-xs">If that was not you, contact the sender.</p>
 {:else}
   <p class="text-sm text-zen-fg-muted max-w-xs" role="status">
@@ -80,7 +78,9 @@
   {:else if rec.at}
     <p class="text-xs text-zen-fg-muted">Claimed {claimedAt(rec.at)}</p>
   {/if}
-  {#if env.PUBLIC_EXPLORER_TX_URL}
+  {#if !rec.txHash}
+    <!-- the relayer's answer was lost: the chain says claimed, but this browser never got the hash -->
+  {:else if env.PUBLIC_EXPLORER_TX_URL}
     <ZenButton href="{env.PUBLIC_EXPLORER_TX_URL}{rec.txHash}" target="_blank" rel="noopener noreferrer" variant="secondary" class="rounded-full min-h-11">
       View the transaction
       {#snippet iconRight()}<ArrowUpRight class="w-3.5 h-3.5" />{/snippet}

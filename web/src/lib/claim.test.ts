@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import vectors from '../../../spec/vectors.json';
 import {
-  loadStarted, saveStarted, classifyDestination, claimState, deadlineText, timeLeft, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isImplicitAccount, isValidAccountId, loadAttempt, newAttemptId,
+  classifyDestination, claimState, deadlineText, timeLeft, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isImplicitAccount, isValidAccountId, loadAttempt, newAttemptId,
   decodeProof, encodeProof, parseCallback, parseLinkFragment, saveAttempt, clearAttempt, saveReceipt, loadReceipt, settleReceipt, claimedAt, middle, twoDecimals, shownAmount, confirmRemembered, RECEIPT_TTL_MS,
 } from './claim';
 
@@ -277,17 +277,18 @@ describe('display helpers', () => {
   });
 });
 
-describe('saveStarted / loadStarted (the note written before the relayer is called)', () => {
+
+describe('a receipt without a hash (the relayer answer was lost, the chain said claimed)', () => {
   const mem = () => { const m = new Map<string, string>(); return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k) } as unknown as Storage; };
-  it('round-trips per contract, campaign and commitment; holds only the destination and the time', () => {
+  it('is kept with its cross-chain fields, so a reopened link can re-poll the bridge', () => {
     const s = mem();
-    saveStarted('c.testnet', '2', 'ab', { destination: 'alice.testnet', at: 1000 }, s);
-    expect(loadStarted('c.testnet', '2', 'ab', s, 2000)).toEqual({ destination: 'alice.testnet', at: 1000 });
-    expect(loadStarted('c.testnet', '3', 'ab', s, 2000)).toBeNull();
+    const r = { amount: '10000000', txHash: '', destination: '0x' + 'ab'.repeat(20), chainName: 'Base', bridge: 'in-transit' as const, depositAddress: 'd'.repeat(64), refundTo: 'sender.near' };
+    saveReceipt('c', '2', 'ab', r, s, 1000);
+    expect(loadReceipt('c', '2', 'ab', s, 2000)).toMatchObject({ txHash: '', depositAddress: 'd'.repeat(64), refundTo: 'sender.near', chainName: 'Base' });
   });
-  it('tolerates garbage and a storage that throws', () => {
-    const broken = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); } } as unknown as Storage;
-    expect(() => saveStarted('c', '2', 'ab', { destination: 'a', at: 1 }, broken)).not.toThrow();
-    expect(loadStarted('c', '2', 'ab', broken)).toBeNull();
+  it('still refuses a hash that is present but malformed', () => {
+    const s = mem();
+    saveReceipt('c', '2', 'ab', { amount: '1', txHash: 'not-base58!', destination: 'a.testnet' }, s, 1000);
+    expect(loadReceipt('c', '2', 'ab', s, 2000)).toBeNull();
   });
 });
