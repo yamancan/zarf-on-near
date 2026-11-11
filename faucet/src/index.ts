@@ -3,7 +3,7 @@ import { handleFaucet } from './faucet';
 import type { KvLike } from './limits';
 import { parseNearKey } from './near';
 import { tryPage, tryScript } from './page';
-import { verifyTurnstile } from './turnstile';
+import { isTurnstileTestKey, verifyTurnstile } from './turnstile';
 
 export interface Env {
   NETWORK: string;
@@ -72,9 +72,12 @@ export default {
     const amount = /^[1-9]\d{0,38}$/.test(env.AMOUNT ?? '') ? env.AMOUNT : null;
     const lifetimeS = positive(env.LIFETIME_S), perIp = positive(env.PER_IP_PER_DAY);
     const perEmail = positive(env.PER_EMAIL_PER_DAY), cap = positive(env.DAILY_CAP);
+    const local = LOCAL_HOSTS.includes(url.hostname);
     const made = env.NETWORK === 'testnet' ? makeCreator(env, url.hostname) : null;
+    // Test keys always pass, so off localhost they would switch the human check off.
+    const testKeys = isTurnstileTestKey(env.TURNSTILE_SECRET ?? '') || isTurnstileTestKey(env.TURNSTILE_SITE_KEY ?? '');
     if (!made || !amount || !lifetimeS || !perIp || !perEmail || !cap || !env.LIMIT_KEY || !/^https:\/\//.test(env.CLAIM_HOST ?? '') ||
-        !env.TURNSTILE_SECRET || !env.TURNSTILE_SITE_KEY) {
+        !env.TURNSTILE_SECRET || !env.TURNSTILE_SITE_KEY || (testKeys && !local)) {
       return json({ error: 'FAUCET_MISCONFIGURED' }, 500);
     }
     if (env.CREATOR === 'testnet') {
@@ -87,7 +90,7 @@ export default {
     const input = (await req.json().catch(() => null)) as { turnstile?: unknown } | null;
     const ip = req.headers.get('CF-Connecting-IP') ?? 'unknown';
     // Before the quota: a bot without a valid token spends nobody's daily allowance.
-    const human = await verifyTurnstile(input?.turnstile, env.TURNSTILE_SECRET, ip);
+    const human = await verifyTurnstile(input?.turnstile, env.TURNSTILE_SECRET, ip, local ? null : url.hostname);
     if (human === 'unavailable') return json({ error: 'TURNSTILE_UNAVAILABLE' }, 503);
     if (human === 'failed') return json({ error: 'TURNSTILE_FAILED' }, 403);
     const { status, body } = await handleFaucet(input, ip, {

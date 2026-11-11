@@ -181,18 +181,18 @@ describe('worker', () => {
   const fullEnv = (): Record<string, unknown> => ({
     NETWORK: 'testnet', CREATOR: 'testnet', CLAIM_HOST: 'https://claim.example', CONTRACT_ID: 'esc.testnet', TOKEN_ID: 'usdc.testnet',
     NEAR_RPC_URL: `https://rpc${rpcUrl++}.example`, FAUCET_SENDER_ID: 'faucet.testnet', AMOUNT: '1000000', LIFETIME_S: '600',
-    PER_IP_PER_DAY: '3', PER_EMAIL_PER_DAY: '1', DAILY_CAP: '10', TURNSTILE_SITE_KEY: '1x00000000000000000000AA',
+    PER_IP_PER_DAY: '3', PER_EMAIL_PER_DAY: '1', DAILY_CAP: '10', TURNSTILE_SITE_KEY: '0x4AAAAAAAsitekey',
     FAUCET_SENDER_KEY: KEY, LIMIT_KEY: 'k', TURNSTILE_SECRET: 'secret', FAUCET_KV: memKv(),
   });
   // Routes outbound fetches: NEAR `status`, and Turnstile siteverify.
-  const net = (o: { chainId?: string; turnstile?: 'ok' | 'failed' | 'down' } = {}) => {
+  const net = (o: { chainId?: string; turnstile?: 'ok' | 'failed' | 'down'; tsHost?: string } = {}) => {
     const seen: string[] = [];
     vi.stubGlobal('fetch', async (u: string | URL | Request, init?: RequestInit) => {
       const url = String(u);
       seen.push(url);
       if (url.startsWith('https://challenges.cloudflare.com/')) {
         if (o.turnstile === 'down') throw new Error('network');
-        return Response.json({ success: (o.turnstile ?? 'ok') === 'ok' });
+        return Response.json({ success: (o.turnstile ?? 'ok') === 'ok', hostname: o.tsHost ?? 'f.example' });
       }
       const body = JSON.parse(String(init?.body));
       if (body.method === 'status') return Response.json({ jsonrpc: '2.0', id: 1, result: { chain_id: o.chainId ?? 'testnet' } });
@@ -273,6 +273,21 @@ describe('worker', () => {
       expect((env.FAUCET_KV as ReturnType<typeof memKv>).m.size).toBe(0);
     });
 
+  it.each<[string, Record<string, unknown>]>([
+    ['the always-pass test secret', { TURNSTILE_SECRET: '1x0000000000000000000000000000000AA' }],
+    ['a test site key', { TURNSTILE_SITE_KEY: '3x00000000000000000000FF'.replace('FF', 'AA') }],
+  ])('refuses %s off localhost, allows it on localhost', async (_n, over) => {
+    net({ tsHost: 'example.com' });
+    const env = { ...fullEnv(), ...over, CREATOR: 'stub' };
+    expect(await post(env, { email: 'a@x.io', turnstile: 't' })).toEqual({ status: 500, body: { error: 'FAUCET_MISCONFIGURED' } });
+    expect((await post(env, { email: 'a@x.io', turnstile: 't' }, { host: '127.0.0.1:8787' })).body).toMatchObject({ stub: true });
+  });
+
+  it('refuses a token issued for another hostname', async () => {
+    net({ tsHost: 'evil.example' });
+    expect(await post(fullEnv(), { email: 'a@x.io', turnstile: 't' })).toEqual({ status: 403, body: { error: 'TURNSTILE_FAILED' } });
+  });
+
   it('a missing token never reaches siteverify', async () => {
     const seen = net();
     expect((await post(fullEnv(), { email: 'a@x.io' })).body).toEqual({ error: 'TURNSTILE_FAILED' });
@@ -297,17 +312,22 @@ describe('worker', () => {
 describe('verifyTurnstile', () => {
   it('posts secret, response and remoteip, and reads success', async () => {
     let form = '';
-    const r = await verifyTurnstile('tok', 'sec', '203.0.113.9', async (_u, i) => ((form = String(i?.body)), Response.json({ success: true })));
+    const r = await verifyTurnstile('tok', 'sec', '203.0.113.9', null, async (_u, i) => ((form = String(i?.body)), Response.json({ success: true })));
     expect(r).toBe('ok');
     expect(new URLSearchParams(form).get('remoteip')).toBe('203.0.113.9');
     expect(new URLSearchParams(form).get('secret')).toBe('sec');
   });
   it.each([[{ success: false }, 'failed'], [{ success: 'true' }, 'failed'], [{}, 'failed']])('%j → %s', async (body, out) => {
-    expect(await verifyTurnstile('tok', 's', 'ip', async () => Response.json(body))).toBe(out);
+    expect(await verifyTurnstile('tok', 's', 'ip', null, async () => Response.json(body))).toBe(out);
+  });
+  it('checks the hostname when one is given', async () => {
+    const ok = async () => Response.json({ success: true, hostname: 'f.example' });
+    expect(await verifyTurnstile('tok', 's', 'ip', 'f.example', ok)).toBe('ok');
+    expect(await verifyTurnstile('tok', 's', 'ip', 'other.example', ok)).toBe('failed');
   });
   it('HTTP 500 and a thrown fetch are unavailable', async () => {
-    expect(await verifyTurnstile('tok', 's', 'ip', async () => new Response('', { status: 500 }))).toBe('unavailable');
-    expect(await verifyTurnstile('tok', 's', 'ip', async () => { throw new Error('x'); })).toBe('unavailable');
+    expect(await verifyTurnstile('tok', 's', 'ip', null, async () => new Response('', { status: 500 }))).toBe('unavailable');
+    expect(await verifyTurnstile('tok', 's', 'ip', null, async () => { throw new Error('x'); })).toBe('unavailable');
   });
 });
 
