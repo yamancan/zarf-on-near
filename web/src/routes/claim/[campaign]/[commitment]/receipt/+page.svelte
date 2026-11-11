@@ -229,7 +229,7 @@
       {:else if stored && !stored.chainName}
         {@render nearDone(stored.amount, stored.destination, stored.txHash)}
       {:else if stored}
-        <ClaimRecord r={stored} amount={stored.amount} title={stored.bridge === 'paid' ? `Arrived on ${stored.chainName}` : stored.bridge === 'in-transit' ? 'Claimed on NEAR' : 'Not delivered'} />
+        <ClaimRecord r={stored} amount={stored.amount} title={stored.bridge === 'paid' ? `Arrived on ${stored.chainName}` : stored.bridge === 'in-transit' ? 'Claimed on NEAR' : stored.bridge === 'failed' ? 'Payout failed' : 'Not delivered'} />
       {:else if !resumed && (!ok || !attempt)}
         <Medallion icon={Mail} tone="muted" />
         <h1 class="text-xl font-semibold tracking-tight">Nothing to show yet</h1>

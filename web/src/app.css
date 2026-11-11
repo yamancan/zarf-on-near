@@ -13,6 +13,15 @@
   --font-app: 'Saira', ui-sans-serif, system-ui, sans-serif;
 }
 
+/*
+ * Chromium on Linux (FreeType) places small hinted Saira glyphs on whole pixels when it draws LCD text on an
+ * opaque fill, which opens gaps such as "Rec laim" / "Disconne ct" in buttons. geometricPrecision turns hinting
+ * off and keeps fractional advances; other desktop platforms already lay text out this way. Unlayered, so it beats
+ * Zen base.css's optimizeLegibility (the one Zen value this overrides).
+ */
+html { text-rendering: geometricPrecision; }
+button, input, select, textarea { text-rendering: inherit; } /* form controls reset it to auto */
+
 /* The claim app's deeper fume ground (main repo apps/claim/src/app.css). */
 [data-theme='glass-porcelain'],
 [data-theme='dark'] {
@@ -51,12 +60,6 @@
   summary::-webkit-details-marker { display: none; }
   /* Zen's base gives every <p> 1rem muted text; here a paragraph takes its container's size and colour. */
   p { font-size: inherit; color: inherit; }
-  /*
-   * Chromium on Linux (FreeType) places small hinted Saira glyphs on whole pixels, which opens gaps such as
-   * "Rec laim" / "Disconne ct" on opaque buttons. geometricPrecision turns hinting off and keeps fractional
-   * advances there; other desktop platforms already lay text out this way, so nothing changes for them.
-   */
-  html { text-rendering: geometricPrecision; }
   /* No orphans: titles balance their lines, sentences avoid a lone last word (critic r2 P1-9). */
   h1, h2, h3 { text-wrap: balance; }
   p, li, dd { text-wrap: pretty; }

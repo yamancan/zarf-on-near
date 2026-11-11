@@ -74,7 +74,8 @@ async function run(final) {
   assert(/returns to sender\.near on NEAR/.test(detail), 'refund copy names the sender');
   await p.locator('button.google').click();
   await p.waitForURL(/receipt/);
-  await p.waitForFunction((t) => document.querySelector('h1')?.textContent?.includes(t), final === 'SUCCESS' ? 'Arrived on Base' : 'Not delivered', { timeout: 20000 });
+  const title = { SUCCESS: 'Arrived on Base', REFUNDED: 'Not delivered', FAILED: 'Payout failed' }[final];
+  await p.waitForFunction((t) => document.querySelector('h1')?.textContent?.includes(t), title, { timeout: 20000 });
   const text = await p.locator('main').innerText();
 
   const [dry, real] = quotes;
@@ -84,10 +85,14 @@ async function run(final) {
   assert(seen.verifier.destination === DEP && seen.verifier.intents.recipient === RECIPIENT && seen.verifier.intents.destination_asset.startsWith('nep141:base-'), 'verifier body');
   assert(seen.submit?.depositAddress === DEP, 'deposit submitted');
   if (final === 'SUCCESS') assert(/basescan\.org/.test(await p.locator('a[href*=basescan]').getAttribute('href')), 'Base explorer link');
-  else assert(/went back to sender\.near on NEAR/.test(text), 'refund copy');
+  else if (final === 'REFUNDED') assert(/Returned to sender\.near on NEAR/.test(text), 'refund copy');
+  else assert(/could not pay this out on Base/.test(text) && !/Returned to/.test(text), 'a failed payout is never called returned');
+  // Remembered as the bridge reported it, never as paid before that.
+  const rec = await p.evaluate(() => Object.entries(localStorage).find(([k]) => k.startsWith('zarf-near:receipt:'))?.[1]);
+  assert(JSON.parse(rec).bridge === { SUCCESS: 'paid', REFUNDED: 'refunded', FAILED: 'failed' }[final], `stored bridge outcome: ${rec}`);
   // A judge reloads: the receipt resumes following the payout from sessionStorage.
   await p.reload();
-  await p.waitForFunction((t) => document.querySelector('h1')?.textContent?.includes(t), final === 'SUCCESS' ? 'Arrived on Base' : 'Not delivered', { timeout: 20000 });
+  await p.waitForFunction((t) => document.querySelector('h1')?.textContent?.includes(t), title, { timeout: 20000 });
   assert(!errs.length, `console errors: ${errs.join(' | ')}`);
   console.log(`${final}: PASS · ${text.split('\n').slice(0, 3).join(' / ')}`);
   await b.close();
@@ -96,4 +101,5 @@ async function run(final) {
 (async () => {
   await run('SUCCESS');
   await run('REFUNDED');
+  await run('FAILED');
 })().catch((e) => { console.error(e.message); process.exit(1); });
