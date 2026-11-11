@@ -9,3 +9,5 @@ export const USDC_LINES = [
   'USDC is a digital dollar issued by Circle, built to stay worth 1 US dollar.',
   ...(TESTNET ? ['Test USDC is its free practice version on NEAR testnet: it has no value.'] : []),
 ];
+/** Mainnet create (second audit S3): Circle controls USDC, and nothing in Zarf can override it. */
+export const CIRCLE_LINE = 'Circle can pause USDC or block an account; that would stop claims and take-backs until Circle lifts it. Zarf cannot override it.';

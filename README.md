@@ -73,6 +73,8 @@ Read this before using it with real money.
   iframe that cannot read the page. The code from GitHub is pinned to a commit; Intear's is served by Intear
   and not pinned. A changed wallet script could ask the wallet to sign a different transaction, so the
   wallet's own approval screen, which shows the receiver and amount, is the last check before signing.
+- **Circle controls USDC.** Circle can pause USDC or block an account. That would stop claims and take-backs
+  (`reclaim`) until Circle lifts it, and nothing in Zarf can override it.
 - **Unclaimed funds go back to the sender** with `reclaim` after the campaign deadline.
 - **Storage is pre-paid by the sender** in NEAR (`prepay_deposit`): the campaign entry plus storage
   for each claim. The unused reservation returns to the sender's free pre-pay on `reclaim`, and

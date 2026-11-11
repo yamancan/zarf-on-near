@@ -13,7 +13,7 @@
   import { deadlineText, timeLeft } from '$lib/claim';
   import { formatNear } from '$lib/create/campaigns';
   import { getClaimState, nearView, type ClaimState } from '$lib/services';
-  import { TESTNET, UNIT, USDC_LINES } from '$lib/network';
+  import { CIRCLE_LINE, TESTNET, UNIT, USDC_LINES } from '$lib/network';
   import { ArrowRight, ArrowUpRight, Check, ChevronDown, Clock, Info, Loader2, Mail } from 'lucide-svelte';
   import Amount from '$lib/Amount.svelte';
   import Medallion from '$lib/Medallion.svelte';
@@ -607,6 +607,7 @@
   {#if usdcOpen}
     <div id="usdc-what" class="flex flex-col gap-1 text-sm text-zen-fg-muted">
       {#each USDC_LINES as l (l)}<p>{l}</p>{/each}
+      {#if !TESTNET}<p>{CIRCLE_LINE}</p>{/if}
       {#if token}
         <p class="text-xs">
           Token on NEAR:
