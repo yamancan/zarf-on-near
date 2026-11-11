@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 // Subset of GET /v0/tokens recorded 2026-11-11; the status body is the verifier's recorded fixture.
 import tokens from './fixtures/1click-tokens.json';
 import pending from './fixtures/1click-status-pending.json';
-import { describeStatus, refusal, evmAddressError, getQuote, getStatus, loadPayout, lossBps, needsRecheck, nextStep, notReturnedYet, recheckReceipt, savePayout, NEAR_USDC_ASSET, PAYOUT_CHAINS, QuoteError, resolveAssets } from './intents';
+import { crossChainOffered, submitDeposit, describeStatus, refusal, evmAddressError, getQuote, getStatus, loadPayout, lossBps, needsRecheck, nextStep, notReturnedYet, recheckReceipt, savePayout, NEAR_USDC_ASSET, PAYOUT_CHAINS, QuoteError, resolveAssets } from './intents';
 import { loadReceipt, saveReceipt, shownAmount, type Receipt } from './claim';
 
 const json = (body: unknown, status = 200) => vi.fn(async (_u: string, _i?: RequestInit) => new Response(JSON.stringify(body), { status }));
@@ -194,5 +194,23 @@ describe('savePayout / loadPayout (receipt reload)', () => {
     const broken = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); } } as unknown as Storage;
     expect(() => savePayout(K, '7', 'c1', p, broken)).not.toThrow();
     expect(loadPayout(K, '7', 'c1', broken)).toBeNull();
+  });
+});
+
+describe('second audit M1: cross-chain gate and deposit submit', () => {
+  it('"Another chain" on testnet always; on mainnet only with PUBLIC_CROSS_CHAIN=on', () => {
+    expect(crossChainOffered('testnet', undefined)).toBe(true);
+    expect(crossChainOffered('mainnet', undefined)).toBe(false);
+    expect(crossChainOffered('mainnet', '')).toBe(false);
+    expect(crossChainOffered('mainnet', 'true')).toBe(false);
+    expect(crossChainOffered('mainnet', 'on')).toBe(true);
+  });
+  it('submits txHash, depositAddress and the NEAR sender, and ignores a failure', async () => {
+    const f = json({}, 200);
+    await submitDeposit('d'.repeat(64), 'TX', 'relayer.near', f);
+    expect(f.mock.calls[0][0]).toBe('https://1click.chaindefuser.com/v0/deposit/submit');
+    expect(JSON.parse(f.mock.calls[0][1]!.body as string)).toEqual({ txHash: 'TX', depositAddress: 'd'.repeat(64), nearSenderAccount: 'relayer.near' });
+    await submitDeposit('d'.repeat(64), 'TX', undefined, json({}, 200));
+    await expect(submitDeposit('d'.repeat(64), 'TX', 'r', vi.fn(async () => { throw new Error('down'); }))).resolves.toBeUndefined();
   });
 });

@@ -153,13 +153,24 @@ export async function getStatus(depositAddress: string, fetchFn: Fetch = default
 }
 
 /** Tells 1Click which NEAR tx paid the deposit address (speeds it up). Failures are ignored. */
-export async function submitDeposit(depositAddress: string, txHash: string, fetchFn: Fetch = defaultFetch): Promise<void> {
+/**
+ * POST /v0/deposit/submit (1Click openapi, 12 Nov 2026: txHash and depositAddress required; nearSenderAccount "used
+ * only for NEAR"): the claim tx that paid the deposit address, and its NEAR signer (the relayer), so 1Click can find
+ * it at once. Optional speed-up: failures are ignored.
+ */
+export async function submitDeposit(depositAddress: string, txHash: string, nearSenderAccount?: string, fetchFn: Fetch = defaultFetch): Promise<void> {
   await fetchFn(`${ONECLICK_API}/v0/deposit/submit`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ depositAddress, txHash }),
+    body: JSON.stringify({ txHash, depositAddress, ...(nearSenderAccount ? { nearSenderAccount } : {}) }),
   }).catch(() => undefined);
 }
+
+/**
+ * Whether the claim card offers "Another chain". Testnet: shown, its chains marked "mainnet only". Mainnet: hidden
+ * until PUBLIC_CROSS_CHAIN=on, which the owner sets after his first cross-chain smoke reaches SUCCESS (second audit M1).
+ */
+export const crossChainOffered = (network: string, flag: string | undefined): boolean => network !== 'mainnet' || flag === 'on';
 
 /** What the receipt needs to resume following a payout after a reload. Nothing here is secret. */
 export interface SavedPayout {

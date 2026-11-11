@@ -55,7 +55,7 @@
   /** After the NEAR claim lands: follow the 1Click swap every 5 s until it settles. */
   async function followPayout(depositAddress: string, again = false) {
     stalled = false;
-    if (!again && txHash) void submitDeposit(depositAddress, txHash); // no hash when the relayer's answer was lost
+    if (!again && txHash) void submitDeposit(depositAddress, txHash, env.PUBLIC_RELAYER_ACCOUNT_ID || undefined); // no hash when the relayer's answer was lost
     for (let i = 0; i < 360; i++) { // 30 min, then stop and say where to look
       try {
         const s = await getStatus(depositAddress);

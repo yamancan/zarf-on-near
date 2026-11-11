@@ -56,7 +56,9 @@ Everything else is ready now.
 4. **Fill `env.mainnet`** and commit:
    - verifier: `CONTRACT_ID`, `GOOGLE_CLIENT_ID`;
    - relayer: `CONTRACT_ID`, `RELAYER_ACCOUNT_ID`, `VERIFIER_SIGNERS` (the signer from step 2);
-   - web: `PUBLIC_CONTRACT_ID`, `PUBLIC_GOOGLE_CLIENT_ID`.
+   - web: `PUBLIC_CONTRACT_ID`, `PUBLIC_GOOGLE_CLIENT_ID`, `PUBLIC_RELAYER_ACCOUNT_ID` (= `RELAYER_ACCOUNT_ID`).
+     Leave `PUBLIC_CROSS_CHAIN` empty: "Another chain" stays hidden on mainnet until the owner's first cross-chain
+     smoke reaches SUCCESS; then set it to `on` and redeploy the web.
 
    `CLAIM_ORIGINS` is already the mainnet origin only.
 5. **Deploy:**

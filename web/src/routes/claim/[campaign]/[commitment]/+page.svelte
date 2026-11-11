@@ -8,7 +8,7 @@
   } from '$lib/claim';
   import { rootFromProof } from '$lib/merkle';
   import { accountExists, ClaimError, describeCheckError, describeError, getCampaign, getClaimState, getNetwork } from '$lib/services';
-  import { getQuote, lossBps, MAX_LOSS_BPS, QUOTE_LIFETIME_MS, QuoteError, refusal, type PayoutAsset } from '$lib/intents';
+  import { crossChainOffered, getQuote, lossBps, MAX_LOSS_BPS, QUOTE_LIFETIME_MS, QuoteError, refusal, type PayoutAsset } from '$lib/intents';
   import PayoutPicker from '$lib/PayoutPicker.svelte';
   import { AlertTriangle, ArrowUpRight, ChevronDown, Clock, Link2Off, Loader2, Mail, SearchX } from 'lucide-svelte';
   import ClaimRecord from '$lib/ClaimRecord.svelte';
@@ -52,7 +52,7 @@
   const paid = loadReceipt(env.PUBLIC_CONTRACT_ID ?? '', campaign, commitment);
   const MODES = $derived([
     ['existing', 'NEAR account'],
-    ['chain', 'Another chain'], // shown on testnet too, its chains marked "mainnet only" (canonical choice 9)
+    ...(crossChainOffered(network, env.PUBLIC_CROSS_CHAIN) ? [['chain', 'Another chain']] : []), // testnet: chains marked "mainnet only" (canonical choice 9); mainnet: behind a flag
     ...(implicitEnabled ? [['new', 'New account']] : []),
   ] as [typeof mode, string][]);
   // MyNearWallet stopped creating accounts (Nov 2026). NEAR's own guide lists the current wallets; on testnet it says
