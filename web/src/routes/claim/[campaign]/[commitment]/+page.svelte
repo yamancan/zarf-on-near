@@ -242,7 +242,7 @@
           <Medallion icon={Mail} />
           <h1><Amount label="Waiting for you" value={formatAmount(BigInt(link!.amount))} unit={UNIT} /></h1>
           <p class="text-xs text-zen-fg-muted">
-            From <span class="font-mono">{sender}</span>{#if left}{' · '}<span title="Claim by {deadline}">{left}</span>{/if}
+            From <span class="font-mono">{sender}</span>{#if left}{' · '}<span class="whitespace-nowrap" title="Claim by {deadline}">{left}</span>{/if}
           </p>
         </div>
 

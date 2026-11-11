@@ -201,6 +201,9 @@
   {:else if step === 'unsettled'}
     <p class="text-sm text-zen-fg-muted max-w-xs">Sent, not settled yet. No need to claim again.</p>
     {#if explorer}{@render explorerButton(explorer, 'View the transaction')}{/if}
+  {:else if step === 'failed' && failureHeading(failCode).muted}
+    <p class="text-sm text-zen-fg-muted max-w-xs" role="status">{error}</p>
+    {@render back()}
   {:else if step === 'failed'}
     <Note tone="error" center>{error}</Note>
     {@render back()}
