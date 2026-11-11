@@ -26,7 +26,7 @@
     // deployed verifier/relayer. For local dev, override the two URLs with --var. No Google client yet.
     "testnet": {
       "vars": {
-        "PUBLIC_GOOGLE_CLIENT_ID": "",
+        "PUBLIC_GOOGLE_CLIENT_ID": "581739717233-vlkg0umlung1r9h7m19vhcd1hccfvef2.apps.googleusercontent.com",
         "PUBLIC_IMPLICIT_ACCOUNTS": "",
         "PUBLIC_VERIFIER_URL": "https://zarf-near-verifier-testnet.sparkling-queen-5e77.workers.dev",
         "PUBLIC_RELAYER_URL": "https://zarf-near-relayer-testnet.sparkling-queen-5e77.workers.dev",
