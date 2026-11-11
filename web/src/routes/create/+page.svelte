@@ -748,9 +748,9 @@
         <div class="flex flex-col items-start gap-4">
           <div class="[&>div]:mx-0"><Medallion icon={Check} tone="success" /></div>
           <div class="space-y-1">
-            <!-- What is true for all of it: it was sent. Who has claimed comes from the chain, below. -->
+            <!-- True for all of it: the contract holds it for them. Nobody has received anything until they claim; who has comes from the chain, below. -->
             <h1 id="done-h" bind:this={stepHeading} tabindex="-1" class="text-2xl md:text-3xl font-light tracking-tight outline-hidden">
-              <span class="tabular-nums">{formatAmount(BigInt(draft.total))}</span>&nbsp;<span class="text-sm font-medium uppercase tracking-widest text-zen-primary whitespace-nowrap align-[0.2em]">{UNIT}</span> sent to {people(draft.recipients.length).replace(' ', ' ')}
+              <span class="tabular-nums">{formatAmount(BigInt(draft.total))}</span>&nbsp;<span class="text-sm font-medium uppercase tracking-widest text-zen-primary whitespace-nowrap align-[0.2em]">{UNIT}</span> held for {people(draft.recipients.length).replace(' ', ' ')}
             </h1>
             {#if claimCounts}
               <p class="text-sm" role="status">
@@ -877,7 +877,7 @@
             </Note>
           {/if}
           <Term q="Which email?">Exactly the address they sign in to Google with. a.lice@gmail.com and alice+pay@gmail.com reach the same inbox but count as different addresses here, and a +alias can't sign in at all.</Term>
-          <label class="self-start text-xs text-zen-fg-muted underline underline-offset-2 hover:text-zen-fg cursor-pointer min-h-11 flex items-center">
+          <label id="backup" class="self-start text-xs text-zen-fg-muted underline underline-offset-2 hover:text-zen-fg cursor-pointer min-h-11 flex items-center">
             Open a backup file
             <input class="sr-only" type="file" accept="application/json,.json" disabled={!config || !!busy} onchange={(e) => openBackup(e.currentTarget.files?.[0])} />
           </label>

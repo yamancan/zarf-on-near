@@ -292,3 +292,13 @@ describe('a receipt without a hash (the relayer answer was lost, the chain said 
     expect(loadReceipt('c', '2', 'ab', s, 2000)).toBeNull();
   });
 });
+
+describe('accountExplorerUrl (receipt: See it in your wallet)', async () => {
+  const { accountExplorerUrl } = await import('./network');
+  it('maps the nearblocks tx base to the account page; nothing without one', () => {
+    expect(accountExplorerUrl('https://testnet.nearblocks.io/txns/', 'alice.testnet')).toBe('https://testnet.nearblocks.io/address/alice.testnet');
+    expect(accountExplorerUrl('https://nearblocks.io/txns/', 'a'.repeat(64))).toBe(`https://nearblocks.io/address/${'a'.repeat(64)}`);
+    expect(accountExplorerUrl('', 'alice.testnet')).toBe('');
+    expect(accountExplorerUrl('https://other.example/tx?h=', 'alice.testnet')).toBe('');
+  });
+});

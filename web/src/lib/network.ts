@@ -9,5 +9,9 @@ export const USDC_LINES = [
   'USDC is a digital dollar issued by Circle, built to stay worth 1 US dollar.',
   ...(TESTNET ? ['Test USDC is its free practice version on NEAR testnet: it has no value.'] : []),
 ];
+/** An account's page on the same explorer as the tx links (nearblocks: /txns/<hash> → /address/<account>); '' if none. */
+export const accountExplorerUrl = (txUrl: string | undefined, account: string): string =>
+  txUrl && /\/txns\/$/.test(txUrl) ? `${txUrl.replace(/\/txns\/$/, '/address/')}${encodeURIComponent(account)}` : '';
+
 /** Mainnet create (second audit S3): Circle controls USDC, and nothing in Zarf can override it. */
 export const CIRCLE_LINE = 'Circle can pause USDC or block an account; that would stop claims and take-backs until Circle lifts it. Zarf cannot override it.';

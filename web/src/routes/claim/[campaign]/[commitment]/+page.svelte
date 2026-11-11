@@ -12,7 +12,7 @@
   import PayoutPicker from '$lib/PayoutPicker.svelte';
   import { AlertTriangle, ArrowUpRight, ChevronDown, Clock, Link2Off, Loader2, Mail, SearchX } from 'lucide-svelte';
   import ClaimRecord from '$lib/ClaimRecord.svelte';
-  import { UNIT } from '$lib/network';
+  import { UNIT, USDC_LINES } from '$lib/network';
   import Amount from '$lib/Amount.svelte';
   import Medallion from '$lib/Medallion.svelte';
   import Note from '$lib/Note.svelte';
@@ -246,6 +246,7 @@
           <p class="text-xs text-zen-fg-muted">
             From <span class="font-mono">{sender}</span>{#if left}{' · '}<span class="whitespace-nowrap" title="Claim by {deadline}">{left}</span>{/if}
           </p>
+          <p class="text-xs text-zen-fg-muted max-w-xs">{USDC_LINES[0]}</p>
         </div>
 
         <!-- Destination: one question, one field; a switch only when there is a real choice -->
@@ -334,6 +335,13 @@
             <img src={themeStore.isDark ? '/google/signin-dark.svg' : '/google/signin-light.svg'} alt="Sign in with Google" width="180" height="40" />
           </button>
           <p class="text-xs text-zen-fg-muted text-center">Another account? Pick it on Google's screen.</p>
+          {#if mode === 'chain' && network !== 'mainnet'}
+            <!-- Why the button is off here, and the way on (empathy walkthrough) -->
+            <div class="flex flex-col items-center gap-2">
+              <p class="text-sm text-zen-fg-muted text-center">On testnet, claim to a NEAR account.</p>
+              <ZenButton variant="secondary" class="rounded-full min-h-11" onclick={() => ((error = ''), (mode = 'existing'))}>Use a NEAR account</ZenButton>
+            </div>
+          {/if}
           {#if error}<Note tone="error" center>{error}</Note>{/if}
           {#if quoteFailed && mode === 'chain'}
             <div class="flex flex-wrap justify-center gap-3">

@@ -202,6 +202,7 @@
               {/if}
               {@render outcome(r.id)}
             </div>
+            <a href="/create#backup" class="self-start inline-flex items-center min-h-11 text-xs text-zen-fg-muted underline underline-offset-2 hover:text-zen-fg">Lost the links? Open your backup file</a>
           </section>
         </ZenCard>
       {/each}

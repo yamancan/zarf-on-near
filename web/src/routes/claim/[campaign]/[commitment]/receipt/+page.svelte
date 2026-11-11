@@ -3,7 +3,7 @@
   import { page } from '$app/state';
   import { env } from '$env/dynamic/public';
   import { claimedAt, clearAttempt, confirmRemembered, isImplicitAccount, loadAttempt, loadReceipt, middle, saveReceipt, settleReceipt, shownAmount, signedIn, type Receipt } from '$lib/claim';
-  import { UNIT } from '$lib/network';
+  import { accountExplorerUrl, TESTNET, UNIT } from '$lib/network';
   import ClaimRecord from '$lib/ClaimRecord.svelte';
   import { canRetry, ClaimError, describeError, errorCode, failureHeading, getClaimState, isUnmapped, relayAndSettle, requestSignature, submitClaim } from '$lib/services';
   import { formatAmount } from '$lib/create/recipients';
@@ -221,13 +221,18 @@
   <h1 class="text-xl font-semibold tracking-tight">Arrived</h1>
   <Amount label="You received" value={formatAmount(BigInt(amount))} unit={UNIT} />
   <p class="text-sm text-zen-fg-muted">to <span class="font-mono text-zen-fg" title={to}>{middle(to, 8)}</span></p>
-  {#if env.PUBLIC_EXPLORER_TX_URL}
-    {@render explorerButton(`${env.PUBLIC_EXPLORER_TX_URL}${hash}`, 'View the transaction')}
-  {:else}
-    <p class="text-xs text-zen-fg-muted">Transaction <span class="font-mono">{middle(hash, 8)}</span></p>
-  {/if}
   {#if isImplicitAccount(to)}
     <p class="text-xs text-zen-fg-muted max-w-xs">To move these funds later, this account needs a little NEAR for gas.</p>
+  {/if}
+  <!-- What next (empathy walkthrough): see it where it landed; on testnet, try the other side -->
+  <div class="flex flex-wrap justify-center gap-2">
+    {#if accountExplorerUrl(env.PUBLIC_EXPLORER_TX_URL, to)}{@render explorerButton(accountExplorerUrl(env.PUBLIC_EXPLORER_TX_URL, to), 'See it in your wallet')}{/if}
+    {#if TESTNET}<ZenButton href="/create" variant="secondary" class="rounded-full min-h-11">Now send some yourself</ZenButton>{/if}
+  </div>
+  {#if hash && env.PUBLIC_EXPLORER_TX_URL}
+    <a href="{env.PUBLIC_EXPLORER_TX_URL}{hash}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center min-h-11 text-xs text-zen-fg-muted underline underline-offset-2 hover:text-zen-fg">The transaction</a>
+  {:else if hash}
+    <p class="text-xs text-zen-fg-muted">Transaction <span class="font-mono">{middle(hash, 8)}</span></p>
   {/if}
 {/snippet}
 
