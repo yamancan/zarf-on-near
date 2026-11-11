@@ -17,19 +17,40 @@ export type Destination =
   | { kind: 'wrong'; reason: string } // not a NEAR account id: never sent to the chain
   | { kind: 'named' | 'implicit'; id: string };
 
+/** Shared NEAR contracts: a plain ft_transfer to them credits nobody (intents.near needs ft_transfer_call + msg). */
+const SHARED_CONTRACTS = ['intents.near', 'wrap.near', 'intents.testnet', 'wrap.testnet'];
+
 /**
  * What the recipient typed in the NEAR field, before any chain read. Foreign addresses are caught on
  * the raw input: lower-casing would turn a Stellar or Ethereum address into a well-formed NEAR name.
  */
-export function classifyDestination(input: string): Destination {
+export function classifyDestination(input: string, contracts: { escrow?: string; token?: string; eth?: boolean } = {}): Destination {
   const raw = input.trim();
   if (!raw) return { kind: 'empty' };
   if (/^(G[A-Z2-7]{55}|M[A-Z2-7]{68})$/i.test(raw)) return { kind: 'wrong', reason: 'That looks like a Stellar address, not a NEAR account.' };
+  // NEP-518 eth-implicit id (MetaMask on NEAR); off until a real claim to one is proven spendable (T-002 item 3).
+  if (contracts.eth && /^0x[0-9a-f]{40}$/i.test(raw)) return { kind: 'implicit', id: raw.toLowerCase() };
   if (/^0x/i.test(raw)) return { kind: 'wrong', reason: 'That looks like an Ethereum address, not a NEAR account.' };
   const id = raw.toLowerCase();
   if (!isValidAccountId(id)) return { kind: 'wrong', reason: 'That is not a valid NEAR account name.' };
+  // The relayer and verifier refuse these too (DESTINATION_IS_CONTRACT / _TOKEN); say so before sign-in.
+  if (id === contracts.escrow) return { kind: 'wrong', reason: 'That is the Zarf contract itself, not your account. USDC sent there could never be taken out.' };
+  if (id === contracts.token) return { kind: 'wrong', reason: 'That is the USDC token contract, not your account. USDC sent there would be lost.' };
+  if (SHARED_CONTRACTS.includes(id)) return { kind: 'wrong', reason: `That is ${id}, a shared NEAR contract, not your account. USDC sent there would credit nobody.` };
   return { kind: isImplicitAccount(id) ? 'implicit' : 'named', id };
 }
+
+export type AccountCheck = { id: string; state: 'checking' | 'found' | 'missing' | 'error' } | null;
+
+/**
+ * The NEAR-account path may go to Google only for the account the recipient confirmed: it must exist on chain
+ * (or be an implicit id whose key holder said so), and "Is this your account?" was answered for this exact id.
+ */
+export const nearAccountReady = (dest: Destination, acct: AccountCheck, unfundedAck: boolean, confirmedFor: string): boolean =>
+  (dest.kind === 'named' || dest.kind === 'implicit') &&
+  acct?.id === dest.id &&
+  (acct.state === 'found' || (acct.state === 'missing' && dest.kind === 'implicit' && unfundedAck)) &&
+  confirmedFor === dest.id;
 
 export const isCampaignId = (s: string): boolean => /^(0|[1-9]\d{0,19})$/.test(s) && BigInt(s) < 1n << 64n;
 export const isHex32 = (s: string): boolean => /^[0-9a-f]{64}$/.test(s);

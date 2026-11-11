@@ -21,12 +21,12 @@ describe('walletRequest (what NEAR Connect is handed)', () => {
 describe('pinned wallet list (wallets.json)', async () => {
   const { default: manifest } = await import('./wallets.json');
   it('offers only the reviewed wallets, never MyNearWallet', () => {
-    expect(manifest.wallets.map((w) => w.id).sort()).toEqual(['hot-wallet', 'intear-wallet', 'meteor-wallet', 'nightly-wallet']);
+    expect(manifest.wallets.map((w) => w.id).sort()).toEqual(['ethereum-wallets', 'hot-wallet', 'intear-wallet', 'meteor-wallet', 'nightly-wallet']);
   });
-  it('wallet code from GitHub is pinned to a commit, not a branch (Intear serves its own, see README)', () => {
+  it('wallet code from GitHub is pinned to a commit, not a branch (Intear and evm-on-near serve their own, see README)', () => {
     for (const w of manifest.wallets) {
       if (w.executor.startsWith('https://raw.githubusercontent.com/')) expect(w.executor).toMatch(/^https:\/\/raw\.githubusercontent\.com\/[^/]+\/[^/]+\/[0-9a-f]{40}\//);
-      else expect(w.executor).toBe('https://wallet.intear.tech/near-selector.js');
+      else expect(['https://wallet.intear.tech/near-selector.js', 'https://evm-on-near.dev/executor.js']).toContain(w.executor);
     }
   });
 });

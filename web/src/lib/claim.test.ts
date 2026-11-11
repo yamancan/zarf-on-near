@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import vectors from '../../../spec/vectors.json';
 import {
-  classifyDestination, claimState, deadlineText, timeLeft, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isImplicitAccount, isValidAccountId, loadAttempt, newAttemptId,
+  classifyDestination, nearAccountReady, claimState, deadlineText, timeLeft, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isImplicitAccount, isValidAccountId, loadAttempt, newAttemptId,
   decodeProof, encodeProof, parseCallback, parseLinkFragment, saveAttempt, clearAttempt, saveReceipt, loadReceipt, settleReceipt, claimedAt, middle, twoDecimals, shownAmount, confirmRemembered, RECEIPT_TTL_MS,
 } from './claim';
 
@@ -300,5 +300,51 @@ describe('accountExplorerUrl (receipt: See it in your wallet)', async () => {
     expect(accountExplorerUrl('https://nearblocks.io/txns/', 'a'.repeat(64))).toBe(`https://nearblocks.io/address/${'a'.repeat(64)}`);
     expect(accountExplorerUrl('', 'alice.testnet')).toBe('');
     expect(accountExplorerUrl('https://other.example/tx?h=', 'alice.testnet')).toBe('');
+  });
+});
+
+describe('wrong-address protection (T-002)', () => {
+  const contracts = { escrow: 'zarf-near-1112.testnet', token: '3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af' };
+  it('refuses the escrow and the token contract, in any case', () => {
+    expect(classifyDestination(' Zarf-Near-1112.testnet', contracts)).toEqual({ kind: 'wrong', reason: expect.stringMatching(/Zarf contract itself/) });
+    expect(classifyDestination(contracts.token.toUpperCase(), contracts)).toEqual({ kind: 'wrong', reason: expect.stringMatching(/USDC token contract/) });
+    expect(classifyDestination('alice.testnet', contracts)).toEqual({ kind: 'named', id: 'alice.testnet' });
+  });
+  const named = classifyDestination('alice.testnet');
+  const implicit = classifyDestination('ab'.repeat(32));
+  it('goes to Google only after "Is this your account?" for this exact, existing account', () => {
+    const found = { id: 'alice.testnet', state: 'found' as const };
+    expect(nearAccountReady(named, found, false, '')).toBe(false);
+    expect(nearAccountReady(named, found, false, 'alice.testnet')).toBe(true);
+    expect(nearAccountReady(named, found, false, 'alice2.testnet')).toBe(false); // confirmed another id, then edited
+    expect(nearAccountReady(named, { id: 'alice.testnet', state: 'checking' }, false, 'alice.testnet')).toBe(false);
+    expect(nearAccountReady(named, { id: 'alice.testnet', state: 'missing' }, true, 'alice.testnet')).toBe(false); // a named typo is never paid
+    expect(nearAccountReady(named, { id: 'alice.testnet', state: 'error' }, false, 'alice.testnet')).toBe(false);
+    expect(nearAccountReady(named, { id: 'bob.testnet', state: 'found' }, false, 'alice.testnet')).toBe(false); // stale check
+  });
+  it('a 64-hex id not on chain needs the key-holder warning acknowledged, then the confirm', () => {
+    const missing = { id: 'ab'.repeat(32), state: 'missing' as const };
+    expect(nearAccountReady(implicit, missing, false, 'ab'.repeat(32))).toBe(false);
+    expect(nearAccountReady(implicit, missing, true, '')).toBe(false);
+    expect(nearAccountReady(implicit, missing, true, 'ab'.repeat(32))).toBe(true);
+  });
+  it('never for an empty or wrong field', () => {
+    expect(nearAccountReady(classifyDestination(''), null, true, '')).toBe(false);
+    expect(nearAccountReady(classifyDestination('0x' + 'ab'.repeat(20)), null, true, '')).toBe(false);
+  });
+});
+
+describe('shared contracts and 0x ids (T-002 items 3-4)', () => {
+  it.each(['intents.near', 'WRAP.NEAR', 'intents.testnet', 'wrap.testnet'])('refuses %s: a plain ft_transfer credits nobody', (id) => {
+    expect(classifyDestination(id)).toEqual({ kind: 'wrong', reason: expect.stringMatching(/shared NEAR contract/) });
+  });
+  const eth = '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed';
+  it('a 0x id stays refused until enabled, then is lower-cased and treated like an implicit id', () => {
+    expect(classifyDestination(eth).kind).toBe('wrong');
+    expect(classifyDestination(` ${eth} `, { eth: true })).toEqual({ kind: 'implicit', id: eth.toLowerCase() });
+    expect(classifyDestination(eth + 'a', { eth: true }).kind).toBe('wrong');
+    const d = classifyDestination(eth, { eth: true });
+    expect(nearAccountReady(d, { id: eth.toLowerCase(), state: 'missing' }, true, eth.toLowerCase())).toBe(true);
+    expect(nearAccountReady(d, { id: eth.toLowerCase(), state: 'missing' }, false, eth.toLowerCase())).toBe(false);
   });
 });

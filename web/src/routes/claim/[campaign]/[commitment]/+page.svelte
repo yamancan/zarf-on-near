@@ -3,7 +3,7 @@
   import { page } from '$app/state';
   import { env } from '$env/dynamic/public';
   import {
-    classifyDestination, claimState, deadlineText, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isValidAccountId, loadAttempt, loadReceipt,
+    classifyDestination, claimState, nearAccountReady, type AccountCheck, deadlineText, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isValidAccountId, loadAttempt, loadReceipt,
     middle, newAttemptId, parseLinkFragment, saveAttempt, timeLeft, type LinkSecret,
   } from '$lib/claim';
   import { rootFromProof } from '$lib/merkle';
@@ -55,18 +55,37 @@
     ...(crossChainOffered(network, env.PUBLIC_CROSS_CHAIN) ? [['chain', 'Another chain']] : []), // testnet: chains marked "mainnet only" (canonical choice 9); mainnet: behind a flag
     ...(implicitEnabled ? [['new', 'New account']] : []),
   ] as [typeof mode, string][]);
-  // MyNearWallet stopped creating accounts (Nov 2026). NEAR's own guide lists the current wallets; on testnet it says
-  // how to get a .testnet account. Mainnet: NEAR's wallet directory.
-  const walletSite = $derived(network === 'mainnet' ? 'https://wallet.near.org' : 'https://docs.near.org/getting-started/create-account');
+  // MyNearWallet stopped creating accounts (Nov 2026). Meteor creates named accounts on both networks.
+  const METEOR = 'https://wallet.meteorwallet.app';
 
-  const dest = $derived(classifyDestination(typed));
+  const dest = $derived(classifyDestination(typed, { escrow: env.PUBLIC_CONTRACT_ID, token: env.PUBLIC_TOKEN_ID, eth: env.PUBLIC_ETH_ACCOUNTS === 'on' }));
   const destination = $derived(mode === 'existing' ? (dest.kind === 'named' || dest.kind === 'implicit' ? dest.id : '') : (implicit?.accountId ?? ''));
   // The typed account, read on chain before sign-in: a typo must never be paid (NEAR account-validation guide).
-  let acct = $state<{ id: string; state: 'checking' | 'found' | 'missing' | 'error' } | null>(null);
+  let acct = $state<AccountCheck>(null);
   let unfundedAck = $state(false);
-  const accountOk = $derived(
-    !!acct && acct.id === destination && (acct.state === 'found' || (acct.state === 'missing' && dest.kind === 'implicit' && unfundedAck)),
-  );
+  // "Is this your account?": answered for one exact id; any edit asks again.
+  let confirmedFor = $state('');
+  const accountOk = $derived(nearAccountReady(dest, acct, unfundedAck, confirmedFor));
+  const askConfirm = $derived(!accountOk && nearAccountReady(dest, acct, unfundedAck, destination)); // all but the answer
+  let guideOpen = $state(false);
+  // "Use my wallet": the account comes from the recipient's own wallet (NEAR Connect sign-in, no key added), so it
+  // cannot be mistyped. The confirm step still applies: the wallet's code is not ours.
+  let walletNote = $state('');
+  async function useWallet() {
+    walletNote = 'Opening your wallet…';
+    try {
+      const { nearConnectWallet } = await import('$lib/create/wallet');
+      const w = await nearConnectWallet(network, env.PUBLIC_NEAR_RPC_URL ?? '');
+      typed = w.accountId() ?? (await w.signIn());
+      walletNote = '';
+    } catch {
+      walletNote = 'No account came back from the wallet. Try again, or type the account name.';
+    }
+  }
+  function backToField() {
+    guideOpen = false;
+    document.getElementById('dest')?.focus();
+  }
   const ready = $derived(
     !!link && check === 'ok' && !busy &&
       (mode === 'chain' ? !!payout : isValidAccountId(destination) && (mode === 'existing' ? accountOk : exported && confirmed)),
@@ -281,38 +300,57 @@
               aria-invalid={dest.kind === 'wrong' || (acct?.state === 'missing' && dest.kind === 'named')}
               aria-describedby="dest-note"
             />
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <ZenButton variant="secondary" class="rounded-full min-h-11" disabled={walletNote === 'Opening your wallet…'} onclick={useWallet}>Use my wallet</ZenButton>
+              <span class="text-xs text-zen-fg-muted">{walletNote || 'Fills in your account from a NEAR wallet.'}</span>
+            </div>
             <div id="dest-note" class="flex flex-col gap-2 pl-1">
               {#if dest.kind === 'wrong'}
                 <Note tone="error">{dest.reason}</Note>
               {:else if acct?.state === 'checking'}
                 <Note tone="pending">Checking <span class="font-mono">{acct.id}</span>…</Note>
-              {:else if acct?.state === 'found'}
+              {:else if acct?.state === 'found' && !askConfirm}
                 <Note tone="success"><span class="font-mono">{acct.id}</span> found</Note>
               {:else if acct?.state === 'missing' && dest.kind === 'named'}
                 <Note tone="error">There is no NEAR account called <span class="font-mono">{acct.id}</span>. Check the spelling.</Note>
               {:else if acct?.state === 'missing'}
-                <Note tone="info">This account is not on NEAR yet.</Note>
+                <Note tone="error">This account is not on NEAR yet. Check every character: one typo sends the USDC where nobody can reach it.</Note>
                 <ZenCheckbox bind:checked={unfundedAck} label="Only the holder of its private key can use these funds. I hold it." />
               {:else if acct?.state === 'error'}
                 <Note tone="error">Could not check this account right now. Try again in a minute.</Note>
               {/if}
-              {#if acct?.state !== 'found'}
-                <!-- No account yet: three steps and a new tab; this tab keeps the claim (flow canvas N2-10) -->
-                <details class="group text-xs text-zen-fg-muted">
+              {#if askConfirm}
+                <!-- Wrong-address guard: the account restated large, before Google (a paid claim cannot be undone) -->
+                <div id="confirm" class="flex flex-col gap-3 mt-1 p-4 rounded-xl border-[0.5px] border-zen-border" role="group" aria-labelledby="confirm-q">
+                  <p id="confirm-q" class="text-sm font-medium text-zen-fg">Is this your account?</p>
+                  <p class="text-2xl font-mono font-semibold tracking-tight break-all text-zen-fg">{destination}</p>
+                  <p class="text-xs text-zen-fg-muted">The USDC goes here and cannot be taken back.</p>
+                  <div class="flex flex-wrap gap-3">
+                    <ZenButton variant="primary" class="rounded-full min-h-11" onclick={() => (confirmedFor = destination)}>Yes, it's mine</ZenButton>
+                    <ZenButton variant="ghost" class="rounded-full min-h-11 !text-zen-fg" onclick={backToField}>No, change it</ZenButton>
+                  </div>
+                </div>
+              {:else if accountOk}
+                <button type="button" class="self-start min-h-11 text-xs text-zen-fg-muted underline underline-offset-2 hover:text-zen-fg" onclick={() => ((confirmedFor = ''), backToField())}>Change account</button>
+              {/if}
+              {#if acct?.state !== 'found' && !(dest.kind === 'implicit' && acct?.state === 'missing')}
+                <!-- No account yet: a guide in this tab, the wallet in a new one; the claim stays here (flow canvas N2-10) -->
+                <details class="group text-xs text-zen-fg-muted" bind:open={guideOpen}>
                   <summary class="inline-flex items-center gap-1.5 min-h-11 cursor-pointer list-none hover:text-zen-fg">
-                    No NEAR account? <ChevronDown class="w-3.5 h-3.5 transition-transform group-open:rotate-180" aria-hidden="true" />
+                    No NEAR account yet? <ChevronDown class="w-3.5 h-3.5 transition-transform group-open:rotate-180" aria-hidden="true" />
                   </summary>
-                  <ol class="flex flex-col gap-1.5 text-sm text-zen-fg list-decimal pl-5 marker:text-zen-fg-muted">
-                    <li>Create a free account in a NEAR wallet, such as Meteor{network === 'mainnet' ? '' : ' (choose testnet)'}.</li>
-                    <li>Copy its name, like <span class="font-mono">{network === 'mainnet' ? 'alice.near' : 'alice.testnet'}</span>.</li>
-                    <li>Come back to this tab and type it above.</li>
+                  <ol id="guide" class="flex flex-col gap-2 text-sm text-zen-fg list-decimal pl-5 marker:text-zen-fg-muted">
+                    <li>Open Meteor, a free NEAR wallet, with the button below. It opens in a new tab; this tab keeps your claim.</li>
+                    {#if network !== 'mainnet'}<li>In Meteor, switch the network to <strong>Testnet</strong>.</li>{/if}
+                    <li>Create a new wallet and pick an account name, like <span class="font-mono">{network === 'mainnet' ? 'alice.near' : 'alice.testnet'}</span>. Save the recovery phrase Meteor shows you.</li>
+                    <li>Copy the account name, come back to this tab and paste it above.</li>
                   </ol>
-                  <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1">
-                    <ZenButton href={walletSite} target="_blank" rel="noopener noreferrer" variant="secondary" class="rounded-full min-h-11">
-                      {network === 'mainnet' ? 'Choose a NEAR wallet' : 'How to get a testnet account'}
+                  <div class="mt-3 flex flex-wrap items-center gap-3">
+                    <ZenButton href={METEOR} target="_blank" rel="noopener noreferrer" variant="secondary" class="rounded-full min-h-11">
+                      Open Meteor
                       {#snippet iconRight()}<ArrowUpRight class="w-3.5 h-3.5" />{/snippet}
                     </ZenButton>
-                    <span>It opens in a new tab. This tab keeps your claim.</span>
+                    <ZenButton variant="ghost" class="rounded-full min-h-11 !text-zen-fg" onclick={backToField}>I have my account: paste it</ZenButton>
                   </div>
                 </details>
               {/if}

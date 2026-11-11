@@ -10,6 +10,8 @@
     "PUBLIC_GOOGLE_CLIENT_ID": "",
     // "on" shows "Create one for me" (in-browser implicit account). Off by default: it starts with no NEAR for gas.
     "PUBLIC_IMPLICIT_ACCOUNTS": "",
+    // "on" accepts 0x (NEP-518) destinations: only after a claim to one is proven spendable (T-002)
+    "PUBLIC_ETH_ACCOUNTS": "",
     // Endpoints. Empty values make the page say what is not set up yet; they also feed CSP connect-src.
     "PUBLIC_VERIFIER_URL": "",
     "PUBLIC_RELAYER_URL": "",
@@ -32,6 +34,7 @@
       "vars": {
         "PUBLIC_GOOGLE_CLIENT_ID": "581739717233-vlkg0umlung1r9h7m19vhcd1hccfvef2.apps.googleusercontent.com",
         "PUBLIC_IMPLICIT_ACCOUNTS": "",
+        "PUBLIC_ETH_ACCOUNTS": "",
         "PUBLIC_VERIFIER_URL": "https://zarf-near-verifier-testnet.sparkling-queen-5e77.workers.dev",
         "PUBLIC_RELAYER_URL": "https://zarf-near-relayer-testnet.sparkling-queen-5e77.workers.dev",
         "PUBLIC_RELAYER_ACCOUNT_ID": "zarf-near-relayer-1111.testnet",
@@ -50,6 +53,7 @@
       "vars": {
         "PUBLIC_GOOGLE_CLIENT_ID": "",
         "PUBLIC_IMPLICIT_ACCOUNTS": "",
+        "PUBLIC_ETH_ACCOUNTS": "",
         "PUBLIC_VERIFIER_URL": "https://zarf-near-verifier.sparkling-queen-5e77.workers.dev",
         "PUBLIC_RELAYER_URL": "https://zarf-near-relayer.sparkling-queen-5e77.workers.dev",
         "PUBLIC_RELAYER_ACCOUNT_ID": "",

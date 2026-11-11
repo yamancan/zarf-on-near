@@ -1,10 +1,11 @@
 // Sender wallet through NEAR Connect (@hot-labs/near-connect), NEAR's replacement for the deprecated wallet
 // selector: it shows a wallet picker and runs each wallet's code in a sandboxed iframe. MyNearWallet stopped
-// accepting app connections in Nov 2026, so it is excluded. Loaded only by /create and /campaigns.
+// accepting app connections in Nov 2026, so it is excluded. Loaded only by /create, /campaigns and the claim form.
 
 import type { Tx } from './funding';
 // Pinned copy of NEAR Connect's manifest (hot-dao/near-selector repository/manifest.json, v1.1.0, 12 Nov 2026),
 // cut to the wallets we offer: no runtime manifest fetch, and no wallet appears that we have not looked at.
+// ethereum-wallets (MetaMask on NEAR, NEP-518) is copied verbatim; its executor is served unpinned by evm-on-near.dev.
 import manifest from './wallets.json';
 
 

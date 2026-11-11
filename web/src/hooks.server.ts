@@ -3,11 +3,12 @@ import { env } from '$env/dynamic/public';
 import { ONECLICK_API } from '$lib/intents';
 
 
-/** The sender pages load wallet code (NEAR Connect); the claim pages never do, so their CSP stays narrow. */
-export const isSenderPage = (path: string) => /^\/(create|campaigns)(\/|$)/.test(path);
+/** Pages that load wallet code (NEAR Connect): the sender pages, and the claim form ("Use my wallet"). Receipt and
+ * Google return never do, so their CSP stays narrow. */
+export const isWalletPage = (path: string) => /^\/(create|campaigns)(\/|$)|^\/claim\/[^/]+\/[^/]+\/?$/.test(path);
 
 /**
- * Sender pages run NEAR Connect: each wallet's code and UI live in a sandboxed srcdoc iframe (opaque origin, no
+ * Wallet pages run NEAR Connect: each wallet's code and UI live in a sandboxed srcdoc iframe (opaque origin, no
  * access to this page), which inherits this CSP and loads its own styles, fonts, images, frames and APIs from
  * hosts the wallets choose. Those directives open to https on these pages only. script-src does not change:
  * only our own scripts and nonce'd inline scripts run, so nothing new can read the page's emails or salts.
@@ -40,7 +41,7 @@ export const handle: Handle = async ({ event, resolve }) => {
   const csp = res.headers.get('Content-Security-Policy');
   const extra = connectOrigins([env.PUBLIC_VERIFIER_URL, env.PUBLIC_RELAYER_URL, env.PUBLIC_NEAR_RPC_URL, ONECLICK_API]);
   let policy = csp && extra ? csp.replace("connect-src 'self'", `connect-src 'self' ${extra}`) : csp;
-  if (policy && isSenderPage(event.url.pathname)) policy = senderPolicy(policy);
+  if (policy && isWalletPage(event.url.pathname)) policy = senderPolicy(policy);
   if (policy) res.headers.set('Content-Security-Policy', policy);
   // The claim path carries campaign + commitment; never leak it to Google or anyone else.
   res.headers.set('Referrer-Policy', 'no-referrer');

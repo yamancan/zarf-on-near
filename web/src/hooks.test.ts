@@ -12,8 +12,8 @@ describe('connectOrigins', () => {
   });
 });
 
-describe('senderPolicy (NEAR Connect on /create and /campaigns only)', async () => {
-  const { isSenderPage, senderPolicy } = await import('./hooks.server');
+describe('senderPolicy (NEAR Connect on /create, /campaigns and the claim form only)', async () => {
+  const { isWalletPage, senderPolicy } = await import('./hooks.server');
   const base = "default-src 'self'; connect-src 'self' https://rpc.example; img-src 'self' data:; script-src 'self' 'nonce-abc'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'";
   it('opens connect, img, style, font and frame to https; never script-src', () => {
     const p = senderPolicy(base);
@@ -26,7 +26,7 @@ describe('senderPolicy (NEAR Connect on /create and /campaigns only)', async () 
     expect(p).toContain("frame-ancestors 'none'");
   });
   it('applies to the sender pages only', () => {
-    expect(['/create', '/create/', '/campaigns'].every(isSenderPage)).toBe(true);
-    expect(['/', '/claim/1/ab', '/claim/1/ab/receipt', '/privacy', '/createx', '/auth/google'].some(isSenderPage)).toBe(false);
+    expect(['/create', '/create/', '/campaigns', '/claim/1/ab', '/claim/1/ab/'].every(isWalletPage)).toBe(true);
+    expect(['/', '/claim/1/ab/receipt', '/privacy', '/createx', '/auth/google'].some(isWalletPage)).toBe(false);
   });
 });
