@@ -537,7 +537,10 @@
   <!-- One message: the reason, and the one thing to do -->
   <ZenAlert variant="warning">
     This send was started from <span class="font-mono">{sentFrom}</span>. Reconnect {sentFrom} to finish it.
-    {#snippet actions()}<ZenButton variant="secondary" size="sm" class="rounded-full min-h-11" onclick={disconnect} disabled={!!busy}>Disconnect</ZenButton>{/snippet}
+    {#snippet actions()}
+      {#if account}<ZenButton variant="secondary" size="sm" class="rounded-full min-h-11" onclick={disconnect} disabled={!!busy}>Disconnect</ZenButton>
+      {:else}<ZenButton variant="secondary" size="sm" class="rounded-full min-h-11" onclick={connect} disabled={!walletReady}>Connect MyNearWallet</ZenButton>{/if}
+    {/snippet}
   </ZenAlert>
 {/snippet}
 
