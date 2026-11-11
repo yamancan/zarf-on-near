@@ -5,14 +5,15 @@
   import Hero from '$lib/Hero.svelte';
   import Medallion from '$lib/Medallion.svelte';
   import { themeStore } from '$lib/zen/stores/themeStore.svelte';
-  import { UNIT } from '$lib/network';
+  import { UNIT, USDC_LINES } from '$lib/network';
 
   const TRY_URL = 'https://zarf-near-faucet-testnet.sparkling-queen-5e77.workers.dev/try';
   const STEPS = [
-    { title: 'Add emails and amounts', line: 'Fund them once from a NEAR wallet.' },
+    { title: 'Add emails and amounts', line: 'You pay once in USDC, a digital dollar, from a NEAR wallet.' },
     { title: 'They claim with Google', line: 'Pick a NEAR account, then sign in with Google.' },
     { title: 'USDC arrives', line: 'On NEAR. On mainnet, also on another chain.' },
   ];
+  let usdcOpen = $state(false);
 </script>
 
 <svelte:head><title>Zarf: send tokens to an email</title></svelte:head>
@@ -58,7 +59,17 @@
           <span class="font-mono text-[11px] text-zen-fg-muted pt-1">0{i + 1}</span>
           <div class="flex flex-col gap-1">
             <h3 class="text-base font-semibold tracking-tight">{s.title}</h3>
-            <p class="text-sm text-zen-fg-muted">{s.line}</p>
+            {#if i === 0}
+              <!-- "USDC" is a term: the USDC sentence opens in place, once, here -->
+              <p class="text-sm text-zen-fg-muted">
+                You pay once in <button type="button" class="underline decoration-dotted underline-offset-4 hover:text-zen-fg cursor-pointer" aria-expanded={usdcOpen} aria-controls="usdc-what" onclick={() => (usdcOpen = !usdcOpen)}>USDC</button>, a digital dollar, from a NEAR wallet.
+              </p>
+              {#if usdcOpen}
+                <div id="usdc-what" class="flex flex-col gap-1 text-sm text-zen-fg-muted">{#each USDC_LINES as l (l)}<p>{l}</p>{/each}</div>
+              {/if}
+            {:else}
+              <p class="text-sm text-zen-fg-muted">{s.line}</p>
+            {/if}
           </div>
         </div>
       </li>
