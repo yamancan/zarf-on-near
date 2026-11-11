@@ -50,10 +50,34 @@ export const claimLink = (claimOrigin: string, campaignId: string, r: Recipient)
 /** A proof grows each link by ~43 characters per tree level; some apps cut long links. */
 export const LONG_LINKS_ABOVE = 500;
 
-/** An email to one recipient with their link. The link is percent-encoded so `&` and `#` survive. */
-export const mailtoHref = (r: Pick<Recipient, 'email' | 'amount'>, link: string): string =>
-  `mailto:${encodeURIComponent(r.email)}?subject=${encodeURIComponent(`${formatAmount(BigInt(r.amount))} USDC for you`)}` +
-  `&body=${encodeURIComponent(`You have ${formatAmount(BigInt(r.amount))} USDC to claim with your Google account:\n\n${link}\n\nKeep this link private: it is the only copy of your claim.`)}`;
+/**
+ * The ready-made message a sender passes on with one link. `unit` is the network's ("test USDC" on testnet):
+ * a testnet message must never read as real money, so it also says the test token has no value.
+ */
+export function messageText(
+  r: Pick<Recipient, 'email' | 'amount'>,
+  link: string,
+  o: { unit: string; testnet: boolean; deadlineMs: number; timeZone?: string },
+): { subject: string; body: string } {
+  const amount = `${formatAmount(BigInt(r.amount))} ${o.unit}`;
+  const until = new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short', timeZone: o.timeZone,
+  }).format(o.deadlineMs);
+  const lines = [
+    `Hi, I sent you ${amount} with Zarf.`,
+    `Open this link and sign in with Google as ${r.email}. You choose the ${o.testnet ? 'NEAR ' : ''}account it goes to; the page helps if you don't have one.`,
+    '',
+    link,
+    '',
+    `Claim it before ${until}. Keep this link to yourself.`,
+  ];
+  if (o.testnet) lines.push('Test USDC is practice money with no value.');
+  return { subject: `${amount} for you`, body: lines.join('\n') };
+}
+
+/** An email to one recipient with their message. Percent-encoded so the link's `&` and `#` survive. */
+export const mailtoHref = (r: Pick<Recipient, 'email'>, m: { subject: string; body: string }): string =>
+  `mailto:${encodeURIComponent(r.email)}?subject=${encodeURIComponent(m.subject)}&body=${encodeURIComponent(m.body)}`;
 
 /** Everything needed to rebuild the links if the page is lost. It holds the salts: keep it private. */
 export const recoveryFile = (d: Draft, deadlineNs: string, ctx: { contractId: string; network: string; claimOrigin: string }) =>
