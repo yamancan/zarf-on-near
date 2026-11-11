@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import vectors from '../../../../spec/vectors.json';
 import { parseLinkFragment } from '../claim';
-import { buildDraft, claimLink, commitment, mailtoHref, messageText, newSalt, recoveryFile } from './campaign';
+import { buildDraft, claimLink, commitment, mailtoHref, messageText, newSalt, readRecoveryFile, recoveryFile } from './campaign';
 import {
   fundsShort,
   campaignIdFrom, checkCreation, failedWith, fundCampaign, fundingTxs, LookupPending, minDeadlineMs, NotCreated, OutcomeUnclear, ownerKeySlack,
@@ -496,5 +496,39 @@ describe('fundsShort (step 3 blocks Continue below the total)', () => {
   it('never blocks when the balance could not be read', () => {
     expect(fundsShort(null, 37_500_000n)).toBe(0n);
     expect(fundsShort('unclaimed', 37_500_000n)).toBe(0n);
+  });
+});
+
+describe('readRecoveryFile (Open a backup file)', () => {
+  const ctx = { contractId: 'zarf-near.testnet', network: 'testnet', claimOrigin: 'https://claim.example' };
+  const rows = [
+    { line: 1, email: 'alice@gmail.com', amount: 10_000_000n },
+    { line: 2, email: 'bob@gmail.com', amount: 2_500_000n },
+    { line: 3, email: 'chen@gmail.com', amount: 25_000_000n },
+  ];
+  it('a file from recoveryFile() plus the campaign id gives exactly the links claimLink() gives', async () => {
+    const draft = await buildDraft(rows);
+    const back = await readRecoveryFile(recoveryFile(draft, '1800000000000000000', ctx), ctx);
+    expect(back.deadlineNs).toBe('1800000000000000000');
+    expect(back.draft).toEqual(draft);
+    expect(back.draft.recipients.map((r) => claimLink(ctx.claimOrigin, '12', r))).toEqual(draft.recipients.map((r) => claimLink(ctx.claimOrigin, '12', r)));
+  });
+  it('refuses another contract or network, a non-backup file, and any row that does not rebuild the root', async () => {
+    const draft = await buildDraft(rows);
+    const file = recoveryFile(draft, '1', ctx);
+    await expect(readRecoveryFile(file, { contractId: 'other.testnet', network: 'testnet' })).rejects.toThrow(/other|not this site/);
+    await expect(readRecoveryFile(file, { contractId: ctx.contractId, network: 'mainnet' })).rejects.toThrow(/not this site/);
+    await expect(readRecoveryFile('{', ctx)).rejects.toThrow(/not a Zarf backup/);
+    await expect(readRecoveryFile('{"kind":"x"}', ctx)).rejects.toThrow(/not a Zarf backup/);
+    for (const mutate of [
+      (f: any) => (f.recipients[1].amount = '2500001'),
+      (f: any) => (f.recipients[0].email = 'mallory@gmail.com'),
+      (f: any) => (f.recipients[2].proof = f.recipients[2].proof.slice(1)),
+      (f: any) => (f.merkle_root = 'ab'.repeat(32)),
+    ]) {
+      const f = JSON.parse(file);
+      mutate(f);
+      await expect(readRecoveryFile(JSON.stringify(f), ctx)).rejects.toThrow(/damaged/);
+    }
   });
 });

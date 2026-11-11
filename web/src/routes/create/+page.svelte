@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { env } from '$env/dynamic/public';
-  import { buildDraft, claimLink, LONG_LINKS_ABOVE, mailtoHref, messageText, recoveryFile, type Draft } from '$lib/create/campaign';
+  import { buildDraft, claimLink, LONG_LINKS_ABOVE, mailtoHref, messageText, readRecoveryFile, recoveryFile, type Draft } from '$lib/create/campaign';
   import { getAccount, getCampaignByRoot, getCampaignView, getConfig, getGasPrice, getPrepayBalance, getStorageCosts, txOutcome, type ContractConfig } from '$lib/create/chain';
   import {
     attachedGas, checkCreation, fundCampaign, fundsShort, LookupPending, mayCreate, minDeadlineMs, nearNeeded, NotCreated, NotSent, OutcomeUnclear, ownerKeySlack,
@@ -239,6 +239,36 @@
     error = errorTitle = errorCode = '';
     draft = await buildDraft(parsed.rows);
     recoverySaved = recoveryAck = false;
+  }
+
+  /**
+   * "Open a backup file": the recovery file rebuilds the links of a campaign this account already funded.
+   * Read-only: it finds the campaign by (sender, merkle_root) and shows the done page; nothing is sent.
+   */
+  async function openBackup(file: File | undefined) {
+    error = errorTitle = errorCode = '';
+    if (!file) return;
+    try {
+      const { draft: d, deadlineNs } = await readRecoveryFile(await file.text(), { contractId: contract!, network: config!.network });
+      if (!account) await connect();
+      if (!account) {
+        error = 'Connect the wallet that sent this campaign to open its backup.';
+        return;
+      }
+      const id = await resolveByRoot({ ...byRoot(), sender: account }, { merkleRoot: d.merkleRoot, total: d.total }).catch((e) => {
+        throw new Error(e?.message === 'CAMPAIGN_MISMATCH' ? 'The campaign on NEAR does not match this backup.' : 'Could not reach NEAR. Try again in a minute.');
+      });
+      if (!id) {
+        error = `No campaign from ${account} uses this backup. If you sent it from another account, connect that one.`;
+        return;
+      }
+      draft = d;
+      deadline = toLocalInput(Number(BigInt(deadlineNs) / 1_000_000n));
+      recoverySaved = recoveryAck = true; // the sender holds the file they just opened
+      result = { campaignId: id, txHash: '' }; // the funding tx is not in the file; the done page hides its link
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
   }
 
   function saveRecovery() {
@@ -840,6 +870,10 @@
             </Note>
           {/if}
           <Term q="Which email?">The exact address they sign in to Google with. A Gmail +alias can't sign in.</Term>
+          <label class="self-start text-xs text-zen-fg-muted underline underline-offset-2 hover:text-zen-fg cursor-pointer min-h-11 flex items-center">
+            Open a backup file
+            <input class="sr-only" type="file" accept="application/json,.json" disabled={!config || !!busy} onchange={(e) => openBackup(e.currentTarget.files?.[0])} />
+          </label>
           {@render actions(false, 'Continue', recipientsOk, () => (uiStep = 1), recipientsOk ? '' : parsed.rejected.length ? `Fix line ${parsed.rejected[0].line} first.` : 'Add at least one line.')}
         {:else if step === 1}
           <div class="control-border grid gap-1 p-1 rounded-full" style="grid-template-columns: repeat({picks.length + 1}, minmax(0, 1fr))" role="radiogroup" aria-label="Claim deadline">
