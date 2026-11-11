@@ -88,10 +88,10 @@
       if (campaignId) {
         const r = reclaimOutcome(outcome, contract!, campaignId);
         result =
-          r.kind === 'reclaimed' ? { for: target, tone: 'success', text: `${formatAmount(BigInt(r.amount))} ${UNIT} is back in your wallet. Any unused storage moved to your storage deposit below.`, hash }
+          r.kind === 'reclaimed' ? { for: target, tone: 'success', text: `${formatAmount(BigInt(r.amount))} ${UNIT} is back in your wallet. Any unused storage NEAR moved to your Zarf balance below.`, hash }
           : r.kind === 'reverted' ? { for: target, tone: 'error', text: 'The transfer failed; the balance is back in the campaign. Try again.', hash }
           : r.kind === 'failed' ? { for: target, tone: 'error', text: 'The transaction did not go through.', code: r.code, hash }
-          : { for: target, tone: 'success', text: 'The unused storage is back in your storage deposit.', hash };
+          : { for: target, tone: 'success', text: 'The unused storage NEAR is back in your Zarf balance.', hash };
       } else {
         const failure = outcome.receipts_outcome?.find((r) => r.outcome?.status?.Failure !== undefined)?.outcome?.status?.Failure;
         const code = failure ? (/E1\d\d_[A-Z_]+/.exec(JSON.stringify(failure))?.[0] ?? 'FAILED') : null;
@@ -196,7 +196,7 @@
               {#if result?.for === r.id && result.tone === 'success'}
                 <!-- Done: the outcome below says what came back; no live button to press again -->
               {:else if can.ok}
-                <ZenButton variant="primary" size="sm" class="rounded-full min-h-11" disabled={!!busy} onclick={() => run('Reclaiming…', reclaimTx(account!, contract!, r.id), r.id, r.id)}>{BigInt(r.c.balance) === 0n ? 'Free up storage deposit' : `Take back ${formatAmount(BigInt(r.c.balance))} ${UNIT}`}</ZenButton>
+                <ZenButton variant="primary" size="sm" class="rounded-full min-h-11" disabled={!!busy} onclick={() => run('Reclaiming…', reclaimTx(account!, contract!, r.id), r.id, r.id)}>{BigInt(r.c.balance) === 0n ? 'Move storage to your Zarf balance' : `Take back ${formatAmount(BigInt(r.c.balance))} ${UNIT}`}</ZenButton>
               {:else}
                 <p class="text-xs text-zen-fg-muted">{left ? `After ${deadlineText(ms, ms)} you can take back what's left.` : can.reason}</p>
               {/if}
@@ -207,16 +207,16 @@
       {/each}
     </div>
 
-    <!-- The sender's storage deposit (the contract's free pre-pay): a footer line, not the page's first block -->
+    <!-- The sender's Zarf balance (the contract's free pre-pay): a footer line, not the page's first block -->
     <div class="mt-8 pt-6 border-t-[0.5px] border-zen-border-subtle flex flex-col items-start gap-2">
       <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-        <span><span class="tabular-nums">{formatNear(freePrepay)} NEAR</span> <span class="text-zen-fg-muted">left in your storage deposit</span></span>
+        <span><span class="tabular-nums">{formatNear(freePrepay)} NEAR</span> <span class="text-zen-fg-muted">in your Zarf balance</span></span>
         {#if BigInt(freePrepay) > 0n && !(result?.for === 'prepay' && result.tone === 'success')}
           <ZenButton variant="ghost" size="sm" class="rounded-full min-h-11 !text-zen-fg" disabled={!!busy} onclick={() => run('Withdrawing…', withdrawTx(account!, contract!), 'prepay')}>Withdraw</ZenButton>
         {/if}
       </div>
       {@render outcome('prepay')}
-      <Term q="What is the storage deposit?">NEAR not used by your sends. Withdraw sends it to your wallet; your next send can also use it.</Term>
+      <Term q="What is my Zarf balance?">NEAR you keep at the Zarf contract to pay for storage. Each send draws on it; whatever is left is yours. Withdraw sends it to your wallet; your next send can also use it.</Term>
     </div>
   {/if}
 </div>
