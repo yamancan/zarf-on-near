@@ -11,6 +11,7 @@
   import { ArrowUpRight, ChevronDown, Send, Wallet } from 'lucide-svelte';
   import Medallion from '$lib/Medallion.svelte';
   import Note from '$lib/Note.svelte';
+  import Term from '$lib/Term.svelte';
   import PageHeader from '$lib/zen/components/PageHeader.svelte';
   import ZenAlert from '$lib/zen/components/ZenAlert.svelte';
   import ZenButton from '$lib/zen/components/ZenButton.svelte';
@@ -87,7 +88,7 @@
       if (campaignId) {
         const r = reclaimOutcome(outcome, contract!, campaignId);
         result =
-          r.kind === 'reclaimed' ? { for: target, tone: 'success', text: `Reclaimed ${formatAmount(BigInt(r.amount))} ${UNIT}.`, hash }
+          r.kind === 'reclaimed' ? { for: target, tone: 'success', text: `${formatAmount(BigInt(r.amount))} ${UNIT} is back in your wallet. Any unused storage moved to your storage deposit below.`, hash }
           : r.kind === 'reverted' ? { for: target, tone: 'error', text: 'The transfer failed; the balance is back in the campaign. Try again.', hash }
           : r.kind === 'failed' ? { for: target, tone: 'error', text: 'The transaction did not go through.', code: r.code, hash }
           : { for: target, tone: 'success', text: 'The unused storage is back in your storage deposit.', hash };
@@ -125,7 +126,7 @@
 {/snippet}
 
 <div class="w-full max-w-3xl mx-auto px-6 py-8 md:py-12">
-  <PageHeader title="Your campaigns" description="After the deadline, take back what was not claimed." />
+  <PageHeader title="Your campaigns" description="What was claimed, and what you can take back after the deadline." />
 
   {#if setupError}
     <ZenAlert variant="error">{setupError}</ZenAlert>
@@ -185,9 +186,9 @@
             <details class="group text-xs text-zen-fg-muted">
               <summary class="inline-flex items-center gap-1.5 min-h-11 cursor-pointer list-none hover:text-zen-fg">Details <ChevronDown class="w-3.5 h-3.5 transition-transform group-open:rotate-180" aria-hidden="true" /></summary>
               <dl class="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1">
-                <dt>Left in the campaign</dt><dd class="tabular-nums text-zen-fg">{formatAmount(BigInt(r.c.balance))} {UNIT}</dd>
+                <dt>Not claimed yet</dt><dd class="tabular-nums text-zen-fg">{formatAmount(BigInt(r.c.balance))} {UNIT}</dd>
                 <dt>Being paid now</dt><dd class="tabular-nums text-zen-fg">{formatAmount(BigInt(r.c.in_flight))} {UNIT}</dd>
-                <dt>Storage reserved</dt><dd class="tabular-nums text-zen-fg">{formatNear(r.c.storage_reserved)} NEAR</dd>
+                <dt>Storage for open links</dt><dd class="tabular-nums text-zen-fg">{formatNear(r.c.storage_reserved)} NEAR</dd>
                 <dt>Claim deadline</dt><dd class="text-zen-fg">{deadlineText(ms, now)}</dd>
               </dl>
             </details>
@@ -195,9 +196,9 @@
               {#if result?.for === r.id && result.tone === 'success'}
                 <!-- Done: the outcome below says what came back; no live button to press again -->
               {:else if can.ok}
-                <ZenButton variant="primary" size="sm" class="rounded-full min-h-11" disabled={!!busy} onclick={() => run('Reclaiming…', reclaimTx(account!, contract!, r.id), r.id, r.id)}>{BigInt(r.c.balance) === 0n ? 'Release storage' : 'Reclaim'}</ZenButton>
+                <ZenButton variant="primary" size="sm" class="rounded-full min-h-11" disabled={!!busy} onclick={() => run('Reclaiming…', reclaimTx(account!, contract!, r.id), r.id, r.id)}>{BigInt(r.c.balance) === 0n ? 'Free up storage deposit' : `Take back ${formatAmount(BigInt(r.c.balance))} ${UNIT}`}</ZenButton>
               {:else}
-                <p class="text-xs text-zen-fg-muted">{left ? 'You can reclaim what is left once claims close.' : can.reason}</p>
+                <p class="text-xs text-zen-fg-muted">{left ? `After ${deadlineText(ms, ms)} you can take back what's left.` : can.reason}</p>
               {/if}
               {@render outcome(r.id)}
             </div>
@@ -209,12 +210,13 @@
     <!-- The sender's storage deposit (the contract's free pre-pay): a footer line, not the page's first block -->
     <div class="mt-8 pt-6 border-t-[0.5px] border-zen-border-subtle flex flex-col items-start gap-2">
       <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-        <span><span class="tabular-nums">{formatNear(freePrepay)} NEAR</span> <span class="text-zen-fg-muted">storage deposit</span></span>
+        <span><span class="tabular-nums">{formatNear(freePrepay)} NEAR</span> <span class="text-zen-fg-muted">left in your storage deposit</span></span>
         {#if BigInt(freePrepay) > 0n && !(result?.for === 'prepay' && result.tone === 'success')}
           <ZenButton variant="ghost" size="sm" class="rounded-full min-h-11 !text-zen-fg" disabled={!!busy} onclick={() => run('Withdrawing…', withdrawTx(account!, contract!), 'prepay')}>Withdraw</ZenButton>
         {/if}
       </div>
       {@render outcome('prepay')}
+      <Term q="What is the storage deposit?">NEAR not used by your sends. Withdraw sends it to your wallet; your next send can also use it.</Term>
     </div>
   {/if}
 </div>
