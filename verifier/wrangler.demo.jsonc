@@ -1,0 +1,10 @@
+{
+  // DEMO ONLY (`make demo`): the verifier with a throwaway in-memory token issuer instead of Google.
+  // Never deploy this config; the release verifier is wrangler.jsonc (src/index.ts).
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "zarf-near-verifier-demo",
+  "main": "src/demo.ts",
+  "compatibility_date": "2026-06-01",
+  "vars": { "GOOGLE_CLIENT_ID": "zarf-near-demo-client", "CLAIM_ORIGINS": "" },
+  "ratelimits": [{ "name": "PER_IP", "namespace_id": "2003", "simple": { "limit": 20, "period": 60 } }]
+}

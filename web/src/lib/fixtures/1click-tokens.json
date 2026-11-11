@@ -1,0 +1,44 @@
+[
+ {
+  "assetId": "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+  "decimals": 6,
+  "blockchain": "near",
+  "symbol": "USDC",
+  "contractAddress": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1"
+ },
+ {
+  "assetId": "nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near",
+  "decimals": 6,
+  "blockchain": "eth",
+  "symbol": "USDC",
+  "contractAddress": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+ },
+ {
+  "assetId": "nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near",
+  "decimals": 6,
+  "blockchain": "arb",
+  "symbol": "USDC",
+  "contractAddress": "0xaf88d065e77c8cc2239327c5edb3a432268e5831"
+ },
+ {
+  "assetId": "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
+  "decimals": 6,
+  "blockchain": "base",
+  "symbol": "USDC",
+  "contractAddress": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
+ },
+ {
+  "assetId": "nep245:v2_1.omni.hot.tg:1100_111bzQBB65GxAPAVoxqmMcgYo5oS3txhqs1Uh1cgahKQUeTUq1TJu",
+  "decimals": 7,
+  "blockchain": "stellar",
+  "symbol": "USDC",
+  "contractAddress": "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
+ },
+ {
+  "assetId": "nep141:base-0xc2bc2a4cd04358281c7cf36a057fc15e5552b18b.omdep.near",
+  "decimals": 18,
+  "blockchain": "base",
+  "symbol": "SSC1_PIT",
+  "contractAddress": "0xc2bc2a4cd04358281c7cf36a057fc15e5552b18b"
+ }
+]

@@ -1,135 +1,55 @@
 # Testnet deployment
 
-Public data only. Keys live on the deploy host in mode-600 local key stores, never in this repo.
+Public data only. Keys live on the deploy host, mode 600, never in this repo.
 
-## Accounts (created 2026-11-11 via the testnet faucet)
+## Live system: `zarf-near-1112.testnet`
 
-| Role | Account | Create tx |
+| Part | Where |
+| --- | --- |
+| Escrow contract | [`zarf-near-1112.testnet`](https://testnet.nearblocks.io/address/zarf-near-1112.testnet): no access keys at all (`view_access_key_list` is empty), code hash `5GdxDSB4sGW9Ewod4Q4Na613C2sLQjVfFjLbbZbKt6N8` |
+| Config (`get_config`) | `upgrade_delay_ns` 600 s, `resolve_delay_ns` 1 h, `min_lifetime_ns` 600 s, token Circle testnet USDC |
+| Verifier signer (Mode W owner key) | `2d10ebec1ec795cef82b8d357cc60d39d9119b99908741660b632fc5cf0d4e32` |
+| Relayer | `zarf-near-relayer-1111.testnet`, function-call key `ed25519:69m6cJwr6KqXhLr58BAUKoTWbtX1oMPtf5daiUbgQ9mm`: receiver `zarf-near-1112.testnet`, methods `["claim"]` |
+| Claim and send app | https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev |
+| Judges' page (1 test USDC to a Gmail) | https://zarf-near-faucet-testnet.sparkling-queen-5e77.workers.dev/try |
+| Verifier | https://zarf-near-verifier-testnet.sparkling-queen-5e77.workers.dev (`GET /health`) |
+| Relayer | https://zarf-near-relayer-testnet.sparkling-queen-5e77.workers.dev (`GET /health`) |
+| NEAR RPC | https://test.rpc.fastnear.com |
+
+The three Workers are deployed with `wrangler deploy --env testnet` from the committed release head. Secrets go in with `wrangler secret put`, piped from files on the deploy host;
+their values are never printed or stored in the repo.
+
+| Service | Version | From |
 | --- | --- | --- |
-| Escrow contract | `zarf-near-1111.testnet` | `4d3iEWrRWFzwwD34oB3qv6piHYhgJKdvPZ1KGfmWzoNK` |
-| Owner | `zarf-near-owner-1111.testnet` | `DQq2sZKJzvDVSMxHmn7J2dtLKtT5UakMXu1U6g2vw5Qx` |
-| Relayer (claim-only key) | `zarf-near-relayer-1111.testnet` | `3JHXRbPG4A6toUVKMBLnR1kwwsXHyTquozwnm7fvYo5d` |
-| Sender (funded with test USDC by the owner) | `zarf-near-sender-1111.testnet` | `FcjSH7apbGZ4V5zYSoFsbSFkVBtsE2WdJLzAk1xeHpy9` |
+| Web (create + claim) | `af1880dc` | `243ba1a` |
+| Verifier | `6c6b4286` | `243ba1a` |
+| Relayer | `eab5f60f-03e4-4ed4-9fc5-daf51d9561e5` | `29327b7` (unchanged since) |
 
-Token: Circle testnet USDC `3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af`, the id
-Circle publishes for NEAR testnet (developers.circle.com/stablecoins/usdc-contract-addresses).
-Verified on chain 2026-11-10: `ft_metadata` = USDC, 6 decimals; `storage_balance_bounds` min =
-max = 0.00125 NEAR per registered account (`1250000000000000000000` yocto).
+Smoke against the public URLs:
 
-## Deploy (2026-11-11)
-
-```bash
-CONTRACT_ID=zarf-near-1111.testnet OWNER_ID=zarf-near-owner-1111.testnet \
-RELAYER_ID=zarf-near-relayer-1111.testnet scripts/deploy.sh
-```
-
-Built from revision `48cda04` (contract code = revision `5342b35`), Rust 1.86.0,
-cargo-near 0.23.0, `cargo near build non-reproducible-wasm --no-abi`.
-
-| Step | Transaction |
+| Check | Result |
 | --- | --- |
-| deploy + `new` (one transaction) | `AgWzntX4mtvT6JUVLYcA3qk7MJZuM1VPP9F94nwheeYZ` |
-| `refresh_token_storage` (owner) | `Bnk4kCygSeYtTZ7MB9aLTwRuSY6a3FAFxezhY1udxGWp` |
-| `add_owner_key` (owner) | `Fs8qxfY8WBf4WkmFfPk39DLc3P6SDGh8ESWwKUyRcjcU` |
-| relayer claim-only key | `5FtyojtzFy79dX5XJpn8ehHoYdx9XTaaXTuKQpy3Lr4g` |
+| verifier `GET /health` | `{"contract_id":"zarf-near-1112.testnet","signer":"2d10ebec…4e32","google_client_id_set":false}` |
+| relayer `GET /health` | `{"contract_id":"zarf-near-1112.testnet","allowance":null,"balance":"9997401738950342600000000","claim_only":true}` |
+| verifier, 40 requests over one connection | 21 × `200`, then 19 × `429 {"error":"RATE_LIMITED"}` (the limit is approximate and per machine) |
+| verifier `POST /claim` with a 20 KB body | `413 {"error":"TOO_LARGE"}` |
+| CORS preflight from `http://localhost:5173` / the web origin | no `access-control-allow-origin` / the web origin |
+| `/`, `/campaigns`, `/create`, `/privacy` | `200` |
+| `/claim/999999/…` with a valid fragment (headless Chromium) | "This campaign does not exist", no form, no console errors |
+| a spec vector link on campaign 0 | "This claim link does not match" (`LINK_MISMATCH`), no form |
+| a missing or damaged fragment | "This claim link is incomplete", no form |
+| claim form (RPC stubbed to a valid link) | Stellar and `0x` input refused; a missing named account blocks; "Account found" enables sign-in; "USDC on another chain" lists Base, Arbitrum, Ethereum as "mainnet only" |
 
-- Code hash on chain: `8PGsest9Y4DRnZyC2CKd11tdmkoFzb4PRThPXXP7BSSu`, equal to the base58 sha256 of the
-  local `contract/target/near/release/zarf_near.wasm` (hex `6db688c8…bec292`).
-- Verifier signer (Mode W owner key, testnet only): `2d10ebec1ec795cef82b8d357cc60d39d9119b99908741660b632fc5cf0d4e32`.
-- Relayer function-call key: `ed25519:28QjUwJb6imTpgR2UHM4ijYNe7F6gaczoX6qBKLTwk9k`, receiver
-  `zarf-near-1111.testnet`, methods `["claim"]`, allowance unlimited.
+Google sign-in stays off until the owner creates the OAuth client. Then add
+`https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev` as a JavaScript origin and
+`…/auth/google` as a redirect URI, set `GOOGLE_CLIENT_ID` (verifier) and `PUBLIC_GOOGLE_CLIENT_ID`
+(web) in the testnet env, and redeploy both.
 
-## Trust: this contract is upgradeable
-
-**This testnet contract is upgradeable by the deployer's full-access key.** Whoever holds that
-key can redeploy the code and move every escrowed token. It is kept on purpose on testnet, where
-we may still redeploy. `scripts/deploy.sh` has an opt-in `LOCK_CONTRACT=1` final step that
-deletes every full-access key and verifies none remains; it was **not** run here. Whether mainnet
-is made immutable is the owner's decision.
-
-`view_access_key_list(zarf-near-1111.testnet)`, 2026-11-11:
-
-| Public key | Permission |
-| --- | --- |
-| `ed25519:2ow2PJ1iYhtP4gqKtexdqgDpQkC7Q7VxrJXr8XDmNDZE` | FullAccess |
-
-## Views after deploy (block ~277206411)
-
-```text
-get_config:         {"network":"testnet","min_lifetime_ns":"600000000000","agent_ttl_ns":"604800000000000","resolve_delay_ns":"3600000000000","token_ids":["3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af"],"storage_byte_cost":"10000000000000000000"}
-storage_costs:      {"ft_storage_deposit":"1250000000000000000000","claim_entry_cost":"1060000000000000000000","per_claim_storage":"2310000000000000000000","campaign_bytes_cost":"7090000000000000000000"}
-get_agent(signer):  {"kind":"owner","valid_until_ns":"1799578835000000000"}
-required_claim_gas: "55000000000000"
-```
-
-`ft_storage_deposit` = 0.00125 NEAR, read from the token on chain (matches S1).
-
-## First real claim: contract-level gas measurement (2026-11-11)
-
-**This is a contract-level test, not the verifier flow.** The claim was signed locally with the
-testnet verifier seed and submitted through the relayer's claim-only key. No Google login was
-involved. It measures the contract against Circle's real USDC, which the sandbox can't.
-
-Setup, from `zarf-near-sender-1111.testnet` (funded with 20 test USDC by the owner):
-
-| Step | Transaction |
-| --- | --- |
-| register the escrow on USDC (`storage_deposit`, 0.00125 NEAR) | `CZJdpebFMcB6YF6wyeriyr13AxJnRLMtaVdP7EXxQ2yN` |
-| `prepay_deposit` 0.02 NEAR | `47pdCeh8iJbRHVmq9iLH1ieWf2BbdzZr4M1QRZyLNC32` |
-| `ft_transfer_call` 3 USDC → campaign 0 (3 leaves, 1 USDC each, deadline +1 day) | `E8WVuJ7dj4rUHaNQjYGAto5nRRQ1jDo6UvFSmKSWebzD` |
-| fresh destination `zarf-near-dest-1111.testnet` (not registered on USDC) | `5M9843rKWAcptXKQZtSfJauSTfsfz7wDtXBgs4f4iWyU` |
-
-The first `ft_transfer_call` attempt returned "Transaction has expired" from the RPC and had no
-effect on chain (balances, `campaigns_of`, `campaign_by_root` unchanged), so it was sent once more.
-
-Campaign 0: merkle root `cbad6057878de5892f1b6756e6860e0ca3438f7c07b9a0a38d4bc10775618417`,
-3 leaves of 1000000 (1 USDC) each. The leaf list is not published (spec: it stays in the
-sender's recovery file, with each leaf's email and salt).
-
-### The claim: leaf 0 → `zarf-near-dest-1111.testnet`, prepaid gas exactly 55 Tgas
-
-Transaction `4B9wh1uKbDqM91F1pGrAXn5RqyhLotmwLzXXQFMwfg5g`: success. Events `claim_started`,
-NEP-141 `ft_transfer` (escrow → destination, 1000000), `claim_paid`.
-
-| Receipt | Executor | Gas burnt |
-| --- | --- | --- |
-| transaction (signer `zarf-near-relayer-1111.testnet`, function-call key) | – | 0.335 Tgas |
-| `claim` | `zarf-near-1111.testnet` | 3.864 Tgas |
-| `storage_deposit` (first-time registration) | Circle USDC | 2.037 Tgas |
-| `ft_transfer` | Circle USDC | 2.289 Tgas |
-| `on_claim` | `zarf-near-1111.testnet` | 2.093 Tgas |
-| 4 gas refunds | relayer | 4 × 0.223 Tgas |
-| **total** | | **11.51 Tgas** (sandbox: 10.1 Tgas) |
-
-After: `claim_state` = `claimed`; destination USDC balance 1000000; campaign 0 balance 2000000,
-in_flight 0, storage_reserved 0.00462 NEAR (two claims left).
-
-Gas margin per receipt (static gas reserved by the contract vs burnt on chain): `claim` gets
-the prepaid remainder after the three static reservations (55 − 40 = 15 Tgas) and burnt 3.864,
-so **3.9×, the tightest**; `storage_deposit` 10 / 2.037 = 4.9×; `ft_transfer` 15 / 2.289 = 6.6×;
-`on_claim` 15 / 2.093 = 7.2×. Over the whole claim, 55 / 11.51 = 4.8×.
-
-### Double claim on the same commitment
-
-Transaction `GzLn6RuPQCn2kA7ERH1f5zWCfUHrFN4r3VmDySqJ7LEE`: refused with
-`E105_ALREADY_CLAIMED`, 2.11 Tgas burnt; the destination balance stayed 1000000.
-
-### Not observed
-
-A failed-path observation with Circle's contract was skipped: its `storage_deposit` registers any
-valid account id, and the sandbox already covers transfer and registration failures.
-
-### Leaves 1 and 2
-
-They are unclaimed, but their commitments were made from placeholder addresses
-(`zarf-measure-N@example.com`), not Google accounts, so a real Google login cannot claim them.
-The real Google flow needs a campaign built from the claimants' real emails.
-
-## zarf-near-1112.testnet: locked contract, one real upgrade through the timelock (2026-11-11)
+## zarf-near-1112.testnet record: deploy, lock, two upgrades, evidence (2026-11-11/12)
 
 The mainnet posture on testnet: **no full-access key**. Code changes only through
 `propose_upgrade` → `upgrade_delay_ns` (10 min here) → `apply_upgrade`. `zarf-near-1111.testnet`
-above predates the upgrade code and keeps its full-access key.
+below predates the upgrade code and keeps its full-access key.
 
 Built from the reviewed revision (Rust 1.86.0, cargo-near 0.23.0, `non-reproducible-wasm --no-abi`).
 
@@ -174,7 +94,7 @@ After: code hash `GALTKUjiwqfbxkrwUtY7qwyryZJHk6FwrCYdQ5yGzfC9` = base58(sha256(
 `contract_source_metadata.version` = `0.1.1`; `watch().pending_upgrade` = null; campaign 0 unchanged
 (amount and balance 3000000, in_flight 0).
 
-### Evidence claim on the upgraded code (contract-level test, as above)
+### Evidence claim on 0.1.1 (contract-level test, as in the 1111 record below)
 
 Leaf 0 of campaign 0 → fresh, unregistered `zarf-near-dest-1112.testnet`
 (created `CF7Pa5Vgf1pamG6FPXVcNtfcuunMSdYwvf6Y5Kn8dKhJ`), signed locally with the testnet
@@ -295,3 +215,177 @@ curl -s https://test.rpc.fastnear.com -H 'content-type: application/json' -d '{"
 curl -s https://test.rpc.fastnear.com -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"query","params":{"request_type":"view_code","finality":"final","account_id":"zarf-near-1112.testnet"}}' | jq -r '.result.hash'
 # 5GdxDSB4sGW9Ewod4Q4Na613C2sLQjVfFjLbbZbKt6N8
 ```
+
+## History: first deploy, `zarf-near-1111.testnet`
+
+The first escrow, superseded by 1112 (new config, same verifier signer, new relayer key). It
+predates the upgrade code and keeps its full-access key. Kept for its transaction record and the
+first gas measurement.
+
+### Accounts (created 2026-11-11 via the testnet faucet)
+
+| Role | Account | Create tx |
+| --- | --- | --- |
+| Escrow contract | `zarf-near-1111.testnet` | `4d3iEWrRWFzwwD34oB3qv6piHYhgJKdvPZ1KGfmWzoNK` |
+| Owner | `zarf-near-owner-1111.testnet` | `DQq2sZKJzvDVSMxHmn7J2dtLKtT5UakMXu1U6g2vw5Qx` |
+| Relayer (claim-only key) | `zarf-near-relayer-1111.testnet` | `3JHXRbPG4A6toUVKMBLnR1kwwsXHyTquozwnm7fvYo5d` |
+| Sender (funded with test USDC by the owner) | `zarf-near-sender-1111.testnet` | `FcjSH7apbGZ4V5zYSoFsbSFkVBtsE2WdJLzAk1xeHpy9` |
+
+Token: Circle testnet USDC `3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af`, the id
+Circle publishes for NEAR testnet (developers.circle.com/stablecoins/usdc-contract-addresses).
+Verified on chain 2026-11-10: `ft_metadata` = USDC, 6 decimals; `storage_balance_bounds` min =
+max = 0.00125 NEAR per registered account (`1250000000000000000000` yocto).
+
+### Deploy (2026-11-11)
+
+```bash
+CONTRACT_ID=zarf-near-1111.testnet OWNER_ID=zarf-near-owner-1111.testnet \
+RELAYER_ID=zarf-near-relayer-1111.testnet scripts/deploy.sh   # then named deploy-testnet.sh
+```
+
+Built from revision `48cda04` (contract code = revision `5342b35`), Rust 1.86.0,
+cargo-near 0.23.0, `cargo near build non-reproducible-wasm --no-abi`.
+
+| Step | Transaction |
+| --- | --- |
+| deploy + `new` (one transaction) | `AgWzntX4mtvT6JUVLYcA3qk7MJZuM1VPP9F94nwheeYZ` |
+| `refresh_token_storage` (owner) | `Bnk4kCygSeYtTZ7MB9aLTwRuSY6a3FAFxezhY1udxGWp` |
+| `add_owner_key` (owner) | `Fs8qxfY8WBf4WkmFfPk39DLc3P6SDGh8ESWwKUyRcjcU` |
+| relayer claim-only key | `5FtyojtzFy79dX5XJpn8ehHoYdx9XTaaXTuKQpy3Lr4g` |
+
+- Code hash on chain: `8PGsest9Y4DRnZyC2CKd11tdmkoFzb4PRThPXXP7BSSu`, equal to the base58 sha256 of the
+  local `contract/target/near/release/zarf_near.wasm` (hex `6db688c8…bec292`).
+- Verifier signer (Mode W owner key, testnet only): `2d10ebec1ec795cef82b8d357cc60d39d9119b99908741660b632fc5cf0d4e32`.
+- Relayer function-call key: `ed25519:28QjUwJb6imTpgR2UHM4ijYNe7F6gaczoX6qBKLTwk9k`, receiver
+  `zarf-near-1111.testnet`, methods `["claim"]`, allowance unlimited.
+
+### Trust: 1111 is upgradeable by a full-access key
+
+**This testnet contract is upgradeable by the deployer's full-access key.** Whoever holds that
+key can redeploy the code and move every escrowed token. It is kept on purpose on testnet, where
+we may still redeploy. `scripts/deploy.sh` has an opt-in `LOCK_CONTRACT=1` final step that
+deletes every full-access key and verifies none remains; it was **not** run here. Whether mainnet
+is made immutable is the owner's decision.
+
+`view_access_key_list(zarf-near-1111.testnet)`, 2026-11-11:
+
+| Public key | Permission |
+| --- | --- |
+| `ed25519:2ow2PJ1iYhtP4gqKtexdqgDpQkC7Q7VxrJXr8XDmNDZE` | FullAccess |
+
+### Views after deploy (block ~277206411)
+
+```text
+get_config:         {"network":"testnet","min_lifetime_ns":"600000000000","agent_ttl_ns":"604800000000000","resolve_delay_ns":"3600000000000","token_ids":["3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af"],"storage_byte_cost":"10000000000000000000"}
+storage_costs:      {"ft_storage_deposit":"1250000000000000000000","claim_entry_cost":"1060000000000000000000","per_claim_storage":"2310000000000000000000","campaign_bytes_cost":"7090000000000000000000"}
+get_agent(signer):  {"kind":"owner","valid_until_ns":"1799578835000000000"}
+required_claim_gas: "55000000000000"
+```
+
+`ft_storage_deposit` = 0.00125 NEAR, read from the token on chain (matches S1).
+
+### First real claim: contract-level gas measurement (2026-11-11)
+
+**This is a contract-level test, not the verifier flow.** The claim was signed locally with the
+testnet verifier seed and submitted through the relayer's claim-only key. No Google login was
+involved. It measures the contract against Circle's real USDC, which the sandbox can't.
+
+Setup, from `zarf-near-sender-1111.testnet` (funded with 20 test USDC by the owner):
+
+| Step | Transaction |
+| --- | --- |
+| register the escrow on USDC (`storage_deposit`, 0.00125 NEAR) | `CZJdpebFMcB6YF6wyeriyr13AxJnRLMtaVdP7EXxQ2yN` |
+| `prepay_deposit` 0.02 NEAR | `47pdCeh8iJbRHVmq9iLH1ieWf2BbdzZr4M1QRZyLNC32` |
+| `ft_transfer_call` 3 USDC → campaign 0 (3 leaves, 1 USDC each, deadline +1 day) | `E8WVuJ7dj4rUHaNQjYGAto5nRRQ1jDo6UvFSmKSWebzD` |
+| fresh destination `zarf-near-dest-1111.testnet` (not registered on USDC) | `5M9843rKWAcptXKQZtSfJauSTfsfz7wDtXBgs4f4iWyU` |
+
+The first `ft_transfer_call` attempt returned "Transaction has expired" from the RPC and had no
+effect on chain (balances, `campaigns_of`, `campaign_by_root` unchanged), so it was sent once more.
+
+Campaign 0: merkle root `cbad6057878de5892f1b6756e6860e0ca3438f7c07b9a0a38d4bc10775618417`,
+3 leaves of 1000000 (1 USDC) each. The leaf list is not published (spec: it stays in the
+sender's recovery file, with each leaf's email and salt).
+
+#### The claim: leaf 0 → `zarf-near-dest-1111.testnet`, prepaid gas exactly 55 Tgas
+
+Transaction `4B9wh1uKbDqM91F1pGrAXn5RqyhLotmwLzXXQFMwfg5g`: success. Events `claim_started`,
+NEP-141 `ft_transfer` (escrow → destination, 1000000), `claim_paid`.
+
+| Receipt | Executor | Gas burnt |
+| --- | --- | --- |
+| transaction (signer `zarf-near-relayer-1111.testnet`, function-call key) | – | 0.335 Tgas |
+| `claim` | `zarf-near-1111.testnet` | 3.864 Tgas |
+| `storage_deposit` (first-time registration) | Circle USDC | 2.037 Tgas |
+| `ft_transfer` | Circle USDC | 2.289 Tgas |
+| `on_claim` | `zarf-near-1111.testnet` | 2.093 Tgas |
+| 4 gas refunds | relayer | 4 × 0.223 Tgas |
+| **total** | | **11.51 Tgas** (sandbox: 10.1 Tgas) |
+
+After: `claim_state` = `claimed`; destination USDC balance 1000000; campaign 0 balance 2000000,
+in_flight 0, storage_reserved 0.00462 NEAR (two claims left).
+
+Gas margin per receipt (static gas reserved by the contract vs burnt on chain): `claim` gets
+the prepaid remainder after the three static reservations (55 − 40 = 15 Tgas) and burnt 3.864,
+so **3.9×, the tightest**; `storage_deposit` 10 / 2.037 = 4.9×; `ft_transfer` 15 / 2.289 = 6.6×;
+`on_claim` 15 / 2.093 = 7.2×. Over the whole claim, 55 / 11.51 = 4.8×.
+
+#### Double claim on the same commitment
+
+Transaction `GzLn6RuPQCn2kA7ERH1f5zWCfUHrFN4r3VmDySqJ7LEE`: refused with
+`E105_ALREADY_CLAIMED`, 2.11 Tgas burnt; the destination balance stayed 1000000.
+
+#### Not observed
+
+A failed-path observation with Circle's contract was skipped: its `storage_deposit` registers any
+valid account id, and the sandbox already covers transfer and registration failures.
+
+#### Leaves 1 and 2
+
+They are unclaimed, but their commitments were made from placeholder addresses
+(`zarf-measure-N@example.com`), not Google accounts, so a real Google login cannot claim them.
+The real Google flow needs a campaign built from the claimants' real emails.
+
+### Local smoke against 1111 (2026-11-11)
+
+The verifier, relayer and apps run locally against the live testnet contract. Nothing is deployed
+to Cloudflare; there is no domain and no Google client yet.
+
+```bash
+scripts/testnet-dev-vars.sh     # writes gitignored, mode-600 .dev.vars.testnet from the deploy host's secrets
+(cd verifier && npx wrangler dev --env testnet --port 8787 --inspector-port 9341)
+(cd relayer  && npx wrangler dev --env testnet --port 8788)
+(cd web && pnpm build && npx wrangler dev --env testnet --port 5173 --inspector-port 9342)
+```
+
+`scripts/testnet-dev-vars.sh` prints only the public signer derived from the seed:
+`2d10ebec1ec795cef82b8d357cc60d39d9119b99908741660b632fc5cf0d4e32`, equal to the key registered with
+`add_owner_key` above.
+
+| Check | Result |
+| --- | --- |
+| relayer `GET /health` | `{"allowance":null,"balance":"9999957942264602800000000","claim_only":true}`: the key is claim-only for the contract, allowance unlimited, ~9.99996 NEAR for gas |
+| verifier chain reader: `get_network` | `"testnet"` |
+| verifier chain reader: `get_agent(2d10ebec…)` | `{"kind":"owner","valid_until_ns":"1799578835000000000"}`: registered, valid until 2027-01-10T11:00:35Z |
+| verifier chain reader: `get_campaign(999999)`, `get_agent(<foreign key>)` | `null`, `null` |
+| verifier `POST /claim` with no Google client configured | `500 {"error":"VERIFIER_MISCONFIGURED"}`: fails closed |
+| verifier CORS preflight from `http://localhost:5173` | `204`, `Access-Control-Allow-Origin: http://localhost:5173` |
+| claim page `/claim/999999/…#s=…` | one `get_campaign` call to testnet; shows "Claim before: this campaign does not exist" |
+| `/create` | one `get_config` call; the USDC token is accepted, the deadline defaults to now + 7 d, Connect is enabled; no errors |
+| `storage_costs(USDC)` (read by `/create` at funding time) | `{"ft_storage_deposit":"1250000000000000000000","claim_entry_cost":"1060000000000000000000","per_claim_storage":"2310000000000000000000","campaign_bytes_cost":"7090000000000000000000"}` |
+| `campaigns_of(zarf-near-sender-1111.testnet)` | `[]` (no campaign yet) |
+| `required_claim_gas` | `"55000000000000"` |
+
+Note: the relayer's `GET /health` shares the per-IP limit (10 per minute); poll a different route
+to wait for the server.
+
+#### Enabling Google sign-in locally (owner)
+
+Once the owner creates the OAuth web client (docs/spikes/S4.md; `http://localhost` and
+`http://localhost:5173` as JavaScript origins and `http://localhost:5173/auth/google` as redirect
+URI are enough for a first real claim), set the client id in the two testnet envs:
+
+- `verifier/wrangler.jsonc`, `env.testnet.vars`: `"GOOGLE_CLIENT_ID": "<client id>.apps.googleusercontent.com"`
+- `web/wrangler.jsonc`, `env.testnet.vars`: `"PUBLIC_GOOGLE_CLIENT_ID": "<client id>.apps.googleusercontent.com"`
+
+The client id is public. A real claim then also needs a funded campaign from the sender account
+and the recipient's claim link (it carries the salt, amount and Merkle proof; nothing else is hosted).

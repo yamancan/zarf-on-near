@@ -1,0 +1,62 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "zarf-near-relayer",
+  "main": "src/index.ts",
+  // No nodejs_compat: nothing here needs it, and it would copy secrets onto process.env.
+  "compatibility_date": "2026-06-01",
+  "vars": {
+    "NETWORK": "testnet",
+    // Set at deploy (T8). Empty values make every request 500 RELAYER_MISCONFIGURED.
+    "CONTRACT_ID": "",
+    "RELAYER_ACCOUNT_ID": "",
+    "NEAR_RPC_URL": "",
+    // Hex public keys of our verifier(s); claims signed by anyone else are refused before any gas is spent.
+    "VERIFIER_SIGNERS": "",
+    "CLAIM_ORIGINS": ""
+  },
+  // RELAYER_KEY: `ed25519:<base58>` of a FUNCTION-CALL access key limited to <CONTRACT_ID> / ["claim"].
+  // The relayer checks the key's permission on chain and refuses to sign with anything broader.
+  "secrets": { "required": ["RELAYER_KEY"] },
+  "ratelimits": [
+    { "name": "PER_IP", "namespace_id": "2001", "simple": { "limit": 10, "period": 60 } },
+    { "name": "PER_COMMITMENT", "namespace_id": "2002", "simple": { "limit": 3, "period": 60 } }
+  ],
+  "env": {
+    "dev": {
+      "vars": { "NETWORK": "testnet", "CONTRACT_ID": "", "RELAYER_ACCOUNT_ID": "", "NEAR_RPC_URL": "", "VERIFIER_SIGNERS": "", "CLAIM_ORIGINS": "http://localhost:5173" },
+      "ratelimits": [
+        { "name": "PER_IP", "namespace_id": "2001", "simple": { "limit": 10, "period": 60 } },
+        { "name": "PER_COMMITMENT", "namespace_id": "2002", "simple": { "limit": 3, "period": 60 } }
+      ]
+    },
+    // `wrangler dev --env testnet --port 8788`; RELAYER_KEY comes from .dev.vars.testnet.
+    "testnet": {
+      "secrets": { "required": ["RELAYER_KEY"] },
+      "vars": {
+        "NETWORK": "testnet", "CONTRACT_ID": "zarf-near-1112.testnet", "RELAYER_ACCOUNT_ID": "zarf-near-relayer-1111.testnet",
+        "NEAR_RPC_URL": "https://test.rpc.fastnear.com",
+        "VERIFIER_SIGNERS": "2d10ebec1ec795cef82b8d357cc60d39d9119b99908741660b632fc5cf0d4e32",
+        "CLAIM_ORIGINS": "https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev"
+      },
+      "ratelimits": [
+        { "name": "PER_IP", "namespace_id": "2001", "simple": { "limit": 10, "period": 60 } },
+        { "name": "PER_COMMITMENT", "namespace_id": "2002", "simple": { "limit": 3, "period": 60 } }
+      ]
+    },
+    // Mainnet, prepared, not deployed (docs/deploy/mainnet-hosting.md). Empty values fail closed (RELAYER_MISCONFIGURED).
+    "mainnet": {
+      "name": "zarf-near-relayer",
+      "secrets": { "required": ["RELAYER_KEY"] },
+      "vars": {
+        "NETWORK": "mainnet", "CONTRACT_ID": "", "RELAYER_ACCOUNT_ID": "",
+        "NEAR_RPC_URL": "https://free.rpc.fastnear.com",
+        "VERIFIER_SIGNERS": "",
+        "CLAIM_ORIGINS": "https://zarf-near-claim.sparkling-queen-5e77.workers.dev"
+      },
+      "ratelimits": [
+        { "name": "PER_IP", "namespace_id": "2001", "simple": { "limit": 10, "period": 60 } },
+        { "name": "PER_COMMITMENT", "namespace_id": "2002", "simple": { "limit": 3, "period": 60 } }
+      ]
+    }
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "zarf-near-claim",
+  "main": ".svelte-kit/cloudflare/_worker.js",
+  "compatibility_date": "2026-06-01",
+  "assets": { "directory": ".svelte-kit/cloudflare", "binding": "ASSETS" },
+  "vars": {
+    // The OAuth web client id (docs/spikes/S4.md). The redirect URI is <origin>/auth/google,
+    // so the claim host itself needs no config here, only an entry in the Google client.
+    "PUBLIC_GOOGLE_CLIENT_ID": "",
+    // "on" shows "Create one for me" (in-browser implicit account). Off by default: it starts with no NEAR for gas.
+    "PUBLIC_IMPLICIT_ACCOUNTS": "",
+    // "on" accepts 0x (NEP-518) destinations: only after a claim to one is proven spendable (T-002)
+    "PUBLIC_ETH_ACCOUNTS": "",
+    // Endpoints. Empty values make the page say what is not set up yet; they also feed CSP connect-src.
+    "PUBLIC_VERIFIER_URL": "",
+    "PUBLIC_RELAYER_URL": "",
+    // The relayer's NEAR account: the signer of claim txs, sent to 1Click with a cross-chain deposit (nearSenderAccount).
+    "PUBLIC_RELAYER_ACCOUNT_ID": "",
+    // Mainnet only: "on" shows "Another chain" on the claim card, after the owner's first cross-chain smoke reached SUCCESS.
+    "PUBLIC_CROSS_CHAIN": "",
+    "PUBLIC_NEAR_RPC_URL": "",
+    "PUBLIC_CONTRACT_ID": "",
+    "PUBLIC_EXPLORER_TX_URL": "",
+    // Create app: the token campaigns are funded with (must be in the contract's token_ids), and the
+    // origin claim links point to (defaults to this site).
+    "PUBLIC_TOKEN_ID": "",
+    "PUBLIC_CLAIM_ORIGIN": ""
+  },
+  "env": {
+    // Deployed as zarf-near-claim-testnet on workers.dev, against the live testnet contract and the
+    // deployed verifier/relayer. For local dev, override the two URLs with --var. No Google client yet.
+    "testnet": {
+      "vars": {
+        "PUBLIC_GOOGLE_CLIENT_ID": "581739717233-vlkg0umlung1r9h7m19vhcd1hccfvef2.apps.googleusercontent.com",
+        "PUBLIC_IMPLICIT_ACCOUNTS": "",
+        "PUBLIC_ETH_ACCOUNTS": "",
+        "PUBLIC_VERIFIER_URL": "https://zarf-near-verifier-testnet.sparkling-queen-5e77.workers.dev",
+        "PUBLIC_RELAYER_URL": "https://zarf-near-relayer-testnet.sparkling-queen-5e77.workers.dev",
+        "PUBLIC_RELAYER_ACCOUNT_ID": "zarf-near-relayer-1111.testnet",
+        "PUBLIC_CROSS_CHAIN": "",
+        "PUBLIC_NEAR_RPC_URL": "https://test.rpc.fastnear.com",
+        "PUBLIC_CONTRACT_ID": "zarf-near-1112.testnet",
+        "PUBLIC_EXPLORER_TX_URL": "https://testnet.nearblocks.io/txns/",
+        "PUBLIC_TOKEN_ID": "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af",
+        "PUBLIC_CLAIM_ORIGIN": ""
+      }
+    },
+    // Mainnet, prepared, not deployed (docs/deploy/mainnet-hosting.md). Empty PUBLIC_CONTRACT_ID makes
+    // every page say the site is not set up yet. Token: Circle USDC on NEAR mainnet.
+    "mainnet": {
+      "name": "zarf-near-claim",
+      "vars": {
+        "PUBLIC_GOOGLE_CLIENT_ID": "",
+        "PUBLIC_IMPLICIT_ACCOUNTS": "",
+        "PUBLIC_ETH_ACCOUNTS": "",
+        "PUBLIC_VERIFIER_URL": "https://zarf-near-verifier.sparkling-queen-5e77.workers.dev",
+        "PUBLIC_RELAYER_URL": "https://zarf-near-relayer.sparkling-queen-5e77.workers.dev",
+        "PUBLIC_RELAYER_ACCOUNT_ID": "",
+        "PUBLIC_CROSS_CHAIN": "",
+        "PUBLIC_NEAR_RPC_URL": "https://free.rpc.fastnear.com",
+        "PUBLIC_CONTRACT_ID": "",
+        "PUBLIC_EXPLORER_TX_URL": "https://nearblocks.io/txns/",
+        "PUBLIC_TOKEN_ID": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+        "PUBLIC_CLAIM_ORIGIN": ""
+      }
+    }
+  }
+}
