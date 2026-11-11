@@ -52,7 +52,7 @@
 {:else}<Medallion icon={Check} tone="muted" />{/if}
 <h1 class="text-xl font-semibold tracking-tight">{heading}</h1>
 <Amount
-  label={kind === 'unknown' ? 'This link held' : kind === 'paid' ? 'Paid out' : kind === 'in-transit' ? 'On its way' : kind === 'refunded' ? 'Returned to the sender' : 'Not delivered'}
+  label={kind === 'unknown' ? 'This link held' : kind === 'paid' ? 'Paid out' : kind === 'in-transit' ? 'On its way' : kind === 'refunded' ? 'Returned to the sender' : kind === 'refunding' ? 'Going back to the sender' : 'Not delivered'}
   value={shown.value}
   unit={shown.unit}
   struck={kind === 'refunded'}

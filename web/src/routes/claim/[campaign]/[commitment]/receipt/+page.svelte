@@ -277,7 +277,7 @@
             {#if step === 'checking'}Checking your claim…{:else if working}Sending your tokens…{:else if arrived}Arrived on {payout.chainName}{:else if refunded || refunding}Not delivered{:else if lost}Payout failed{:else if waiting}Still on its way to {payout.chainName}{:else}Sending to {payout.chainName}…{/if}
           </h1>
           <Amount
-            label={working ? 'Claiming' : arrived ? 'You received' : refunded ? 'Returned to the sender' : lost || refunding ? 'Not delivered' : 'On its way'}
+            label={working ? 'Claiming' : arrived ? 'You received' : refunded ? 'Returned to the sender' : refunding ? 'Going back to the sender' : lost ? 'Not delivered' : 'On its way'}
             value={shown.value}
             unit={shown.unit}
             struck={refunded}
