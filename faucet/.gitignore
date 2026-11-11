@@ -1,0 +1,2 @@
+# Local secrets for `wrangler dev` (FAUCET_SENDER_KEY, LIMIT_KEY).
+.dev.vars*

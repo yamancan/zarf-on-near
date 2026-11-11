@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "zarf-near-faucet",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-01",
+  // Testnet only. Host, accounts and amounts are owner decisions: empty values fail closed.
+  "vars": {
+    "NETWORK": "testnet",
+    "CLAIM_HOST": "",
+    "CONTRACT_ID": "",
+    "TOKEN_ID": "",
+    "NEAR_RPC_URL": "https://rpc.testnet.near.org",
+    "FAUCET_SENDER_ID": "",
+    "CREATOR": "stub", // "stub" | "testnet"
+    "AMOUNT": "1000000", // 1 test USDC (6 decimals)
+    "LIFETIME_S": "604800", // claim window: 7 days
+    "PER_IP_PER_DAY": "3",
+    "PER_EMAIL_PER_DAY": "1",
+    "DAILY_CAP": "50"
+  },
+  // Secrets (wrangler secret put, or .dev.vars locally): FAUCET_SENDER_KEY, LIMIT_KEY.
+  "kv_namespaces": [{ "binding": "FAUCET_KV", "id": "" }]
+}
