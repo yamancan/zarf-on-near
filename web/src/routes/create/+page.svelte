@@ -530,8 +530,9 @@
     <div class="relative isolate flex flex-col lg:flex-row lg:items-start gap-10 lg:gap-12">
       {#if step === 0}
         <!-- Background decor of create step 1 (main repo apps/create/src/routes/wizard/step-0/+page.svelte): the
-             same blob; its own clipping layer, so the sticky preview beside it keeps working -->
-        <div class="absolute inset-0 -z-10 overflow-hidden pointer-events-none" aria-hidden="true">
+             same blob. Not clipped to this block (that shows straight edges); the page wrapper clips the overflow
+             sideways instead, so a 390 px screen never scrolls and the sticky preview keeps working -->
+        <div class="absolute inset-0 -z-10 pointer-events-none" aria-hidden="true">
           <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-125 h-125 bg-zen-fg/5 rounded-full blur-[120px]"></div>
         </div>
       {/if}
