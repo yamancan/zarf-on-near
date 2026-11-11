@@ -187,7 +187,7 @@
           {#if step === 'checking'}Checking your claim…{:else if step === 'paying' || step === 'settling'}Sending your tokens…{:else if step === 'done'}{arrived ? `Arrived on ${payout.chainName}` : returned ? 'Not delivered' : `Sending to ${payout.chainName}…`}{:else if step === 'unsettled'}Still settling{:else}Not claimed{/if}
         </h1>
         <Amount
-          label={arrived ? 'You received' : returned ? 'Not delivered' : 'On its way'}
+          label={arrived ? 'You received' : returned ? 'Returned to the sender' : 'On its way'}
           value={twoDecimals(arrived && bridge?.amountOutFormatted ? bridge.amountOutFormatted : payout.amountOutFormatted)}
           approx={!arrived}
           struck={returned}
