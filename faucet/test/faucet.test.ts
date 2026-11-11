@@ -5,6 +5,7 @@ import { campaignIdFrom, CreateError, stubCreator, testnetCreator, type Campaign
 import { handleFaucet, type FaucetDeps } from '../src/faucet';
 import { takeQuota, type KvLike } from '../src/limits';
 import { base58Encode, encodeTx, parseNearKey } from '../src/near';
+import { usdcText } from '../src/page';
 import { verifyTurnstile } from '../src/turnstile';
 
 const memKv = (): KvLike & { m: Map<string, string> } => {
@@ -387,5 +388,38 @@ describe('review m4', () => {
   it('campaignIdFrom checks the standard and the event name', () => {
     expect(campaignIdFrom(out(ev({}).replace('"zarf-near"', '"nep171"')), 'esc.testnet', want)).toBeNull();
     expect(campaignIdFrom(out(ev({}).replace('campaign_created', 'reclaimed')), 'esc.testnet', want)).toBeNull();
+  });
+});
+
+describe('judges page presentation', () => {
+  it('usdcText reads 6-decimal base units, and nothing else', () => {
+    expect(usdcText('500000')).toBe('0.5');
+    expect(usdcText('1000000')).toBe('1');
+    expect(usdcText('12345678')).toBe('12.345678');
+    expect(usdcText('1')).toBe('0.000001');
+    for (const bad of ['', '0', '05', '-1', '1.5', '1e6', '"><x']) expect(usdcText(bad)).toBeNull();
+  });
+
+  it('shows the configured amount, never an unvalidated one', async () => {
+    const { default: worker } = await import('../src/index');
+    const page = async (AMOUNT: string) => (await worker.fetch(new Request('https://f.example/try'), { AMOUNT } as never)).text();
+    expect(await page('500000')).toContain('get a link for 0.5 test USDC');
+    const hostile = await page('5"><script>');
+    expect(hostile).toContain('get a link for test USDC');
+    expect(hostile).not.toContain('"><script>');
+  });
+
+  it('serves the font and favicon from its own origin, under the same CSP', async () => {
+    const { default: worker } = await import('../src/index');
+    const csp = (await worker.fetch(new Request('https://f.example/try'), {} as never)).headers.get('Content-Security-Policy')!;
+    expect(csp).toContain("font-src 'self'");
+    expect(csp).toContain("img-src 'self'");
+    expect(csp.match(/https:\/\/[^\s;']+/g)!.every((o) => o === 'https://challenges.cloudflare.com')).toBe(true);
+    const font = await worker.fetch(new Request('https://f.example/saira.woff2'), {} as never);
+    expect(font.headers.get('Content-Type')).toBe('font/woff2');
+    expect(new TextDecoder().decode((await font.arrayBuffer()).slice(0, 4))).toBe('wOF2');
+    const icon = await worker.fetch(new Request('https://f.example/favicon.svg'), {} as never);
+    expect(icon.headers.get('Content-Type')).toBe('image/svg+xml');
+    expect((await worker.fetch(new Request('https://f.example/saira.woff2', { method: 'POST' }), {} as never)).status).toBe(404);
   });
 });
