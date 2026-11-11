@@ -90,7 +90,7 @@ export async function submitClaim(relayerUrl: string | undefined, args: ClaimArg
 
 const MESSAGES: Record<string, string> = {
   COMMITMENT_MISMATCH: 'This link was sent to a different Google account. Sign in with the account it was sent to.',
-  E125_CAMPAIGN_ENDED: 'This campaign has ended. Unclaimed funds go back to the sender.',
+  E125_CAMPAIGN_ENDED: 'This campaign has ended. The sender can take back what was not claimed.',
   E110_UNKNOWN_CAMPAIGN: 'This campaign does not exist.',
   E102_INVALID_MERKLE_PROOF: 'This claim is not in the campaign list.',
   E105_ALREADY_CLAIMED: 'This link was already claimed.',

@@ -6,7 +6,8 @@
   import { env } from '$env/dynamic/public';
   import { AlertTriangle, ArrowUpRight, Check, Clock, Undo2 } from 'lucide-svelte';
   import { claimedAt, middle, shownAmount, type Receipt } from '$lib/claim';
-  import { needsRecheck, nextStep, recheckReceipt } from '$lib/intents';
+  import { needsRecheck, nextStep, notReturnedYet, recheckReceipt } from '$lib/intents';
+  import BridgeDetails from '$lib/BridgeDetails.svelte';
   import { formatAmount } from '$lib/create/recipients';
   import { UNIT } from '$lib/network';
   import Amount from '$lib/Amount.svelte';
@@ -45,7 +46,7 @@
 </script>
 
 {#if kind === 'paid'}<Medallion icon={Check} tone="success" />
-{:else if kind === 'in-transit'}<Medallion icon={Clock} tone="muted" />
+{:else if kind === 'in-transit' || kind === 'refunding'}<Medallion icon={Clock} tone="muted" />
 {:else if kind === 'refunded'}<Medallion icon={Undo2} tone="error" />
 {:else if kind === 'failed'}<Medallion icon={AlertTriangle} tone="error" />
 {:else}<Medallion icon={Check} tone="muted" />{/if}
@@ -65,9 +66,11 @@
     {:else if kind === 'in-transit'}
       to <span class="font-mono text-zen-fg" title={rec.destination}>{middle(rec.destination)}</span> on {rec.chainName}. Claimed on NEAR; the bridge has not confirmed the payout yet.
     {:else if kind === 'refunded'}
-      The bridge could not pay it out on {rec.chainName} and returned it to {rec.refundTo ?? 'the sender'} on NEAR. {nextStep('refunded', '')}
+      The bridge could not pay it out on {rec.chainName} and returned it to {rec.refundTo ?? 'the sender'} on NEAR. {nextStep('refunded')}
+    {:else if kind === 'refunding'}
+      The bridge did not accept the deposit. It refunds {rec.refundTo ?? 'the sender'} on NEAR by its deadline. {nextStep('refunding')}
     {:else}
-      The bridge could not pay it out on {rec.chainName}. {nextStep('failed', rec.refundTo ?? 'the sender')}
+      The bridge reported an error and has not paid it out on {rec.chainName}. {nextStep('failed')}
     {/if}
   </p>
   {#if rec.chainName && kind !== 'paid' && rec.checkedAt}
@@ -82,5 +85,8 @@
     </ZenButton>
   {:else}
     <p class="text-xs text-zen-fg-muted">Transaction <span class="font-mono">{middle(rec.txHash, 8)}</span></p>
+  {/if}
+  {#if rec.depositAddress && (kind === 'failed' || kind === 'refunding')}
+    <BridgeDetails depositAddress={rec.depositAddress} lines={[kind === 'failed' && rec.checkedAt ? notReturnedYet(rec.refundTo ?? 'the sender', claimedAt(rec.checkedAt)) : '']} />
   {/if}
 {/if}

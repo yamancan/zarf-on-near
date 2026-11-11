@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { page } from '$app/state';
   import { env } from '$env/dynamic/public';
-  import { clearAttempt, confirmRemembered, isImplicitAccount, loadAttempt, loadReceipt, middle, saveReceipt, settleReceipt, shownAmount, signedIn, type Receipt } from '$lib/claim';
+  import { claimedAt, clearAttempt, confirmRemembered, isImplicitAccount, loadAttempt, loadReceipt, middle, saveReceipt, settleReceipt, shownAmount, signedIn, type Receipt } from '$lib/claim';
   import { UNIT } from '$lib/network';
   import ClaimRecord from '$lib/ClaimRecord.svelte';
   import { canRetry, ClaimError, describeError, errorCode, failureHeading, getClaimState, isUnmapped, outcomeAfterRelay, requestSignature, submitClaim } from '$lib/services';
@@ -13,7 +13,8 @@
   import Note from '$lib/Note.svelte';
   import ZenButton from '$lib/zen/components/ZenButton.svelte';
   import ZenCard from '$lib/zen/components/ZenCard.svelte';
-  import { describeStatus, getStatus, loadPayout, nextStep, savePayout, submitDeposit, type StatusView } from '$lib/intents';
+  import { describeStatus, getStatus, loadPayout, nextStep, notReturnedYet, savePayout, submitDeposit, type StatusView } from '$lib/intents';
+  import BridgeDetails from '$lib/BridgeDetails.svelte';
 
   const attempt = loadAttempt();
   const idToken = signedIn.idToken;
@@ -60,6 +61,7 @@
         const s = await getStatus(depositAddress);
         if (s) {
           bridge = s;
+          checkedAt = Date.now();
           // Every answer is remembered with its time; "paid" only after SUCCESS (describeStatus).
           settleReceipt(contract, campaignId, commitmentId, bridgeView!.outcome, s.amountOutFormatted);
         }
@@ -72,6 +74,7 @@
     stalled = true;
   }
   let stalled = $state(false);
+  let checkedAt = $state(0); // when the bridge last answered
   let final = $state(false); // the claim can never succeed from this link: no way back to it
   const working = $derived(step === 'checking' || step === 'paying' || step === 'settling');
 
@@ -251,11 +254,12 @@
           <ZenButton href="/" variant="secondary" class="rounded-full min-h-11">What is Zarf?</ZenButton>
         {/if}
       {:else if payout}
-        {@const outcome = bridgeView?.done ? bridgeView.outcome : 'in-transit'}
+        {@const outcome = bridgeView?.outcome ?? 'in-transit'}
         {@const arrived = outcome === 'paid'}
         {@const refunded = outcome === 'refunded'}
+        {@const refunding = outcome === 'refunding'}
         {@const lost = outcome === 'failed'}
-        {@const waiting = stalled && !bridgeView?.done}
+        {@const waiting = stalled && outcome === 'in-transit'}
         {@const shown = shownAmount({ chainName: payout.chainName, bridge: outcome, amountOut: bridge?.amountOutFormatted }, formatAmount(BigInt(ok ? attempt!.amount : (resumed?.amount ?? '0'))), UNIT)}
         {#if step === 'done' || working}
           {#if arrived}
@@ -264,16 +268,16 @@
             <Medallion icon={Undo2} tone="error" />
           {:else if lost}
             <Medallion icon={AlertTriangle} tone="error" />
-          {:else if waiting}
+          {:else if waiting || refunding}
             <Medallion icon={Clock} tone="muted" />
           {:else}
             <Medallion icon={Loader2} tone="muted" spin />
           {/if}
           <h1 class="text-xl font-semibold tracking-tight">
-            {#if step === 'checking'}Checking your claim…{:else if working}Sending your tokens…{:else if arrived}Arrived on {payout.chainName}{:else if refunded}Not delivered{:else if lost}Payout failed{:else if waiting}Still on its way to {payout.chainName}{:else}Sending to {payout.chainName}…{/if}
+            {#if step === 'checking'}Checking your claim…{:else if working}Sending your tokens…{:else if arrived}Arrived on {payout.chainName}{:else if refunded || refunding}Not delivered{:else if lost}Payout failed{:else if waiting}Still on its way to {payout.chainName}{:else}Sending to {payout.chainName}…{/if}
           </h1>
           <Amount
-            label={working ? 'Claiming' : arrived ? 'You received' : refunded ? 'Returned to the sender' : lost ? 'Not delivered' : 'On its way'}
+            label={working ? 'Claiming' : arrived ? 'You received' : refunded ? 'Returned to the sender' : lost || refunding ? 'Not delivered' : 'On its way'}
             value={shown.value}
             unit={shown.unit}
             struck={refunded}
@@ -294,19 +298,21 @@
               {#if arrived}<Check class="w-4 h-4 text-zen-success-content shrink-0" aria-hidden="true" />
               {:else if refunded}<Undo2 class="w-4 h-4 text-zen-error-content shrink-0" aria-hidden="true" />
               {:else if lost}<AlertTriangle class="w-4 h-4 text-zen-error-content shrink-0" aria-hidden="true" />
-              {:else if waiting}<Clock class="w-4 h-4 text-zen-fg-muted shrink-0" aria-hidden="true" />
+              {:else if waiting || refunding}<Clock class="w-4 h-4 text-zen-fg-muted shrink-0" aria-hidden="true" />
               {:else}<Loader2 class="w-4 h-4 text-zen-fg-muted shrink-0 animate-spin" aria-hidden="true" />{/if}
               <span class="flex-1 {refunded || lost ? 'text-zen-error-content' : ''}" role="status">{waiting ? 'Waiting for the bridge for 30 minutes.' : (bridgeView?.text ?? 'Sent from NEAR, waiting for the bridge.')}</span>
             </li>
           </ol>
-          {#if refunded || lost}<p class="text-sm text-zen-fg-muted max-w-xs">{nextStep(outcome, payout.refundTo)}</p>{/if}
+          {#if refunded || refunding || lost}<p class="text-sm text-zen-fg-muted max-w-xs">{nextStep(outcome)}</p>{/if}
           {#if bridge?.destinationTx}
             {#if bridge.destinationTx.explorerUrl}{@render explorerButton(bridge.destinationTx.explorerUrl, `View it on ${payout.chainName}`)}{:else}<p class="text-xs text-zen-fg-muted">{payout.chainName} transaction <span class="font-mono">{middle(bridge.destinationTx.hash, 8)}</span></p>{/if}
           {/if}
-          {#if waiting}
+          {#if stalled && !bridgeView?.done}
             <ZenButton variant="secondary" class="rounded-full min-h-11" onclick={() => followPayout(depositAddress, true)}>Check again</ZenButton>
           {/if}
-          {#if refunded || lost || waiting}{@render details('Bridge deposit address', depositAddress, bridge?.refundReason ? `The bridge said: ${bridge.refundReason}` : '')}{/if}
+          {#if refunded || refunding || lost || waiting}
+            <BridgeDetails {depositAddress} lines={[lost && checkedAt ? notReturnedYet(payout.refundTo, claimedAt(checkedAt)) : '', bridge?.refundReason ? `The bridge said: ${bridge.refundReason}` : '']} />
+          {/if}
         {/if}
       {:else if attempt}
         {#if step === 'done'}

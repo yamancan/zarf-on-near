@@ -78,7 +78,7 @@ async function run(final) {
   await p.getByText('Details', { exact: true }).click(); // minimum, cost and refund sit one layer down
   const detail = await p.locator('#addr-note details').innerText();
   assert(/About 9\.99558 USDC, at least 9\.895624/.test(detail), `quote detail: ${detail}`);
-  assert(/returns to sender\.near on NEAR/.test(detail), 'refund copy names the sender');
+  assert(/does not complete the payout by its deadline, it refunds sender\.near on NEAR/.test(detail) && !/If it cannot be paid/.test(detail), 'refund copy is the documented one and names the sender');
   await p.locator('button.google').click();
   await p.waitForURL(/receipt/);
   const title = { SUCCESS: 'Arrived on Base', REFUNDED: 'Not delivered', FAILED: 'Payout failed', REOPENED: 'Sending to Base' }[final];
@@ -93,7 +93,14 @@ async function run(final) {
   assert(seen.submit?.depositAddress === DEP, 'deposit submitted');
   if (final === 'SUCCESS') assert(/basescan\.org/.test(await p.locator('a[href*=basescan]').getAttribute('href')), 'Base explorer link');
   else if (final === 'REFUNDED') assert(/Went back to sender\.near on NEAR/.test(text) && /new link/.test(text) && !/route unavailable/.test(text), 'refund copy, raw reason only under Details');
-  else if (final === 'FAILED') assert(/Not paid out on Base/.test(text) && /goes back to sender\.near on NEAR\. The sender can send you a new link/.test(text) && !/Keep this page|Returned to/.test(text), 'a failed payout says what happens next and is never called returned');
+  else if (final === 'FAILED') {
+    // 1Click documents no refund for FAILED: no promise that it goes back, and the deposit address one layer down.
+    assert(/The bridge reported an error and has not paid out on Base/.test(text) && /Tell the sender\. They can ask NEAR Intents support/.test(text), `failed copy: ${text}`);
+    assert(!/goes back|go back|will be returned|is refunded|refunds|Returned to|Went back|Keep this page/i.test(text), `a failed payout promises no refund: ${text}`);
+    await p.getByText('Details', { exact: true }).click();
+    const more = await p.locator('main details').last().innerText();
+    assert(more.includes(DEP) && /Not returned to sender\.near as of the last check/.test(more) && /Copy address/.test(more), `failed details: ${more}`);
+  }
   // One amount: the link's 10 USDC until the bridge confirms, then what it paid.
   assert(final === 'SUCCESS' ? /9\.99\s*USDC/.test(text) : /10\s*(TEST )?USDC/.test(text), `receipt amount: ${text}`);
   // Remembered as the bridge reported it, never as paid before that, with the deposit address for a reopened link.

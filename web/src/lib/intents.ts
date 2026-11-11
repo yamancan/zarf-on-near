@@ -193,9 +193,11 @@ export function loadPayout(contract: string, campaign: string, commitment: strin
 }
 
 /**
- * Receipt copy per 1Click status (UI/UX audit, finding 10). `outcome` is what may be remembered: only
- * SUCCESS is 'paid', only REFUNDED is 'refunded'. `done` ends the polling: SUCCESS, REFUNDED and FAILED
- * (1Click's own final error) only. INCOMPLETE_DEPOSIT and any status we do not know are still processing.
+ * Receipt copy per 1Click status, held to what 1Click's docs say (docs.near-intents.org, 1click-api status table,
+ * read 2026-11-12). `outcome` is what may be remembered: only SUCCESS is 'paid', only REFUNDED is 'refunded'
+ * ("funds returned to refund address"). FAILED is only "Swap encountered an error": no refund is documented,
+ * so nothing here says it goes back. INCOMPLETE_DEPOSIT "is refunded by deadline": 'refunding', polled on until
+ * REFUNDED. `done` ends the live polling: SUCCESS, REFUNDED, FAILED. Statuses we do not know: still processing.
  * The bridge's refund reason is never in `text`: the receipt shows it under Details.
  */
 export function describeStatus(s: StatusView, chainName: string, refundTo: string): { text: string; done: boolean; ok: boolean; outcome: BridgeOutcome } {
@@ -210,18 +212,27 @@ export function describeStatus(s: StatusView, chainName: string, refundTo: strin
     case 'REFUNDED':
       return { text: `Went back to ${refundTo} on NEAR.`, done: true, ok: false, outcome: 'refunded' };
     case 'FAILED':
-      return { text: `Not paid out on ${chainName}.`, done: true, ok: false, outcome: 'failed' };
-    default: // INCOMPLETE_DEPOSIT, anything new: not an outcome, keep asking
+      return { text: `The bridge reported an error and has not paid out on ${chainName}.`, done: true, ok: false, outcome: 'failed' };
+    case 'INCOMPLETE_DEPOSIT':
+      return { text: `The bridge did not accept the deposit. It refunds ${refundTo} on NEAR by its deadline.`, done: false, ok: false, outcome: 'refunding' };
+    default: // anything new: not an outcome, keep asking
       return { text: 'Still processing on the bridge.', done: false, ok: true, outcome: 'in-transit' };
   }
 }
 
-/** What happens next after a payout that did not arrive, in the recipient's words. Same on the receipt and the record. */
-export function nextStep(outcome: BridgeOutcome, refundTo: string): string {
-  if (outcome === 'failed') return `The USDC goes back to ${refundTo} on NEAR. The sender can send you a new link.`;
-  if (outcome === 'refunded') return 'The sender can send you a new link.'; // the row above already says where it went
+/**
+ * What happens next after a payout that did not arrive, in the recipient's words. Same on the receipt and the record.
+ * For 'failed' it never says the USDC goes back: 1Click documents no refund for FAILED.
+ */
+export function nextStep(outcome: BridgeOutcome): string {
+  if (outcome === 'failed') return 'Tell the sender. They can ask NEAR Intents support, with the deposit address under Details.';
+  if (outcome === 'refunded' || outcome === 'refunding') return 'The sender can send you a new link.'; // the row above says where it goes
   return '';
 }
+
+/** The line under Details for a failed payout: what was true at the last check, never a promise. */
+export const notReturnedYet = (refundTo: string, checked: string): string =>
+  `Not returned to ${refundTo} as of the last check (${checked}).`;
 
 /**
  * A remembered cross-chain record asks the bridge again: the tab that followed the payout may have closed
@@ -241,7 +252,7 @@ export async function recheckReceipt(
 }
 
 /** Records worth asking the bridge about again: cross-chain, with a deposit address, and not yet paid or refunded. */
-export const needsRecheck = (r: Receipt | null): boolean => !!r?.chainName && !!r.depositAddress && (r.bridge === 'in-transit' || r.bridge === 'failed');
+export const needsRecheck = (r: Receipt | null): boolean => !!r?.chainName && !!r.depositAddress && (r.bridge === 'in-transit' || r.bridge === 'refunding' || r.bridge === 'failed');
 
 /** A refused quote in plain words; the bridge's raw message is never shown (critic r2 P2-7). */
 export function refusal(message: string, chainName: string): string {

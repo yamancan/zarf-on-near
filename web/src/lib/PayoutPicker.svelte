@@ -141,7 +141,7 @@
               {cost(quote.q, asset.decimals)} USDC. A fresh quote is taken when you sign in.
             </p>
           {/if}
-          <p>If it cannot be paid, the USDC returns to <span class="font-mono">{refundTo}</span> on NEAR (the sender), not to this address.</p>
+          <p>If the bridge does not complete the payout by its deadline, it refunds <span class="font-mono">{refundTo}</span> on NEAR (the sender), not this address.</p>
           {#if asset.chain.note}<p>{asset.chain.note}</p>{/if}
         </div>
       </details>

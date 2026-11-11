@@ -28,7 +28,8 @@
 <p>
   If you choose USDC on another chain, your destination address and the amount go to NEAR Intents 1Click, a third-party
   swap service, which also sees your IP address. 1Click's status for the deposit address of your payout is public, so
-  anyone who knows that address can link the claim to your destination address.
+  anyone who knows that address can link the claim to your destination address. If the bridge does not complete a
+  payout by its deadline, it refunds the sender on NEAR, not your address.
 </p>
 
 <h2>Testnet only</h2>

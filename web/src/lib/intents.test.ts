@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 // Subset of GET /v0/tokens recorded 2026-11-11; the status body is the verifier's recorded fixture.
 import tokens from './fixtures/1click-tokens.json';
 import pending from './fixtures/1click-status-pending.json';
-import { describeStatus, refusal, evmAddressError, getQuote, getStatus, loadPayout, lossBps, needsRecheck, nextStep, recheckReceipt, savePayout, NEAR_USDC_ASSET, PAYOUT_CHAINS, QuoteError, resolveAssets } from './intents';
+import { describeStatus, refusal, evmAddressError, getQuote, getStatus, loadPayout, lossBps, needsRecheck, nextStep, notReturnedYet, recheckReceipt, savePayout, NEAR_USDC_ASSET, PAYOUT_CHAINS, QuoteError, resolveAssets } from './intents';
 import { loadReceipt, saveReceipt, shownAmount, type Receipt } from './claim';
 
 const json = (body: unknown, status = 200) => vi.fn(async (_u: string, _i?: RequestInit) => new Response(JSON.stringify(body), { status }));
@@ -92,24 +92,27 @@ describe('getStatus and describeStatus', () => {
     expect(d('PROCESSING')).toMatchObject({ text: 'Paying out on Base.', outcome: 'in-transit' });
     expect(d('SUCCESS', { amountOutFormatted: '1.99558' })).toEqual({ done: true, ok: true, outcome: 'paid', text: 'Arrived on Base.' });
     expect(d('REFUNDED')).toMatchObject({ done: true, ok: false, outcome: 'refunded', text: 'Went back to sender.near on NEAR.' });
-    expect(d('FAILED')).toMatchObject({ done: true, ok: false, outcome: 'failed', text: 'Not paid out on Base.' });
+    expect(d('FAILED')).toMatchObject({ done: true, ok: false, outcome: 'failed', text: 'The bridge reported an error and has not paid out on Base.' });
+    expect(d('INCOMPLETE_DEPOSIT')).toEqual({ done: false, ok: false, outcome: 'refunding', text: 'The bridge did not accept the deposit. It refunds sender.near on NEAR by its deadline.' });
   });
   it('never shows the bridge\'s raw refund reason on the surface (critic r3 M4)', () => {
     expect(describeStatus({ status: 'REFUNDED', refundReason: 'route unavailable' }, 'Base', 'sender.near').text).not.toMatch(/route unavailable|\(/);
   });
-  it('never calls a failed payout returned (critic r2 P0-2): only REFUNDED is a refund', () => {
-    expect(describeStatus({ status: 'FAILED' }, 'Base', 'sender.near').text).not.toMatch(/return(ed)? to|went back|refund/i);
+  it('never promises a refund for FAILED: 1Click documents none (only REFUNDED is "returned")', () => {
+    const promise = /goes back|go back|will be returned|is refunded|refunds|returned to|went back/i;
+    expect(describeStatus({ status: 'FAILED' }, 'Base', 'sender.near').text).not.toMatch(promise);
+    expect(nextStep('failed')).not.toMatch(promise);
   });
-  it('keeps polling INCOMPLETE_DEPOSIT and any unknown status: still processing, not final (round 3 A2)', () => {
-    for (const s of ['INCOMPLETE_DEPOSIT', 'SOMETHING_NEW']) {
-      expect(describeStatus({ status: s as never }, 'Base', 'sender.near')).toEqual({ done: false, ok: true, outcome: 'in-transit', text: 'Still processing on the bridge.' });
-    }
+  it('keeps polling an unknown status: still processing, not final (round 3 A2)', () => {
+    expect(describeStatus({ status: 'SOMETHING_NEW' as never }, 'Base', 'sender.near')).toEqual({ done: false, ok: true, outcome: 'in-transit', text: 'Still processing on the bridge.' });
   });
-  it('says what happens next after a payout that did not arrive, without "Keep this page" (round 3 A3)', () => {
-    expect(nextStep('failed', 'sender.near')).toBe('The USDC goes back to sender.near on NEAR. The sender can send you a new link.');
-    expect(nextStep('refunded', 'sender.near')).toBe('The sender can send you a new link.');
-    expect(nextStep('in-transit', 'sender.near')).toBe('');
-    expect(nextStep('paid', 'sender.near')).toBe('');
+  it('says what happens next after a payout that did not arrive, without "Keep this page" (round 3 A3, corrected)', () => {
+    expect(nextStep('failed')).toBe('Tell the sender. They can ask NEAR Intents support, with the deposit address under Details.');
+    expect(nextStep('refunded')).toBe('The sender can send you a new link.');
+    expect(nextStep('refunding')).toBe('The sender can send you a new link.');
+    expect(nextStep('in-transit')).toBe('');
+    expect(nextStep('paid')).toBe('');
+    expect(notReturnedYet('sender.near', '12 Nov 2026, 14:02')).toBe('Not returned to sender.near as of the last check (12 Nov 2026, 14:02).');
   });
 });
 
@@ -123,6 +126,7 @@ describe('recheckReceipt (a reopened cross-chain record asks the bridge again, r
   it('asks again only for an unsettled cross-chain record with a deposit address', () => {
     expect(needsRecheck(rec)).toBe(true);
     expect(needsRecheck({ ...rec, bridge: 'failed' })).toBe(true);
+    expect(needsRecheck({ ...rec, bridge: 'refunding' })).toBe(true);
     expect(needsRecheck({ ...rec, bridge: 'paid' })).toBe(false);
     expect(needsRecheck({ ...rec, bridge: 'refunded' })).toBe(false);
     expect(needsRecheck({ ...rec, depositAddress: undefined })).toBe(false);
@@ -143,7 +147,7 @@ describe('recheckReceipt (a reopened cross-chain record asks the bridge again, r
     const s = mem();
     saveReceipt(K, '7', 'c', rec, s, NOW);
     const busy = await recheckReceipt(K, '7', 'c', rec, json({ status: 'INCOMPLETE_DEPOSIT' }), s, NOW + 1);
-    expect(busy).toMatchObject({ done: false, r: { bridge: 'in-transit', checkedAt: NOW + 1 } });
+    expect(busy).toMatchObject({ done: false, r: { bridge: 'refunding', checkedAt: NOW + 1 } });
     const back = await recheckReceipt(K, '7', 'c', { ...rec, bridge: 'failed' }, json({ status: 'REFUNDED' }), s, NOW + 2);
     expect(back).toMatchObject({ done: true, r: { bridge: 'refunded' } });
     expect(loadReceipt(K, '7', 'c', s, NOW + 2)!.bridge).toBe('refunded');

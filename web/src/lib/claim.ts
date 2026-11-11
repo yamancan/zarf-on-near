@@ -181,9 +181,13 @@ export interface Receipt {
 /** A remembered receipt is cleared when read 30 days after it was saved (it names a destination and an amount). */
 export const RECEIPT_TTL_MS = 30 * 86_400_000;
 
-/** A cross-chain payout as last reported by the bridge. Only 'paid' means it arrived. */
-export type BridgeOutcome = 'in-transit' | 'paid' | 'refunded' | 'failed';
-const OUTCOMES: BridgeOutcome[] = ['in-transit', 'paid', 'refunded', 'failed'];
+/**
+ * A cross-chain payout as last reported by the bridge. Only 'paid' means it arrived, only 'refunded' that it went
+ * back. 'refunding': 1Click did not accept the deposit (INCOMPLETE_DEPOSIT), which its docs say is refunded by the
+ * deadline. 'failed': 1Click reported an error; its docs promise nothing about where that money goes.
+ */
+export type BridgeOutcome = 'in-transit' | 'paid' | 'refunded' | 'refunding' | 'failed';
+const OUTCOMES: BridgeOutcome[] = ['in-transit', 'paid', 'refunded', 'refunding', 'failed'];
 
 // The contract id is in the key: the same host has served more than one contract.
 const receiptKey = (contract: string, campaign: string, commitment: string) => `zarf-near:receipt:${contract}/${campaign}/${commitment}`;
