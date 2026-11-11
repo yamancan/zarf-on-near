@@ -53,6 +53,7 @@ function rpc(p, o = {}) {
         : m === 'storage_costs' ? { ft_storage_deposit: '1250000000000000000000', claim_entry_cost: '1000000000000000000000', per_claim_storage: '1000000000000000000000', campaign_bytes_cost: '9000000000000000000000' }
         : m === 'campaign_by_root' ? (o.byRoot ?? null)
         : m === 'get_campaign' ? (o.campaigns ? o.campaigns[args.campaign_id] ?? null : 'campaign' in o ? o.campaign : camp(o.camp))
+        : (m === 'get_claim_state' || m === 'claim_state') && o.claimBy ? (o.claimBy[args.commitment] ?? 'unclaimed')
         : m === 'get_claim_state' || m === 'claim_state' ? (st.claimed ? 'claimed' : o.claimStateAfterFirst ? (st.reads++ ? o.claimStateAfterFirst : 'unclaimed') : o.claimState ?? 'unclaimed')
         : m === 'get_config' ? { network: o.network ?? 'testnet', min_lifetime_ns: '3600000000000', agent_ttl_ns: '1', token_ids: ['3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af'], storage_byte_cost: '10000000000000000000' }
         : m === 'prepay_balance_of' ? (o.prepay ?? '50000000000000000000000')
@@ -157,7 +158,16 @@ const toStep4 = async (p) => {
   await p.getByRole('button', { name: 'Continue' }).click(); await p.getByRole('button', { name: 'Continue' }).click(); await p.waitForTimeout(600);
   await p.getByRole('button', { name: 'Continue' }).click(); await p.waitForTimeout(800);
 };
-const ackBackup = async (p) => { await p.getByRole('button', { name: 'Download a backup of the links' }).click(); await p.getByText('I stored the backup somewhere private').click(); };
+const saveBackup = (p) => p.getByRole('button', { name: 'Save the backup file' }).click();
+const ackBackup = async (p) => { await saveBackup(p); await p.getByText('I saved it somewhere private').click(); };
+// /create only: timers 1000x faster, so the 45 s of tx-lookup retries end in a render's wait.
+const fastCreate = (ctx) => ctx.addInitScript(() => { if (location.pathname !== '/create') return; const st = window.setTimeout; window.setTimeout = (f, ms, ...a) => st(f, (ms || 0) / 1000, ...a); });
+const toStep = async (p, n, csv = CSV) => {
+  await p.goto(base + '/create'); await p.waitForSelector('#recipients'); await p.waitForTimeout(1500); await p.fill('#recipients', csv);
+  for (let i = 0; i < n; i++) { await p.getByRole('button', { name: 'Continue' }).click(); await p.waitForTimeout(600); }
+  await p.waitForTimeout(400);
+};
+const SEND = 'Send 37.5 test USDC';
 
 const wallet = (ctx, id = 'sender.testnet') => ctx.addInitScript((a) => {
   localStorage.setItem('signedAccountId', a);
@@ -286,24 +296,39 @@ const S = {
   'create-3': async (p) => { await rpc(p); await p.goto(base + '/create'); await p.waitForSelector('#recipients'); await p.fill('#recipients', CSV); await p.getByRole('button', { name: 'Continue' }).click(); await p.getByRole('button', { name: 'Continue' }).click(); await p.waitForTimeout(800); return { full: true }; },
   'create-3-wallet': async (p, ctx) => { await wallet(ctx); await rpc(p); await p.goto(base + '/create'); await p.waitForSelector('#recipients'); await p.waitForTimeout(1500); await p.fill('#recipients', CSV); await p.getByRole('button', { name: 'Continue' }).click(); await p.getByRole('button', { name: 'Continue' }).click(); await p.waitForTimeout(800); return { full: true }; },
   'create-4': async (p, ctx) => { await wallet(ctx); await rpc(p); await p.goto(base + '/create'); await p.waitForSelector('#recipients'); await p.waitForTimeout(1500); await p.fill('#recipients', CSV); await p.getByRole('button', { name: 'Continue' }).click(); await p.getByRole('button', { name: 'Continue' }).click(); await p.getByRole('button', { name: 'Continue' }).click(); await p.waitForTimeout(800); return { full: true }; },
-  'create-done': async (p, ctx) => { await funding(ctx, { txHash: 'H', campaignId: '12' }); await rpc(p); await p.goto(base + '/create'); await p.waitForTimeout(4500); return { full: true }; },
+  'create-done': async (p, ctx) => { await funding(ctx, { txHash: 'H', campaignId: '12' }); await rpc(p, { claimBy: { ['0'.repeat(64)]: 'claimed', ['2'.repeat(64)]: 'pending' } }); await p.goto(base + '/create'); await p.waitForTimeout(4500); return { full: true }; },
   'create-done-detail': async (p, ctx) => { await funding(ctx, { txHash: 'H', campaignId: '12' }); await rpc(p); await p.goto(base + '/create'); await p.waitForTimeout(4500); await p.getByText('Keep each link private').click(); await p.waitForTimeout(300); return { full: true }; },
-  'create-done-copied': async (p, ctx) => { await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: base }); await funding(ctx, { txHash: 'H', campaignId: '12' }); await rpc(p); await p.goto(base + '/create'); await p.waitForTimeout(4500); await p.getByRole('button', { name: 'Copy', exact: true }).first().click(); await p.waitForTimeout(300); return { full: true }; },
+  'create-done-copied': async (p, ctx) => { await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: base }); await funding(ctx, { txHash: 'H', campaignId: '12' }); await rpc(p); await p.goto(base + '/create'); await p.waitForTimeout(4500); await p.getByRole('button', { name: 'Copy message' }).nth(1).click(); await p.waitForTimeout(300); return { full: true }; },
   'create-done-long': async (p, ctx) => {
     await ctx.addInitScript((d) => sessionStorage.setItem('zarf-near:create-funding', JSON.stringify({ txHash: 'H', sender: 'sender.testnet', deadline: '2026-12-01T12:00', campaignId: '12', draft: d })),
       { merkleRoot: ROOT, total: String(501 * 1000000), recipients: Array.from({ length: 501 }, (_, i) => ({ email: `person${i}@gmail.com`, amount: '1000000', salt: 'ab'.repeat(32), commitment: i.toString(16).padStart(64, '0'), proof: Array(9).fill('cd'.repeat(32)) })) });
     await rpc(p); await p.goto(base + '/create'); await p.waitForTimeout(4500); return {};
   },
+  // Send UX round (r5): every new or changed sender state.
+  'landing-usdc': async (p) => { await rpc(p); await p.goto(base + '/'); await p.waitForSelector('h1'); await heroShown(p); await p.getByRole('button', { name: 'USDC', exact: true }).click(); await p.waitForTimeout(300); await p.getByRole('button', { name: 'USDC', exact: true }).scrollIntoViewIfNeeded(); return {}; },
+  'create-1-usdc': async (p) => { await rpc(p); await p.goto(base + '/create'); await p.waitForSelector('#recipients'); await p.waitForTimeout(1500); await p.getByRole('button', { name: /What is test USDC/ }).click(); await p.waitForTimeout(300); return { full: true }; },
+  'create-1-ok': async (p) => { await rpc(p); await p.goto(base + '/create'); await p.waitForSelector('#recipients'); await p.waitForTimeout(1500); await p.fill('#recipients', CSV); await p.waitForTimeout(400); return { full: true }; },
+  'create-1-dup': async (p) => { await rpc(p); await p.goto(base + '/create'); await p.waitForSelector('#recipients'); await p.waitForTimeout(1500); await p.fill('#recipients', CSV + '\nAlice@gmail.com,5'); await p.waitForTimeout(400); return { full: true }; },
+  'create-1-email': async (p) => { await rpc(p); await p.goto(base + '/create'); await p.waitForSelector('#recipients'); await p.waitForTimeout(1500); await p.getByText('Which email?').click(); await p.waitForTimeout(300); return { full: true }; },
+  'create-2-date': async (p) => { await rpc(p); await toStep(p, 1); await p.getByText('Pick a date').click(); await p.waitForTimeout(300); return { full: true }; },
+  'create-2-30': async (p) => { await rpc(p); await toStep(p, 1); await p.getByText('30 days').click(); await p.getByText('Does it come back by itself?').click(); await p.waitForTimeout(300); return { full: true }; },
+  'create-3-balance-error': async (p, ctx) => { await wallet(ctx); await rpc(p, { fail: 'ft_balance_of' }); await toStep(p, 2); await p.waitForTimeout(800); return { full: true }; },
+  'create-4-deposit': async (p, ctx) => { await wallet(ctx); await rpc(p, { prepay: '0' }); await toStep4(p); return { full: true }; },
+  'create-4-saved': async (p, ctx) => { await wallet(ctx); await rpc(p); await toStep4(p); await saveBackup(p); await p.waitForTimeout(300); return { full: true }; },
+  'create-4-terms': async (p, ctx) => { await wallet(ctx); await rpc(p, { prepay: '0' }); await toStep4(p); for (const q of ['Why NEAR as well?', 'Can I cancel after sending?']) await p.getByText(q).click(); await p.waitForTimeout(300); return { full: true }; },
+  'create-send-chain': async (p, ctx) => { await wallet(ctx); await walletPopup(ctx, 'ok'); await rpc(p, { prepay: '0' }); await toStep4(p); await ackBackup(p); await p.getByRole('button', { name: SEND }).click(); await p.waitForTimeout(2500); return { full: true }; },
+  'create-send-lost': async (p, ctx) => { await fastCreate(ctx); await wallet(ctx); await funding(ctx, { txHash: TX }); await rpc(p); await p.goto(base + '/create'); await p.getByText('Checking with NEAR').waitFor({ timeout: 20000 }); await p.waitForTimeout(300); return { full: true }; },
+  'create-done-terms': async (p, ctx) => { await funding(ctx, { txHash: 'H', campaignId: '12' }); await rpc(p, { claimBy: { ['0'.repeat(64)]: 'claimed' } }); await p.goto(base + '/create'); await p.waitForTimeout(4500); await p.getByText('What happens next').scrollIntoViewIfNeeded(); return {}; },
   'create-setup-error': async (p) => { await rpc(p, { rpcDown: true }); await p.goto(base + '/create'); await p.waitForTimeout(4500); return {}; },
   'create-deadline-early': async (p) => { await rpc(p); await p.goto(base + '/create'); await p.waitForSelector('#recipients'); await p.fill('#recipients', CSV); await p.getByRole('button', { name: 'Continue' }).click(); await p.fill('#deadline', '2026-11-12T00:00'); await p.waitForTimeout(400); return { full: true }; },
   'create-3-short': async (p, ctx) => { await wallet(ctx); await rpc(p, { balance: '10000000' }); await p.goto(base + '/create'); await p.waitForSelector('#recipients'); await p.waitForTimeout(1500); await p.fill('#recipients', CSV); await p.getByRole('button', { name: 'Continue' }).click(); await p.getByRole('button', { name: 'Continue' }).click(); await p.waitForTimeout(1000); return { full: true }; },
   'create-wallet-error': async (p, ctx) => { await walletPopup(ctx, 'fail'); await rpc(p); await p.goto(base + '/create'); await p.waitForSelector('#recipients'); await p.waitForTimeout(1500); await p.fill('#recipients', CSV); await p.getByRole('button', { name: 'Continue' }).click(); await p.getByRole('button', { name: 'Continue' }).click(); await p.getByRole('button', { name: 'Connect MyNearWallet' }).click(); await p.waitForTimeout(2500); return { full: true }; },
   'create-4-ready': async (p, ctx) => { await wallet(ctx); await rpc(p, { prepay: '0' }); await toStep4(p); await ackBackup(p); await p.waitForTimeout(400); return { full: true }; },
-  'create-send-waiting': async (p, ctx) => { await wallet(ctx); await walletPopup(ctx, 'hang'); await rpc(p, { prepay: '0' }); await toStep4(p); await ackBackup(p); await p.getByRole('button', { name: 'Create campaign' }).click(); await p.waitForTimeout(2000); return { full: true }; },
+  'create-send-waiting': async (p, ctx) => { await wallet(ctx); await walletPopup(ctx, 'hang'); await rpc(p, { prepay: '0' }); await toStep4(p); await ackBackup(p); await p.getByRole('button', { name: SEND }).click(); await p.waitForTimeout(2000); return { full: true }; },
   'create-send-notsent': async (p, ctx) => {
     await wallet(ctx); await walletPopup(ctx, 'hang');
     await ctx.addInitScript(() => { const set = Storage.prototype.setItem; Storage.prototype.setItem = function (k, v) { if (k === 'zarf-near:create-funding') throw new Error('denied'); return set.call(this, k, v); }; });
-    await rpc(p, { prepay: '0' }); await toStep4(p); await ackBackup(p); await p.getByRole('button', { name: 'Create campaign' }).click(); await p.waitForTimeout(1500); return { full: true };
+    await rpc(p, { prepay: '0' }); await toStep4(p); await ackBackup(p); await p.getByRole('button', { name: SEND }).click(); await p.waitForTimeout(1500); return { full: true };
   },
   'create-send-checking': async (p, ctx) => { await wallet(ctx); await funding(ctx, { txHash: TX }); await rpc(p); await p.goto(base + '/create'); await p.waitForTimeout(5000); return { full: true }; },
   'create-send-unclear': async (p, ctx) => { await wallet(ctx); await funding(ctx, { txHash: TX }); await rpc(p, { tx: receipts([TOKEN]) }); await p.goto(base + '/create'); await p.waitForTimeout(5000); return { full: true }; },
