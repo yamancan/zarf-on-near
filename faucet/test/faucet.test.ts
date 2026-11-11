@@ -403,9 +403,9 @@ describe('judges page presentation', () => {
   it('shows the configured amount, never an unvalidated one', async () => {
     const { default: worker } = await import('../src/index');
     const page = async (AMOUNT: string) => (await worker.fetch(new Request('https://f.example/try'), { AMOUNT } as never)).text();
-    expect(await page('500000')).toContain('get a link for 0.5 test USDC');
+    expect(await page('500000')).toContain('Get a link for 0.5 test USDC');
     const hostile = await page('5"><script>');
-    expect(hostile).toContain('get a link for test USDC');
+    expect(hostile).toContain('Get a link for test USDC');
     expect(hostile).not.toContain('"><script>');
   });
 

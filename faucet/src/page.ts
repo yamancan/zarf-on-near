@@ -183,7 +183,7 @@ const html = (siteKey: string, claimHost: string, usdc: string | null) => `<!doc
     <div id="ask">
       <div class="medallion">${ICON(MAIL)}</div>
       <h1>Send tokens to an email.</h1>
-      <p class="lede">Try it: get a link for ${usdc ? usdc + ' ' : ''}test USDC (no real value) at your Google email.</p>
+      <p class="lede">Get a link for ${usdc ? usdc + ' ' : ''}test USDC (no real value) at your Google email.</p>
       <form id="f" novalidate>
         <label for="email">Your Google email</label>
         <input id="email" name="email" type="email" autocomplete="email" inputmode="email" required spellcheck="false" autocapitalize="off" placeholder="you@gmail.com">
