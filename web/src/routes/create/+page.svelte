@@ -949,7 +949,7 @@
               {@render figure('You have', balance !== null ? formatAmount(BigInt(balance)) : '…', UNIT, balance === null)}
               {@render figure('This send', formatAmount(parsed.total), UNIT)}
               {@render figure('You have', nearHave !== null ? formatNear(nearHave.toString()) : '…', 'NEAR', nearHave === null)}
-              {@render figure('Needs up to', nearNeed !== null ? nearUp(nearNeed) : '…', 'NEAR', nearNeed === null)}
+              {@render figure('Needs free to start', nearNeed !== null ? nearUp(nearNeed) : '…', 'NEAR', nearNeed === null)}
             </div>
             <div class="flex flex-col gap-1">
               {#if balanceFailed && balance === null}
@@ -976,6 +976,9 @@
                     <ZenButton variant="ghost" size="sm" class="rounded-full min-h-11 !text-zen-fg" onclick={() => balanceTick++}>Check again</ZenButton>
                   </span>
                 </div>
+              {/if}
+              {#if nearNeed !== null}
+                <p class="text-xs text-zen-fg-muted">Needs about {nearUp(nearNeed)} NEAR free to start; most comes back. The network fee itself is {feeMax !== null ? `at most ${nearUp(feeMax)}` : 'a small amount of'} NEAR{storageShort ? ', plus storage' : ''}.</p>
               {/if}
               {#if balance !== null && short === 0n}
                 {#if nearHave !== null && nearNeed !== null && nearShort === 0n}

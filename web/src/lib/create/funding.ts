@@ -109,10 +109,17 @@ export function campaignIdFrom(outcome: Outcome, contractId: string, expect: { m
 export const attachedGas = (shortfall: bigint): bigint => (shortfall > 0n ? 230n : 200n) * TGAS;
 
 /**
- * NEAR this send needs in the wallet: the storage pre-pay plus the attached gas at the current gas price
- * (the most the network fee can be at that price). Advisory: the wallet and the contract decide.
+ * Since nearcore 2.13 a transaction buys its attached gas up front at no less than 0.001 NEAR per Tgas (1e9 yocto per
+ * gas), whatever the burn price; the unused part is refunded after. So to START, the wallet needs this much free.
  */
-export const nearNeeded = (shortfall: bigint, gasPrice: bigint): bigint => shortfall + attachedGas(shortfall) * gasPrice;
+export const MIN_GAS_PRICE_TO_START = 1_000_000_000n;
+
+/**
+ * NEAR this send needs free in the wallet to start: the storage pre-pay plus the attached gas at the higher of the
+ * current gas price and the start-time minimum. Most of the gas part comes back. Advisory: the wallet decides.
+ */
+export const nearNeeded = (shortfall: bigint, gasPrice: bigint): bigint =>
+  shortfall + attachedGas(shortfall) * (gasPrice > MIN_GAS_PRICE_TO_START ? gasPrice : MIN_GAS_PRICE_TO_START);
 
 /** NEAR an account can spend: its balance less what it must keep for its own storage (view_account). */
 export const spendableNear = (a: { amount: string; storage_usage: number }, storageByteCost: string): bigint => {

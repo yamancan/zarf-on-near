@@ -474,7 +474,12 @@ describe('NEAR this send needs (step 3 advisory check)', () => {
     const short = prepayShortfall(costs, 3, '0', ownerKeySlack('10000000000000000000'));
     expect(short).toBe(14_340_000_000_000_000_000_000n); // 0.00709 + 3 × 0.00231 + 0.00032
     expect(attachedGas(short)).toBe(230_000_000_000_000n);
-    expect(nearNeeded(short, 100_000_000n)).toBe(short + 23_000_000_000_000_000_000_000n); // + 0.023
+    // To start, gas is bought at >= 0.001 NEAR/Tgas (nearcore 2.13): 230 Tgas needs 0.23 NEAR free, not 0.023.
+    expect(nearNeeded(short, 100_000_000n)).toBe(short + 230_000_000_000_000_000_000_000n);
+    expect(nearNeeded(short, 999_999_999n)).toBe(short + 230_000_000_000_000_000_000_000n); // just under the floor
+    expect(nearNeeded(short, 1_000_000_000n)).toBe(short + 230_000_000_000_000_000_000_000n); // at it
+    expect(nearNeeded(short, 2_000_000_000n)).toBe(short + 460_000_000_000_000_000_000_000n); // a dearer network wins
+    expect(nearNeeded(0n, 100_000_000n)).toBe(200_000_000_000_000_000_000_000n); // 200 Tgas: 0.2 NEAR
     // gas matches what fundingTxs attaches
     const txs = fundingTxs({ sender: 's', contractId: 'c', tokenId: 't', merkleRoot: 'r', deadlineNs: '1', leafCount: 3, total: '1', shortfall: short });
     expect(txs.reduce((g, t) => g + BigInt(t.actions[0].params.gas), 0n)).toBe(attachedGas(short));
