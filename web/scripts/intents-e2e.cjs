@@ -3,7 +3,7 @@
 // 1Click ending SUCCESS, REFUNDED and FAILED, plus a claim reopened in a new tab after the first one closed
 // while the bridge was still processing, which must ask the bridge again and learn SUCCESS. Nothing leaves the browser.
 // Usage: PLAYWRIGHT_CORE=/path/to/playwright-core node scripts/intents-e2e.cjs http://localhost:5181
-// (the page must run with PUBLIC_GOOGLE_CLIENT_ID set, e.g. wrangler dev --var PUBLIC_GOOGLE_CLIENT_ID:test).
+// (the page must run with PUBLIC_GOOGLE_CLIENT_ID set and PUBLIC_CROSS_CHAIN=on, e.g. wrangler dev --var PUBLIC_GOOGLE_CLIENT_ID:test --var PUBLIC_CROSS_CHAIN:on).
 const { chromium } = require(process.env.PLAYWRIGHT_CORE || 'playwright-core');
 const crypto = require('node:crypto');
 const v = require('../../spec/vectors.json');
