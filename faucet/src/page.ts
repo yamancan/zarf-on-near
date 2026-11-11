@@ -5,7 +5,7 @@ const TS = 'https://challenges.cloudflare.com';
 const CSP = `default-src 'none'; script-src 'self' ${TS}; frame-src ${TS}; style-src 'unsafe-inline'; connect-src 'self' ${TS}; form-action 'none'; base-uri 'none'; frame-ancestors 'none'`;
 const HEADERS = { 'Content-Security-Policy': CSP, 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'Cache-Control': 'no-store' };
 
-const html = (siteKey: string) => `<!doctype html>
+const html = (siteKey: string, claimHost: string) => `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -28,6 +28,8 @@ const html = (siteKey: string) => `<!doctype html>
   :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
   #out { margin-top: 1.5rem; }
   .cf-turnstile { margin-top: 1rem; min-height: 65px; }
+  a { color: var(--accent); }
+  footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--line); }
   .error { color: var(--err); }
   code { word-break: break-all; font-size: .85rem; }
 </style>
@@ -38,6 +40,8 @@ const html = (siteKey: string) => `<!doctype html>
   <p>Type your Gmail address. We create a NEAR <strong>testnet</strong> campaign that holds 1 test USDC for it, and give you the claim link.
      Open it, sign in with that Google account, and the USDC goes to the NEAR account you choose.</p>
   <p>Type the address exactly as your Google account shows it.</p>
+  <p>To receive it you need a NEAR testnet account.
+     <a href="https://docs.near.org/getting-started/create-account" rel="noopener">Create a free one</a> before you open the link.</p>
   <p class="muted">Testnet only, no real money. The email never goes on chain: the chain stores a salted hash.
      Our verifier service does see your email when you claim. One link per email per day.</p>
   <form id="f" novalidate>
@@ -47,6 +51,9 @@ const html = (siteKey: string) => `<!doctype html>
     <button id="go" type="submit">Create my claim link</button>
   </form>
   <div id="out" role="status" aria-live="polite"></div>
+  <footer class="muted">
+    <a href="${claimHost}/">About Zarf on NEAR</a> · <a href="${claimHost}/privacy">Privacy and terms</a>
+  </footer>
 </main>
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 <script src="/try.js"></script>
@@ -113,5 +120,8 @@ const JS = `(() => {
 
 const escapeAttr = (s: string) => s.replace(/[^A-Za-z0-9_-]/g, ''); // site keys are [0-9A-Za-z_-]
 
-export const tryPage = (siteKey: string): Response => new Response(html(escapeAttr(siteKey)), { headers: { ...HEADERS, 'Content-Type': 'text/html; charset=utf-8' } });
+// Only an https origin is linked; anything else drops the footer links to the page itself.
+const safeOrigin = (u: string) => (/^https:\/\/[A-Za-z0-9.-]+(:\d+)?$/.test(u.replace(/\/+$/, '')) ? u.replace(/\/+$/, '') : '');
+
+export const tryPage = (siteKey: string, claimHost = ''): Response => new Response(html(escapeAttr(siteKey), safeOrigin(claimHost)), { headers: { ...HEADERS, 'Content-Type': 'text/html; charset=utf-8' } });
 export const tryScript = (): Response => new Response(JS, { headers: { ...HEADERS, 'Content-Type': 'text/javascript; charset=utf-8' } });

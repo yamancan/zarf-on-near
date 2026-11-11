@@ -302,6 +302,12 @@ describe('worker', () => {
     expect(csp).toContain('frame-src https://challenges.cloudflare.com');
     const html = await page.text();
     expect(html).toContain('data-sitekey="1x00000000000000000000AAx"'); // attribute-escaped
+    const linked = await (await worker.fetch(new Request('https://f.example/try'), { CLAIM_HOST: 'https://claim.example/' } as never)).text();
+    expect(linked).toContain('href="https://claim.example/privacy"');
+    expect(linked).toContain('href="https://claim.example/"');
+    expect(linked).toContain('href="https://docs.near.org/getting-started/create-account"');
+    const hostile = await (await worker.fetch(new Request('https://f.example/try'), { CLAIM_HOST: 'https://x.example/"><script>' } as never)).text();
+    expect(hostile).not.toContain('x.example');
     expect(html).not.toMatch(/<script>(?!<)/);
     const js = await worker.fetch(new Request('https://f.example/try.js'), {} as never);
     const src = await js.text();

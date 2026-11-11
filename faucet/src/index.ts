@@ -65,7 +65,7 @@ const json = (body: unknown, status: number) => Response.json(body, { status, he
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url), path = url.pathname;
-    if (req.method === 'GET' && (path === '/' || path === '/try')) return tryPage(env.TURNSTILE_SITE_KEY ?? '');
+    if (req.method === 'GET' && (path === '/' || path === '/try')) return tryPage(env.TURNSTILE_SITE_KEY ?? '', env.CLAIM_HOST ?? '');
     if (req.method === 'GET' && path === '/try.js') return tryScript();
     if (req.method !== 'POST' || path !== '/faucet') return json({ error: 'NOT_FOUND' }, 404);
 
