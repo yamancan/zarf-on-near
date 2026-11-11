@@ -177,3 +177,13 @@ describe('describeCheckError (claim page, before any claim)', () => {
     expect(describeCheckError(new ClaimError('NOT_CONFIGURED:PUBLIC_NEAR_RPC_URL'))).toMatch(/not fully set up/);
   });
 });
+
+describe('pinned sentences (security review: removal mutants survived)', () => {
+  it('E123, E105 and the INTENTS_ fallback say exactly this', () => {
+    expect(describeError(new ClaimError('E123_CLAIM_PENDING'))).toBe('This claim is already being paid. Check back in a minute.');
+    expect(describeError(new ClaimError('E105_ALREADY_CLAIMED'))).toBe('This link was already claimed.');
+    expect(describeError(new ClaimError('INTENTS_SOMETHING_NEW'))).toBe("The cross-chain quote doesn't match what you chose. Open your claim link to get a new one.");
+    expect(describeError(new ClaimError('INTENTS_NOT_PENDING'))).toBe('This cross-chain quote was already used. Open your claim link to get a new one.');
+    expect(isUnmapped(new ClaimError('INTENTS_SOMETHING_NEW'))).toBe(true);
+  });
+});

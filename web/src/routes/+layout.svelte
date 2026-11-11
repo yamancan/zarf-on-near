@@ -2,7 +2,7 @@
   import '../app.css';
   import { onMount } from 'svelte';
   import { page } from '$app/state';
-  import { env } from '$env/dynamic/public';
+  import { TESTNET } from '$lib/network';
   import ZarfMark from '$lib/ZarfMark.svelte';
   import ThemeToggle from '$lib/zen/components/ThemeToggle.svelte';
   import { themeStore } from '$lib/zen/stores/themeStore.svelte';
@@ -12,16 +12,17 @@
     { href: '/create', label: 'Send' },
     { href: '/campaigns', label: 'Campaigns' },
   ];
-  // The one network label. Mainnet needs none.
-  const testnet = env.PUBLIC_CONTRACT_ID?.endsWith('.testnet') ?? false;
   const landing = $derived(page.url.pathname === '/');
+  // A recipient (claim, receipt, Google return) is not offered the sender's pages (canonical choice 1).
+  const recipient = $derived(/^\/(claim|auth)\//.test(page.url.pathname));
 
   onMount(() => themeStore.restore());
 </script>
 
 {#snippet lockup(small: boolean)}
-  <!-- Brand kit lockup: the mark as tall as the "f" of zarf.to, gap 0.4x the mark -->
-  <span class="flex items-center {small ? 'gap-[4px] text-xs' : 'gap-[5px] text-base'} font-semibold tracking-tight">
+  <!-- Brand kit lockup: the mark as tall as the "f" of zarf.to; ink gap mark→"z" 0.4x the mark (the "z" side
+       bearing and the mark's own edge add about 2 px to the box gap, measured from renders) -->
+  <span class="flex items-center {small ? 'gap-[1.5px] text-xs' : 'gap-[3px] text-base'} font-semibold tracking-tight">
     <ZarfMark size={small ? 9 : 12} />zarf.to
   </span>
 {/snippet}
@@ -33,7 +34,8 @@
       <a href="/" class="group flex items-center min-h-11 opacity-80 hover:opacity-100 transition-opacity" aria-label="zarf.to home">
         {@render lockup(false)}
       </a>
-      <!-- Zarf hides the nav below md; here Send stays reachable on phones (critic P1-24) -->
+      <!-- Zarf hides the nav below md; here Send stays reachable on phones (critic P1-24), but not for recipients -->
+      {#if !recipient}
       <nav class="flex items-center gap-4 md:gap-6" aria-label="Main">
         {#each NAV as n (n.href)}
           <a
@@ -44,10 +46,11 @@
           >
         {/each}
       </nav>
+      {/if}
     </div>
     <div class="flex items-center gap-4">
-      {#if testnet}
-        <span class="hidden sm:inline text-[10px] font-medium uppercase tracking-[0.15em] text-zen-fg-muted">NEAR testnet</span>
+      {#if TESTNET}
+        <span class="text-[10px] font-medium uppercase tracking-[0.15em] text-zen-fg-muted">NEAR testnet</span>
       {/if}
       <a
         href="https://x.com/zarfto"

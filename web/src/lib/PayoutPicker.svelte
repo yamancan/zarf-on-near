@@ -1,5 +1,6 @@
 <script lang="ts">
-  // "USDC on another chain" (mainnet only): chain + address, then a dry 1Click quote shown before sign-in.
+  // "USDC on another chain": chain + address, then a dry 1Click quote shown before sign-in. On testnet the
+  // chains are listed, marked "mainnet only" (canonical choice 9), and nothing is quoted.
   // The real quote (and its deposit address, which the sign-in binds) is taken on "Sign in".
   import { onMount } from 'svelte';
   import { formatAmount } from '$lib/create/recipients';
@@ -9,7 +10,7 @@
   import ZenInput from '$lib/zen/components/ZenInput.svelte';
   import ZenSelect from '$lib/zen/components/ZenSelect.svelte';
   import {
-    getQuote, lossBps, MAX_LOSS_BPS, PAYOUT_CHAINS, QUOTE_LIFETIME_MS, QuoteError, resolveAssets, type PayoutAsset, type Quote,
+    getQuote, lossBps, MAX_LOSS_BPS, PAYOUT_CHAINS, QUOTE_LIFETIME_MS, QuoteError, refusal, resolveAssets, type PayoutAsset, type Quote,
   } from '$lib/intents';
 
   interface Props {
@@ -17,8 +18,9 @@
     amount: string; // leaf amount, NEAR USDC base units
     refundTo: string; // the campaign sender
     choice: { asset: PayoutAsset; recipient: string } | null; // set only when a fair quote exists
+    requote?: number; // bumped by "Get a new quote": takes the dry quote again
   }
-  let { network, amount, refundTo, choice = $bindable() }: Props = $props();
+  let { network, amount, refundTo, requote = 0, choice = $bindable() }: Props = $props();
 
   const mainnet = $derived(network === 'mainnet');
   let assets = $state<PayoutAsset[] | null>(null);
@@ -45,6 +47,7 @@
   $effect(() => {
     const a = asset;
     const recipient = address.trim();
+    void requote;
     choice = null;
     quote = null;
     quoteError = '';
@@ -66,7 +69,7 @@
         quote = { for: tag, q };
         choice = { asset: a, recipient };
       } catch (e) {
-        quoteError = e instanceof QuoteError ? `The bridge refused this payout: ${e.message}` : 'Cross-chain quotes are unavailable right now. Try again, or claim to a NEAR account.';
+        quoteError = e instanceof QuoteError ? refusal(e.message, a.chain.name) : 'Cross-chain quotes are unavailable right now. Try again, or claim to a NEAR account.';
       } finally {
         quoting = false;
       }
@@ -82,7 +85,17 @@
   };
 </script>
 
-{#if loadError}
+{#if !mainnet}
+  <ul class="flex flex-col border-y-[0.5px] border-zen-border-subtle text-sm" aria-label="Chains">
+    {#each PAYOUT_CHAINS as c (c.key)}
+      <li class="flex items-center justify-between gap-3 min-h-11 border-b-[0.5px] border-zen-border-subtle last:border-b-0">
+        <span class="text-zen-fg-muted">USDC on {c.name}</span>
+        <span class="text-[10px] font-medium uppercase tracking-[0.15em] text-zen-fg-muted">Mainnet only</span>
+      </li>
+    {/each}
+  </ul>
+  <Note tone="info">This is NEAR testnet, so the claim goes to a NEAR account. On mainnet it can be paid out on these chains through the NEAR Intents bridge.</Note>
+{:else if loadError}
   <Note tone="error">{loadError}</Note>
 {:else if !assets}
   <Note tone="pending">Loading chains…</Note>

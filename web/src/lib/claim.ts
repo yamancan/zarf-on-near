@@ -159,33 +159,58 @@ export function timeLeft(deadlineMs: number, nowMs: number): string {
   return h >= 48 ? `${Math.floor(h / 24)} days left` : h >= 1 ? `${h} hour${h === 1 ? '' : 's'} left` : 'less than an hour left';
 }
 
-/** What a finished claim paid, kept so a reload or a reopened link can still show it. Nothing here is secret. */
+/**
+ * What a finished claim paid, kept so a reload or a reopened link can still show it. Nothing here is secret.
+ * It never says more than was confirmed: a cross-chain payout stays 'in-transit' until the bridge reports
+ * an outcome, and the page shows the record only after the chain says the claim is claimed.
+ */
 export interface Receipt {
   amount: string; // USDC base units (the link's amount)
   destination: string; // the NEAR account, or for a cross-chain payout the address on that chain
   txHash: string; // the NEAR claim tx
+  at?: number; // when this browser saw the claim land (ms)
   chainName?: string; // set for a cross-chain payout
+  bridge?: BridgeOutcome; // set for a cross-chain payout
+  amountOut?: string; // cross-chain: what the bridge reported paying, "9.99558" (display only)
 }
 
-const receiptKey = (campaign: string, commitment: string) => `zarf-near:receipt:${campaign}/${commitment}`;
+/** A cross-chain payout as last reported by the bridge. Only 'paid' means it arrived. */
+export type BridgeOutcome = 'in-transit' | 'paid' | 'refunded' | 'failed';
+const OUTCOMES: BridgeOutcome[] = ['in-transit', 'paid', 'refunded', 'failed'];
+
+// The contract id is in the key: the same host has served more than one contract.
+const receiptKey = (contract: string, campaign: string, commitment: string) => `zarf-near:receipt:${contract}/${campaign}/${commitment}`;
 
 // localStorage, not sessionStorage: the recipient often reopens the link from the email in a new tab.
-export function saveReceipt(campaign: string, commitment: string, r: Receipt, store?: Storage): void {
+export function saveReceipt(contract: string, campaign: string, commitment: string, r: Receipt, store?: Storage): void {
   try {
-    (store ?? localStorage).setItem(receiptKey(campaign, commitment), JSON.stringify(r));
+    (store ?? localStorage).setItem(receiptKey(contract, campaign, commitment), JSON.stringify(r));
   } catch {
     // best effort: without it a reload shows "Already claimed" without the transaction
   }
 }
 
-export function loadReceipt(campaign: string, commitment: string, store?: Storage): Receipt | null {
+export function loadReceipt(contract: string, campaign: string, commitment: string, store?: Storage): Receipt | null {
   try {
-    const r = JSON.parse((store ?? localStorage).getItem(receiptKey(campaign, commitment)) ?? 'null') as Receipt | null;
-    return r && /^[1-9]\d{0,38}$/.test(r.amount) && typeof r.destination === 'string' && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(r.txHash) ? r : null;
+    const r = JSON.parse((store ?? localStorage).getItem(receiptKey(contract, campaign, commitment)) ?? 'null') as Receipt | null;
+    if (!r || !/^[1-9]\d{0,38}$/.test(r.amount) || typeof r.destination !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(r.txHash)) return null;
+    if (r.amountOut !== undefined && !/^\d+(\.\d+)?$/.test(r.amountOut)) delete r.amountOut;
+    // A cross-chain record without a known outcome is still in transit, whatever else it says.
+    return r.chainName ? { ...r, bridge: OUTCOMES.includes(r.bridge!) ? r.bridge : 'in-transit' } : r;
   } catch {
     return null;
   }
 }
+
+/** Records the bridge's outcome on a cross-chain receipt already saved; nothing happens without one. */
+export function settleReceipt(contract: string, campaign: string, commitment: string, bridge: BridgeOutcome, amountOut?: string, store?: Storage): void {
+  const r = loadReceipt(contract, campaign, commitment, store);
+  if (r?.chainName) saveReceipt(contract, campaign, commitment, { ...r, bridge, ...(bridge === 'paid' && amountOut ? { amountOut } : {}) }, store);
+}
+
+/** "12 Nov 2026, 14:02": when a remembered claim landed, in the reader's own zone. */
+export const claimedAt = (ms: number, timeZone?: string): string =>
+  new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone }).format(ms);
 
 /** "0x5aAe…1BeAed": long addresses on one line; the full value stays in a title and on copy. */
 export const middle = (s: string, keep = 6): string => (s.length > keep * 2 + 1 ? `${s.slice(0, keep)}…${s.slice(-keep)}` : s);

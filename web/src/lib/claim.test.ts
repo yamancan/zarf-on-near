@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import vectors from '../../../spec/vectors.json';
 import {
   classifyDestination, claimState, deadlineText, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isImplicitAccount, isValidAccountId, loadAttempt, newAttemptId,
-  decodeProof, encodeProof, parseCallback, parseLinkFragment, saveAttempt, clearAttempt, saveReceipt, loadReceipt, middle, twoDecimals,
+  decodeProof, encodeProof, parseCallback, parseLinkFragment, saveAttempt, clearAttempt, saveReceipt, loadReceipt, settleReceipt, claimedAt, middle, twoDecimals,
 } from './claim';
 
 const main = vectors.campaigns.main;
@@ -159,27 +159,65 @@ describe('receipt record (reload or reopened link after a paid claim)', () => {
     const m = new Map<string, string>();
     return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => void m.set(k, v), removeItem: (k) => void m.delete(k) } as Storage;
   };
+  const K = 'zarf-near-1112.testnet';
   const r = { amount: '10000000', destination: 'alice.testnet', txHash: '6zgh2u9DqHHiXzdy9ouTP7oGky2T4nugqzqt9wJZwNFm' };
-  it('is kept per claim and survives garbage', () => {
+  it('is kept per contract and claim, and survives garbage', () => {
     const s = mem();
-    expect(loadReceipt('7', 'c', s)).toBeNull();
-    saveReceipt('7', 'c', r, s);
-    expect(loadReceipt('7', 'c', s)).toEqual(r);
-    expect(loadReceipt('7', 'd', s)).toBeNull();
-    s.setItem('zarf-near:receipt:7/c', '{');
-    expect(loadReceipt('7', 'c', s)).toBeNull();
+    expect(loadReceipt(K, '7', 'c', s)).toBeNull();
+    saveReceipt(K, '7', 'c', r, s);
+    expect(loadReceipt(K, '7', 'c', s)).toEqual(r);
+    expect(loadReceipt(K, '7', 'd', s)).toBeNull();
+    s.setItem(`zarf-near:receipt:${K}/7/c`, '{');
+    expect(loadReceipt(K, '7', 'c', s)).toBeNull();
+  });
+  it('is never read back on another contract served from the same host (security review m1)', () => {
+    const s = mem();
+    saveReceipt('old-contract.testnet', '7', 'c', r, s);
+    expect(loadReceipt(K, '7', 'c', s)).toBeNull();
+    s.setItem('zarf-near:receipt:7/c', JSON.stringify(r)); // the round-1 key had no contract id
+    expect(loadReceipt(K, '7', 'c', s)).toBeNull();
   });
   it('refuses a record whose tx hash or amount is malformed (it feeds the explorer link)', () => {
     const s = mem();
-    saveReceipt('7', 'c', { ...r, txHash: 'javascript:alert(1)' }, s);
-    expect(loadReceipt('7', 'c', s)).toBeNull();
-    saveReceipt('7', 'c', { ...r, amount: '-1' }, s);
-    expect(loadReceipt('7', 'c', s)).toBeNull();
+    saveReceipt(K, '7', 'c', { ...r, txHash: 'javascript:alert(1)' }, s);
+    expect(loadReceipt(K, '7', 'c', s)).toBeNull();
+    saveReceipt(K, '7', 'c', { ...r, amount: '-1' }, s);
+    expect(loadReceipt(K, '7', 'c', s)).toBeNull();
   });
   it('never throws when storage is blocked', () => {
     const blocked = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); } } as unknown as Storage;
-    expect(() => saveReceipt('7', 'c', r, blocked)).not.toThrow();
-    expect(loadReceipt('7', 'c', blocked)).toBeNull();
+    expect(() => saveReceipt(K, '7', 'c', r, blocked)).not.toThrow();
+    expect(loadReceipt(K, '7', 'c', blocked)).toBeNull();
+  });
+  it('remembers a cross-chain claim as in transit until the bridge reports, and only success as paid', () => {
+    const s = mem();
+    const chain = { ...r, destination: '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed', chainName: 'Base' };
+    saveReceipt(K, '7', 'c', chain, s); // no outcome recorded: in transit, never "paid out"
+    expect(loadReceipt(K, '7', 'c', s)!.bridge).toBe('in-transit');
+    saveReceipt(K, '7', 'c', { ...chain, bridge: 'bogus' as never }, s);
+    expect(loadReceipt(K, '7', 'c', s)!.bridge).toBe('in-transit');
+    settleReceipt(K, '7', 'c', 'failed', undefined, s);
+    expect(loadReceipt(K, '7', 'c', s)!.bridge).toBe('failed');
+    settleReceipt(K, '7', 'c', 'paid', '9.99558', s);
+    expect(loadReceipt(K, '7', 'c', s)).toMatchObject({ bridge: 'paid', amountOut: '9.99558' });
+    settleReceipt(K, '7', 'c', 'refunded', '1', s);
+    expect(loadReceipt(K, '7', 'c', s)).toMatchObject({ bridge: 'refunded' });
+  });
+  it('settling needs an existing cross-chain record; a NEAR record never gets a bridge state', () => {
+    const s = mem();
+    settleReceipt(K, '7', 'c', 'paid', '1', s);
+    expect(loadReceipt(K, '7', 'c', s)).toBeNull();
+    saveReceipt(K, '7', 'c', r, s);
+    settleReceipt(K, '7', 'c', 'failed', undefined, s);
+    expect(loadReceipt(K, '7', 'c', s)!.bridge).toBeUndefined();
+  });
+  it('drops a malformed display amount instead of showing it', () => {
+    const s = mem();
+    saveReceipt(K, '7', 'c', { ...r, chainName: 'Base', bridge: 'paid', amountOut: '<b>9</b>' }, s);
+    expect(loadReceipt(K, '7', 'c', s)!.amountOut).toBeUndefined();
+  });
+  it('dates a remembered claim in en-GB', () => {
+    expect(claimedAt(Date.UTC(2026, 10, 12, 14, 2), 'UTC')).toBe('12 Nov 2026, 14:02');
   });
 });
 

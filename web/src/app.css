@@ -51,6 +51,9 @@
   summary::-webkit-details-marker { display: none; }
   /* Zen's base gives every <p> 1rem muted text; here a paragraph takes its container's size and colour. */
   p { font-size: inherit; color: inherit; }
+  /* No orphans: titles balance their lines, sentences avoid a lone last word (critic r2 P1-9). */
+  h1, h2, h3 { text-wrap: balance; }
+  p, li, dd { text-wrap: pretty; }
 }
 
 /*

@@ -1,13 +1,15 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
-  import { AlertTriangle, Loader2 } from 'lucide-svelte';
+  import { AlertTriangle, ChevronDown, Loader2, Mail } from 'lucide-svelte';
+  import { formatAmount } from '$lib/create/recipients';
+  import { UNIT } from '$lib/network';
   import { claimState, loadAttempt, parseCallback, signedIn } from '$lib/claim';
   import Medallion from '$lib/Medallion.svelte';
   import ZenButton from '$lib/zen/components/ZenButton.svelte';
   import ZenCard from '$lib/zen/components/ZenCard.svelte';
 
-  let failed = $state<{ title: string; line: string; code?: string } | null>(null);
+  let failed = $state<{ title: string; line: string; code?: string; cancelled?: boolean } | null>(null);
   // The claim this tab started: its link (salt included) is still in this tab's sessionStorage.
   let back = $state('');
 
@@ -16,9 +18,11 @@
     history.replaceState(history.state, '', location.pathname); // the id_token leaves the address bar and history at once
     const attempt = loadAttempt();
     if (attempt?.campaign && attempt.commitment) back = `/claim/${attempt.campaign}/${attempt.commitment}`;
+    // Cancelling is not an error: the claim waits (flow canvas). The amount comes from this tab's own link.
+    const waiting = attempt && /^[1-9]\d{0,38}$/.test(attempt.amount) ? `Your ${formatAmount(BigInt(attempt.amount))} ${UNIT} is still waiting.` : 'Your claim is still waiting.';
     if ('error' in cb) {
       failed = cb.error === 'access_denied'
-        ? { title: 'Sign-in cancelled', line: 'Your claim is still waiting. Sign in again when you are ready.' }
+        ? { title: 'Sign-in cancelled', line: back ? `${waiting} Sign in again when you are ready.` : 'Open your claim link again to sign in.', cancelled: true }
         : { title: 'Google sign-in did not finish', line: 'Google could not sign you in this time. Try again.', code: cb.error };
     } else if (!attempt?.destination || !attempt.attemptId || claimState(attempt.campaign, attempt.commitment, attempt.attemptId) !== cb.state) {
       failed = { title: 'This sign-in belongs to another tab', line: 'Start the sign-in again from your claim.' };
@@ -35,14 +39,24 @@
   <ZenCard variant="elevated" class="!p-6 sm:!p-8">
     <div class="flex flex-col items-center text-center gap-4 py-2">
       {#if failed}
-        <Medallion icon={AlertTriangle} tone="error" />
+        {#if failed.cancelled}
+          <Medallion icon={Mail} />
+        {:else}
+          <Medallion icon={AlertTriangle} tone="error" />
+        {/if}
         <h1 class="text-xl font-semibold tracking-tight">{failed.title}</h1>
-        <p class="text-sm text-zen-fg-muted max-w-xs" role="alert">{failed.line}</p>
-        {#if failed.code}<p class="text-xs text-zen-fg-muted">Code <span class="font-mono">{failed.code}</span></p>{/if}
+        <p class="text-sm text-zen-fg-muted max-w-xs" role={failed.cancelled ? 'status' : 'alert'}>{failed.line}</p>
         {#if back}
           <ZenButton href={back} variant="primary" class="rounded-full min-h-11 mt-2">Back to your claim</ZenButton>
         {:else}
-          <p class="text-xs text-zen-fg-muted">Open the claim link from your email again.</p>
+          {#if !failed.cancelled}<p class="text-xs text-zen-fg-muted max-w-xs">Open your claim link again to try once more.</p>{/if}
+          <ZenButton href="/" variant="secondary" class="rounded-full min-h-11 mt-2">What is Zarf?</ZenButton>
+        {/if}
+        {#if failed.code}
+          <details class="group text-xs text-zen-fg-muted">
+            <summary class="inline-flex items-center gap-1.5 min-h-11 cursor-pointer list-none hover:text-zen-fg">Details <ChevronDown class="w-3.5 h-3.5 transition-transform group-open:rotate-180" aria-hidden="true" /></summary>
+            <p>Code <span class="font-mono">{failed.code}</span></p>
+          </details>
         {/if}
       {:else}
         <Medallion icon={Loader2} tone="muted" spin />

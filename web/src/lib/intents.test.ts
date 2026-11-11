@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 // Subset of GET /v0/tokens recorded 2026-11-11; the status body is the verifier's recorded fixture.
 import tokens from './fixtures/1click-tokens.json';
 import pending from './fixtures/1click-status-pending.json';
-import { describeStatus, evmAddressError, getQuote, getStatus, loadPayout, lossBps, savePayout, NEAR_USDC_ASSET, PAYOUT_CHAINS, QuoteError, resolveAssets } from './intents';
+import { describeStatus, refusal, evmAddressError, getQuote, getStatus, loadPayout, lossBps, savePayout, NEAR_USDC_ASSET, PAYOUT_CHAINS, QuoteError, resolveAssets } from './intents';
 
 const json = (body: unknown, status = 200) => vi.fn(async (_u: string, _i?: RequestInit) => new Response(JSON.stringify(body), { status }));
 
@@ -86,13 +86,27 @@ describe('getStatus and describeStatus', () => {
   });
   it('maps every status to receipt copy', () => {
     const d = (status: string, extra = {}) => describeStatus({ status: status as never, ...extra }, 'Base', 'sender.near');
-    expect(d('PENDING_DEPOSIT')).toMatchObject({ done: false, ok: true, text: 'Sent from NEAR, waiting for the bridge.' });
-    expect(d('KNOWN_DEPOSIT_TX').done).toBe(false);
-    expect(d('PROCESSING').text).toBe('Paying out on Base.');
-    expect(d('SUCCESS', { amountOutFormatted: '1.99' })).toEqual({ done: true, ok: true, text: 'Arrived on Base: 1.99 USDC.' });
-    expect(d('REFUNDED')).toMatchObject({ done: true, ok: false, text: 'Not delivered. The USDC went back to sender.near on NEAR.' });
-    expect(d('FAILED')).toMatchObject({ done: true, ok: false });
-    expect(d('INCOMPLETE_DEPOSIT').text).toMatch(/contact the sender/);
+    expect(d('PENDING_DEPOSIT')).toMatchObject({ done: false, ok: true, outcome: 'in-transit', text: 'Sent from NEAR, waiting for the bridge.' });
+    expect(d('KNOWN_DEPOSIT_TX')).toMatchObject({ done: false, outcome: 'in-transit' });
+    expect(d('PROCESSING')).toMatchObject({ text: 'Paying out on Base.', outcome: 'in-transit' });
+    expect(d('SUCCESS', { amountOutFormatted: '1.99558' })).toEqual({ done: true, ok: true, outcome: 'paid', text: 'Arrived on Base: 1.99 USDC.' });
+    expect(d('REFUNDED')).toMatchObject({ done: true, ok: false, outcome: 'refunded', text: 'Returned to sender.near on NEAR.' });
+  });
+  it('never calls a failed payout returned (critic r2 P0-2): only REFUNDED is a refund', () => {
+    const d = (status: string) => describeStatus({ status: status as never }, 'Base', 'sender.near');
+    for (const s of ['FAILED', 'INCOMPLETE_DEPOSIT', 'SOMETHING_NEW']) {
+      expect(d(s)).toMatchObject({ done: true, ok: false, outcome: 'failed' });
+      expect(d(s).text).not.toMatch(/return(ed)? to|went back|refund/i);
+      expect(d(s).text).toMatch(/could not pay this out on Base.*contact the sender/);
+    }
+  });
+});
+
+describe('refusal (a refused quote in plain words)', () => {
+  it('maps the bridge message, never echoing it', () => {
+    expect(refusal('Amount is too low for this route.', 'Base')).toBe('This amount is too low to send to Base. Claim to a NEAR account instead.');
+    expect(refusal('The bridge would pay too little: the price moved too far.', 'Base')).toBe('The bridge would pay too little: the price moved too far.');
+    expect(refusal('<script>x</script> route gone', 'Arbitrum')).toBe('The bridge cannot pay this out to Arbitrum right now. Claim to a NEAR account instead.');
   });
 });
 

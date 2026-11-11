@@ -3,7 +3,7 @@
 // re-reads the quote before it signs (verifier/src/intents.ts).
 
 import { keccak_256 } from '@noble/hashes/sha3';
-import { hex } from './claim';
+import { hex, twoDecimals, type BridgeOutcome } from './claim';
 
 export const ONECLICK_API = 'https://1click.chaindefuser.com';
 export const NEAR_USDC_ASSET = 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1';
@@ -190,19 +190,29 @@ export function loadPayout(campaign: string, commitment: string, store?: Storage
   }
 }
 
-/** Receipt copy per 1Click status (UI/UX audit, finding 10). */
-export function describeStatus(s: StatusView, chainName: string, refundTo: string): { text: string; done: boolean; ok: boolean } {
+/**
+ * Receipt copy per 1Click status (UI/UX audit, finding 10). `outcome` is what may be remembered: only
+ * SUCCESS is 'paid', only REFUNDED is 'refunded'; a FAILED or incomplete payout is neither.
+ */
+export function describeStatus(s: StatusView, chainName: string, refundTo: string): { text: string; done: boolean; ok: boolean; outcome: BridgeOutcome } {
   switch (s.status) {
     case 'PENDING_DEPOSIT':
     case 'KNOWN_DEPOSIT_TX':
-      return { text: 'Sent from NEAR, waiting for the bridge.', done: false, ok: true };
+      return { text: 'Sent from NEAR, waiting for the bridge.', done: false, ok: true, outcome: 'in-transit' };
     case 'PROCESSING':
-      return { text: `Paying out on ${chainName}.`, done: false, ok: true };
+      return { text: `Paying out on ${chainName}.`, done: false, ok: true, outcome: 'in-transit' };
     case 'SUCCESS':
-      return { text: `Arrived on ${chainName}${s.amountOutFormatted ? `: ${s.amountOutFormatted} USDC` : ''}.`, done: true, ok: true };
+      return { text: `Arrived on ${chainName}${s.amountOutFormatted ? `: ${twoDecimals(s.amountOutFormatted)} USDC` : ''}.`, done: true, ok: true, outcome: 'paid' };
     case 'REFUNDED':
-      return { text: `Not delivered. The USDC went back to ${refundTo} on NEAR.${s.refundReason ? ` (${s.refundReason})` : ''}`, done: true, ok: false };
-    default: // INCOMPLETE_DEPOSIT, FAILED, anything new
-      return { text: 'Not delivered. Keep this page and contact the sender.', done: true, ok: false };
+      return { text: `Returned to ${refundTo} on NEAR.${s.refundReason ? ` (${s.refundReason})` : ''}`, done: true, ok: false, outcome: 'refunded' };
+    default: // INCOMPLETE_DEPOSIT, FAILED, anything new: neither paid nor returned
+      return { text: `The bridge could not pay this out on ${chainName}, and has not returned it yet. Keep this page and contact the sender.`, done: true, ok: false, outcome: 'failed' };
   }
+}
+
+/** A refused quote in plain words; the bridge's raw message is never shown (critic r2 P2-7). */
+export function refusal(message: string, chainName: string): string {
+  if (/too low|too small|minimum/i.test(message)) return `This amount is too low to send to ${chainName}. Claim to a NEAR account instead.`;
+  if (/price moved|pay too little/i.test(message)) return 'The bridge would pay too little: the price moved too far.';
+  return `The bridge cannot pay this out to ${chainName} right now. Claim to a NEAR account instead.`;
 }

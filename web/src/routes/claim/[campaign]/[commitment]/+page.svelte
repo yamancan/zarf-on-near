@@ -8,9 +8,11 @@
   } from '$lib/claim';
   import { rootFromProof } from '$lib/merkle';
   import { accountExists, ClaimError, describeCheckError, describeError, getCampaign, getClaimState, getNetwork } from '$lib/services';
-  import { getQuote, lossBps, MAX_LOSS_BPS, QUOTE_LIFETIME_MS, QuoteError, type PayoutAsset } from '$lib/intents';
+  import { getQuote, lossBps, MAX_LOSS_BPS, QUOTE_LIFETIME_MS, QuoteError, refusal, type PayoutAsset } from '$lib/intents';
   import PayoutPicker from '$lib/PayoutPicker.svelte';
-  import { AlertTriangle, ArrowUpRight, CheckCircle, ChevronDown, Clock, Link2Off, Loader2, Mail, SearchX, ShieldCheck } from 'lucide-svelte';
+  import { AlertTriangle, ArrowUpRight, ChevronDown, Clock, Link2Off, Loader2, Mail, SearchX, ShieldCheck } from 'lucide-svelte';
+  import ClaimRecord from '$lib/ClaimRecord.svelte';
+  import { UNIT } from '$lib/network';
   import Amount from '$lib/Amount.svelte';
   import Medallion from '$lib/Medallion.svelte';
   import Note from '$lib/Note.svelte';
@@ -47,10 +49,10 @@
   let left = $state('');
   let checkError = $state('');
   // A claim this browser finished earlier (receipt page): lets "Already claimed" show what was paid.
-  const paid = loadReceipt(campaign, commitment);
+  const paid = loadReceipt(env.PUBLIC_CONTRACT_ID ?? '', campaign, commitment);
   const MODES = $derived([
     ['existing', 'NEAR account'],
-    ...(network === 'mainnet' ? [['chain', 'Another chain']] : []),
+    ['chain', 'Another chain'], // shown on testnet too, its chains marked "mainnet only" (canonical choice 9)
     ...(implicitEnabled ? [['new', 'New account']] : []),
   ] as [typeof mode, string][]);
   const walletSite = $derived(network === 'mainnet' ? 'https://app.mynearwallet.com' : 'https://testnet.mynearwallet.com');
@@ -146,7 +148,16 @@
     exported = true;
   }
 
+  // A refused or failed real quote: offer a fresh one or the NEAR path (flow canvas N2-08).
+  let quoteFailed = $state(false);
+  let requote = $state(0);
+  $effect(() => {
+    void mode;
+    quoteFailed = false;
+  });
+
   async function signIn() {
+    error = '';
     const clientId = env.PUBLIC_GOOGLE_CLIENT_ID;
     if (!clientId) {
       error = 'Google sign-in is not configured on this site yet.';
@@ -162,11 +173,12 @@
       busy = 'Getting your quote…';
       try {
         const q = await getQuote(false, { amount: link!.amount, assetId: asset.assetId, recipient, refundTo: sender, deadline: requestDeadline });
-        if (lossBps(link!.amount, q.minAmountOut, asset.decimals) > MAX_LOSS_BPS) throw new QuoteError('the price moved too far. Try again.');
+        if (lossBps(link!.amount, q.minAmountOut, asset.decimals) > MAX_LOSS_BPS) throw new QuoteError('The bridge would pay too little: the price moved too far.');
         to = q.depositAddress!;
         intents = { chainName: asset.chain.name, assetId: asset.assetId, recipient, refundTo: sender, requestDeadline, amountOutFormatted: q.amountOutFormatted };
       } catch (e) {
-        error = e instanceof QuoteError ? `The bridge refused this payout: ${e.message}` : 'Cross-chain quotes are unavailable right now. Try again, or claim to a NEAR account.';
+        error = e instanceof QuoteError ? refusal(e.message, asset.chain.name) : 'Cross-chain quotes are unavailable right now. Try again, or claim to a NEAR account.';
+        quoteFailed = true;
         busy = '';
         return;
       }
@@ -201,46 +213,34 @@
   <ZenCard variant="elevated" class="!p-6 sm:!p-8">
     <div class="flex flex-col gap-6">
       {#if !linkOk}
-        {@render terminal(Link2Off, 'muted', 'This claim link is broken', 'Open the link from your email again, in full.', 'home')}
+        {@render terminal(Link2Off, 'muted', 'This claim link is broken', 'Copy the whole link from your message and open it again.', 'home')}
       {:else if loaded && !link}
-        {@render terminal(Link2Off, 'muted', 'This claim link is incomplete', 'The part after # is missing. Open the full link from your email again.', 'home')}
+        {@render terminal(Link2Off, 'muted', 'This claim link is incomplete', 'Part of it is missing. Copy the whole link from your message and open it again.', 'home')}
       {:else if check === 'mismatch'}
         {@render terminal(Link2Off, 'error', 'This link cannot be claimed', describeError(new ClaimError('LINK_MISMATCH')), 'home')}
       {:else if check === 'unknown'}
-        {@render terminal(SearchX, 'muted', 'Campaign not found', "This link's campaign was not found. Ask the sender for your link again.", 'home')}
+        {@render terminal(SearchX, 'muted', 'Campaign not found', 'Ask the sender for your link again.', 'home')}
       {:else if check === 'claimed'}
         <div class="flex flex-col items-center text-center gap-4 py-2">
-          <Medallion icon={CheckCircle} tone="success" />
-          <h1 class="text-xl font-semibold tracking-tight">Already claimed</h1>
-          <Amount label={paid ? 'Paid out' : 'This link held'} value={formatAmount(BigInt(link!.amount))} unit={network === 'mainnet' ? 'USDC' : 'test USDC'} />
-          {#if paid}
-            <p class="text-sm text-zen-fg-muted">to <span class="font-mono text-zen-fg" title={paid.destination}>{middle(paid.destination, 8)}</span>{paid.chainName ? ` on ${paid.chainName}` : ''}</p>
-            {#if env.PUBLIC_EXPLORER_TX_URL}
-              <ZenButton href="{env.PUBLIC_EXPLORER_TX_URL}{paid.txHash}" target="_blank" rel="noopener noreferrer" variant="secondary" class="rounded-full min-h-11">
-                View the transaction
-                {#snippet iconRight()}<ArrowUpRight class="w-3.5 h-3.5" />{/snippet}
-              </ZenButton>
-            {/if}
-          {:else}
-            <p class="text-sm text-zen-fg-muted max-w-xs">The tokens for this link have been paid out.</p>
-          {/if}
+          <ClaimRecord r={paid} amount={link!.amount} title="Already claimed" />
         </div>
       {:else if check === 'pending'}
-        {@render terminal(Clock, 'muted', 'This claim is being paid', 'A claim for this link is in progress. It usually settles within a minute.', 'recheck')}
+        {@render terminal(Clock, 'muted', 'This claim is being paid', 'It usually settles within a minute.', 'recheck')}
       {:else if check === 'ended'}
         {@render terminal(Clock, 'muted', 'This campaign has ended', `Claims closed on ${deadline}. Ask the sender about it.`, 'home')}
       {:else if check === 'error'}
         {@render terminal(AlertTriangle, 'error', 'Could not check this claim', checkError, 'recheck')}
       {:else if loaded && check === 'checking'}
-        <div class="flex flex-col items-center gap-4 py-8">
+        <div class="flex flex-col items-center text-center gap-4 py-6">
           <Medallion icon={Loader2} tone="muted" spin />
-          <p class="text-sm text-zen-fg-muted" role="status">Checking your claim…</p>
+          <h1 class="text-xl font-semibold tracking-tight" role="status">Checking your claim…</h1>
+          <p class="text-sm text-zen-fg-muted max-w-xs">Reading this link's campaign on NEAR.</p>
         </div>
       {:else if loaded}
         <!-- Header: medallion, the amount as the hero figure, one muted line -->
         <div class="flex flex-col items-center text-center gap-4">
           <Medallion icon={Mail} />
-          <h1><Amount label="Waiting for you" value={formatAmount(BigInt(link!.amount))} unit={network === 'mainnet' ? 'USDC' : 'test USDC'} /></h1>
+          <h1><Amount label="Waiting for you" value={formatAmount(BigInt(link!.amount))} unit={UNIT} /></h1>
           <p class="text-xs text-zen-fg-muted">
             From <span class="font-mono">{sender}</span>{#if left}{' · '}<span title="Claim by {deadline}">{left}</span>{/if}
           </p>
@@ -263,7 +263,7 @@
           {/if}
 
           {#if mode === 'chain'}
-            <PayoutPicker {network} amount={link!.amount} refundTo={sender} bind:choice={payout} />
+            <PayoutPicker {network} amount={link!.amount} refundTo={sender} {requote} bind:choice={payout} />
           {:else if mode === 'existing'}
             <label for="dest" class="text-sm font-medium text-zen-fg {MODES.length > 1 ? 'sr-only' : ''}">Your NEAR account</label>
             <ZenInput
@@ -287,15 +287,30 @@
               {:else if acct?.state === 'missing' && dest.kind === 'named'}
                 <Note tone="error">There is no NEAR account called <span class="font-mono">{acct.id}</span>. Check the spelling.</Note>
               {:else if acct?.state === 'missing'}
-                <Note tone="info">This account is not on chain yet.</Note>
+                <Note tone="info">This account is not on NEAR yet.</Note>
                 <ZenCheckbox bind:checked={unfundedAck} label="Only the holder of its private key can use these funds. I hold it." />
               {:else if acct?.state === 'error'}
                 <Note tone="error">Could not check this account right now. Try again in a minute.</Note>
               {/if}
               {#if acct?.state !== 'found'}
-                <p class="text-xs text-zen-fg-muted">
-                  No NEAR account? <a href={walletSite} target="_blank" rel="noopener noreferrer" class="underline underline-offset-2 hover:text-zen-fg">Create a free one at MyNearWallet</a>, then type it here. This tab keeps your claim.
-                </p>
+                <!-- No account yet: three steps and a new tab; this tab keeps the claim (flow canvas N2-10) -->
+                <details class="group text-xs text-zen-fg-muted">
+                  <summary class="inline-flex items-center gap-1.5 min-h-11 cursor-pointer list-none hover:text-zen-fg">
+                    No NEAR account? <ChevronDown class="w-3.5 h-3.5 transition-transform group-open:rotate-180" aria-hidden="true" />
+                  </summary>
+                  <ol class="flex flex-col gap-1.5 text-sm text-zen-fg list-decimal pl-5 marker:text-zen-fg-muted">
+                    <li>Create a free account at MyNearWallet.</li>
+                    <li>Copy its name, like <span class="font-mono">{network === 'mainnet' ? 'alice.near' : 'alice.testnet'}</span>.</li>
+                    <li>Come back to this tab and type it above.</li>
+                  </ol>
+                  <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1">
+                    <ZenButton href={walletSite} target="_blank" rel="noopener noreferrer" variant="secondary" class="rounded-full min-h-11">
+                      Open MyNearWallet
+                      {#snippet iconRight()}<ArrowUpRight class="w-3.5 h-3.5" />{/snippet}
+                    </ZenButton>
+                    <span>It opens in a new tab. This tab keeps your claim.</span>
+                  </div>
+                </details>
               {/if}
             </div>
           {:else if !implicit}
@@ -311,11 +326,19 @@
 
         <!-- Sign in: which account first, then Google's own pill asset -->
         <div class="flex flex-col items-center gap-3 pt-1">
-          <p class="text-xs text-zen-fg-muted text-center">Use the Google account this link was sent to.</p>
+          <p class="flex items-center gap-2 text-sm text-zen-fg text-center"><Mail class="w-4 h-4 shrink-0 text-zen-fg-muted" aria-hidden="true" />Use the Google account this link was sent to.</p>
           {#if busy}<Note tone="pending">{busy}</Note>{/if}
           <button class="google" disabled={!ready} onclick={signIn}>
             <img src={themeStore.isDark ? '/google/signin-dark.svg' : '/google/signin-light.svg'} alt="Sign in with Google" width="180" height="40" />
           </button>
+          <p class="text-xs text-zen-fg-muted text-center">Another account? Pick it on Google's screen.</p>
+          {#if error}<Note tone="error" class="justify-center !text-center">{error}</Note>{/if}
+          {#if quoteFailed && mode === 'chain'}
+            <div class="flex flex-wrap justify-center gap-3">
+              <ZenButton variant="secondary" class="rounded-full min-h-11" onclick={() => ((error = ''), (quoteFailed = false), (requote += 1))}>Get a new quote</ZenButton>
+              <ZenButton variant="ghost" class="rounded-full min-h-11 !text-zen-fg" onclick={() => ((error = ''), (mode = 'existing'))}>Claim to a NEAR account</ZenButton>
+            </div>
+          {/if}
         </div>
 
         <!-- One honest line; the rest one layer down -->
@@ -337,7 +360,6 @@
         </details>
       {/if}
 
-      {#if error}<Note tone="error" class="justify-center">{error}</Note>{/if}
     </div>
   </ZenCard>
 </div>
