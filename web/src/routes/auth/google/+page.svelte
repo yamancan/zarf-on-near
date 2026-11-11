@@ -60,7 +60,7 @@
         {/if}
       {:else}
         <Medallion icon={Loader2} tone="muted" spin />
-        <p class="text-sm text-zen-fg-muted" role="status">Signing you in…</p>
+        <h1 class="text-xl font-semibold tracking-tight" role="status">Signing you in…</h1>
       {/if}
     </div>
   </ZenCard>

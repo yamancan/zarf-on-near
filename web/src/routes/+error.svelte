@@ -16,11 +16,11 @@
       {#if page.status === 404}
         <Medallion icon={SearchX} tone="muted" />
         <h1 class="text-xl font-semibold tracking-tight">This page does not exist</h1>
-        <p class="text-sm text-zen-fg-muted max-w-xs">If you followed a claim link, open it again from the message you received, in full.</p>
+        <p class="text-sm text-zen-fg-muted max-w-xs">Following a claim link? Open it again, in full, from your message.</p>
       {:else}
         <Medallion icon={AlertTriangle} tone="error" />
         <h1 class="text-xl font-semibold tracking-tight">Something went wrong</h1>
-        <p class="text-sm text-zen-fg-muted max-w-xs">Try again in a minute. If you followed a claim link, open it again from the message you received.</p>
+        <p class="text-sm text-zen-fg-muted max-w-xs">Try again in a minute. Following a claim link? Open it again from your message.</p>
       {/if}
       <ZenButton href="/" variant="secondary" class="rounded-full min-h-11 mt-2">What is Zarf?</ZenButton>
     </div>

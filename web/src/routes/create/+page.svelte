@@ -115,9 +115,13 @@
   let balance = $state<string | null>(null);
   let storageNear = $state<string | null>(null);
   const short = $derived(fundsShort(balance, parsed.total));
+  // Read again when the window regains focus or on "Check again": a sender who tops up is not stuck until a reload.
+  let balanceTick = $state(0);
+  let balanceFor: string | null = null;
   $effect(() => {
     const a = account;
-    balance = null;
+    void balanceTick;
+    if (a !== balanceFor) ((balance = null), (balanceFor = a));
     if (!a || !rpc || !token) return;
     nearView<string>(rpc, token, 'ft_balance_of', { account_id: a }, 'optimistic').then((b) => { if (account === a) balance = b; }, () => {});
   });
@@ -414,6 +418,7 @@
 </script>
 
 <svelte:head><title>Send USDC · Zarf</title></svelte:head>
+<svelte:window onfocus={() => balanceTick++} />
 
 {#snippet walletBlock()}
   {#if wrongAccount}
@@ -429,7 +434,10 @@
     </div>
     {#if pinned && !wrongAccount}<p class="text-xs text-zen-fg-muted">Finish this send before using another account.</p>{/if}
     {#if short > 0n && !draft}
-      <Note tone="error">You have {formatAmount(BigInt(balance!))} {UNIT}; this campaign needs {formatAmount(parsed.total)}.</Note>
+      <div class="flex flex-wrap items-center justify-between gap-x-3">
+        <Note tone="error">{formatAmount(short)} {UNIT} short. Top up this wallet or connect another.</Note>
+        <ZenButton variant="ghost" size="sm" class="rounded-full min-h-11 !text-zen-fg" onclick={() => balanceTick++}>Check again</ZenButton>
+      </div>
     {/if}
   {/if}
 {/snippet}
@@ -600,7 +608,7 @@
           {:else if txState === 'settling'}
             <ZenAlert variant="warning">
               {#snippet title()}Making sure an earlier send did not land{/snippet}
-              That attempt was refunded. One more look in about 90 seconds before these links can change.
+              That attempt was refunded. One more look in about 90 seconds.
             </ZenAlert>
           {:else if txState === 'mismatch'}
             <ZenAlert variant="error">
@@ -611,9 +619,14 @@
           {:else if txState === 'unclear'}
             <ZenAlert variant="warning">
               {#snippet title()}Do not send again yet{/snippet}
-              The transaction ran but did not create this campaign, and we could not confirm your tokens came back. Check it on the explorer first.
+              It ran but made no campaign, and the refund is not confirmed. Check it first.
             </ZenAlert>
-            {@render explorerLink(sentTx ?? '')}
+            {#if env.PUBLIC_EXPLORER_TX_URL && sentTx}
+              <ZenButton href="{env.PUBLIC_EXPLORER_TX_URL}{sentTx}" target="_blank" rel="noopener noreferrer" variant="secondary" class="rounded-full self-start min-h-11">
+                View the transaction
+                {#snippet iconRight()}<ArrowUpRight class="w-3.5 h-3.5" />{/snippet}
+              </ZenButton>
+            {/if}
           {:else}
             {#if error}<ZenAlert variant="error">{error}</ZenAlert>{/if}
             <div class="mt-4 pt-6 border-t-[0.5px] border-zen-border-subtle flex items-center {pinned ? 'justify-end' : 'justify-between'} gap-3">
@@ -621,6 +634,7 @@
               <!-- Progress lives on the button itself: one status style below it -->
               <ZenButton variant="primary" class="rounded-full min-h-11" disabled={!recoveryAck || !!busy || !!sentTx || !sendable.ok} onclick={create} aria-live="polite">{busy || 'Create campaign'}</ZenButton>
             </div>
+            {#if busy === 'Waiting for your wallet…'}<p class="text-xs text-zen-fg-muted text-right">Approve the send in MyNearWallet.</p>{/if}
           {/if}
         {/if}
 
