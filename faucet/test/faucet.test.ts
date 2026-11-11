@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import vectors from '../../spec/vectors.json';
 import { canonicalizeEmail, claimLink, commitment, leaf, unhex } from '../src/claim';
 import { campaignIdFrom, CreateError, stubCreator, testnetCreator, type CampaignCreator } from '../src/creator';
 import { handleFaucet, type FaucetDeps } from '../src/faucet';
 import { takeQuota, type KvLike } from '../src/limits';
 import { base58Encode, encodeTx, parseNearKey } from '../src/near';
+import { verifyTurnstile } from '../src/turnstile';
 
 const memKv = (): KvLike & { m: Map<string, string> } => {
   const m = new Map<string, string>();
@@ -172,29 +173,158 @@ describe('testnet creator (stubbed RPC; nothing is sent)', () => {
   });
 });
 
-describe('worker routes', () => {
-  it('serves /try with a strict CSP and its script from /try.js', async () => {
+describe('worker', () => {
+  const unhexAny = (h: string) => Uint8Array.from(h.match(/../g)!, (x) => parseInt(x, 16));
+  const KEY = `ed25519:${base58Encode(unhexAny(vectors.keys.signer_seed + vectors.keys.signer))}`;
+  let rpcUrl = 0;
+  // A fresh RPC URL per env, so the per-URL chain_id cache never leaks between tests.
+  const fullEnv = (): Record<string, unknown> => ({
+    NETWORK: 'testnet', CREATOR: 'testnet', CLAIM_HOST: 'https://claim.example', CONTRACT_ID: 'esc.testnet', TOKEN_ID: 'usdc.testnet',
+    NEAR_RPC_URL: `https://rpc${rpcUrl++}.example`, FAUCET_SENDER_ID: 'faucet.testnet', AMOUNT: '1000000', LIFETIME_S: '600',
+    PER_IP_PER_DAY: '3', PER_EMAIL_PER_DAY: '1', DAILY_CAP: '10', TURNSTILE_SITE_KEY: '1x00000000000000000000AA',
+    FAUCET_SENDER_KEY: KEY, LIMIT_KEY: 'k', TURNSTILE_SECRET: 'secret', FAUCET_KV: memKv(),
+  });
+  // Routes outbound fetches: NEAR `status`, and Turnstile siteverify.
+  const net = (o: { chainId?: string; turnstile?: 'ok' | 'failed' | 'down' } = {}) => {
+    const seen: string[] = [];
+    vi.stubGlobal('fetch', async (u: string | URL | Request, init?: RequestInit) => {
+      const url = String(u);
+      seen.push(url);
+      if (url.startsWith('https://challenges.cloudflare.com/')) {
+        if (o.turnstile === 'down') throw new Error('network');
+        return Response.json({ success: (o.turnstile ?? 'ok') === 'ok' });
+      }
+      const body = JSON.parse(String(init?.body));
+      if (body.method === 'status') return Response.json({ jsonrpc: '2.0', id: 1, result: { chain_id: o.chainId ?? 'testnet' } });
+      throw new Error(`unexpected ${body.method}`);
+    });
+    return seen;
+  };
+  afterEach(() => vi.unstubAllGlobals());
+  const post = async (env: Record<string, unknown>, body: object = { email: 'not-an-email', turnstile: 't' }, o: { host?: string; type?: string } = {}) => {
     const { default: worker } = await import('../src/index');
-    const env = {} as never;
-    const page = await worker.fetch(new Request('https://f.example/try'), env);
-    expect(page.headers.get('Content-Security-Policy')).toContain("script-src 'self'");
+    const res = await worker.fetch(new Request(`https://${o.host ?? 'f.example'}/faucet`, {
+      method: 'POST', headers: { 'Content-Type': o.type ?? 'application/json' }, body: JSON.stringify(body),
+    }), env as never);
+    return { status: res.status, body: (await res.json()) as { error?: string } };
+  };
+
+  it('a full testnet env gets past every config check (BAD_EMAIL comes from the handler)', async () => {
+    net();
+    expect(await post(fullEnv())).toEqual({ status: 400, body: { error: 'BAD_EMAIL' } });
+  });
+
+  it.each(['NETWORK', 'CREATOR', 'CLAIM_HOST', 'CONTRACT_ID', 'TOKEN_ID', 'NEAR_RPC_URL', 'FAUCET_SENDER_ID', 'AMOUNT', 'LIFETIME_S',
+    'PER_IP_PER_DAY', 'PER_EMAIL_PER_DAY', 'DAILY_CAP', 'TURNSTILE_SITE_KEY', 'FAUCET_SENDER_KEY', 'LIMIT_KEY', 'TURNSTILE_SECRET'])(
+    'without %s it is FAUCET_MISCONFIGURED', async (k) => {
+      net();
+      const env = fullEnv();
+      delete env[k];
+      expect(await post(env)).toEqual({ status: 500, body: { error: 'FAUCET_MISCONFIGURED' } });
+    });
+
+  it.each<[string, Record<string, unknown>]>([
+    ['mainnet NETWORK', { NETWORK: 'mainnet' }],
+    ['a .near sender', { FAUCET_SENDER_ID: 'faucet.near' }],
+    ['a .near contract', { CONTRACT_ID: 'esc.near' }],
+    ['a non-https claim host', { CLAIM_HOST: 'http://claim.example' }],
+    ['amount 0', { AMOUNT: '0' }],
+    ['an unknown creator', { CREATOR: 'mainnet' }],
+  ])('refuses %s', async (_n, over) => {
+    net();
+    expect((await post({ ...fullEnv(), ...over })).status).toBe(500);
+  });
+
+  it('refuses an RPC whose status reports another chain, and caches a good answer', async () => {
+    net({ chainId: 'mainnet' });
+    expect((await post(fullEnv())).body).toEqual({ error: 'FAUCET_MISCONFIGURED' });
+    const seen = net();
+    const env = fullEnv();
+    await post(env);
+    await post(env);
+    expect(seen.filter((u) => u === env.NEAR_RPC_URL)).toHaveLength(1);
+  });
+
+  it('503s when the RPC status call fails, and retries next time', async () => {
+    vi.stubGlobal('fetch', async () => { throw new Error('down'); });
+    const env = fullEnv();
+    expect((await post(env)).status).toBe(503);
+    net();
+    expect((await post(env)).status).toBe(400);
+  });
+
+  it('serves the stub creator only on localhost', async () => {
+    net();
+    const env = { ...fullEnv(), CREATOR: 'stub' };
+    expect((await post(env)).status).toBe(500);
+    expect((await post(env, { email: 'a@x.io', turnstile: 't' }, { host: 'localhost:8787' })).body).toMatchObject({ stub: true });
+  });
+
+  it('requires a JSON content type (no cross-site form posts)', async () => {
+    net();
+    expect(await post(fullEnv(), { email: 'a@x.io', turnstile: 't' }, { type: 'text/plain' })).toEqual({ status: 415, body: { error: 'UNSUPPORTED_MEDIA_TYPE' } });
+  });
+
+  it.each<['failed' | 'down', number, string]>([['failed', 403, 'TURNSTILE_FAILED'], ['down', 503, 'TURNSTILE_UNAVAILABLE']])(
+    'turnstile %s → %i, and no quota is spent', async (t, status, error) => {
+      net({ turnstile: t });
+      const env = fullEnv();
+      expect(await post(env, { email: 'a@x.io', turnstile: 'tok' })).toEqual({ status, body: { error } });
+      expect((env.FAUCET_KV as ReturnType<typeof memKv>).m.size).toBe(0);
+    });
+
+  it('a missing token never reaches siteverify', async () => {
+    const seen = net();
+    expect((await post(fullEnv(), { email: 'a@x.io' })).body).toEqual({ error: 'TURNSTILE_FAILED' });
+    expect(seen.some((u) => u.startsWith('https://challenges.cloudflare.com/'))).toBe(false);
+  });
+
+  it('serves /try with the Turnstile widget and a CSP that allows only its origin', async () => {
+    const { default: worker } = await import('../src/index');
+    const page = await worker.fetch(new Request('https://f.example/try'), { TURNSTILE_SITE_KEY: '1x00000000000000000000AA"><x' } as never);
+    const csp = page.headers.get('Content-Security-Policy')!;
+    expect(csp).toContain("script-src 'self' https://challenges.cloudflare.com");
+    expect(csp).toContain('frame-src https://challenges.cloudflare.com');
     const html = await page.text();
-    expect(html).toContain('<script src="/try.js"></script>');
-    expect(html).not.toMatch(/<script>(?!<)/); // no inline script
-    const js = await worker.fetch(new Request('https://f.example/try.js'), env);
-    expect(js.headers.get('Content-Type')).toContain('javascript');
+    expect(html).toContain('data-sitekey="1x00000000000000000000AAx"'); // attribute-escaped
+    expect(html).not.toMatch(/<script>(?!<)/);
+    const js = await worker.fetch(new Request('https://f.example/try.js'), {} as never);
     const src = await js.text();
     expect(() => new Function(src)).not.toThrow();
   });
-  it('fails closed when unconfigured', async () => {
-    const { default: worker } = await import('../src/index');
-    const res = await worker.fetch(new Request('https://f.example/faucet', { method: 'POST', body: '{"email":"a@x.io"}' }), { NETWORK: 'testnet', CREATOR: 'stub' } as never);
-    expect(res.status).toBe(500);
-    expect(await res.json()).toEqual({ error: 'FAUCET_MISCONFIGURED' });
+});
+
+describe('verifyTurnstile', () => {
+  it('posts secret, response and remoteip, and reads success', async () => {
+    let form = '';
+    const r = await verifyTurnstile('tok', 'sec', '203.0.113.9', async (_u, i) => ((form = String(i?.body)), Response.json({ success: true })));
+    expect(r).toBe('ok');
+    expect(new URLSearchParams(form).get('remoteip')).toBe('203.0.113.9');
+    expect(new URLSearchParams(form).get('secret')).toBe('sec');
   });
-  it('refuses mainnet', async () => {
-    const { default: worker } = await import('../src/index');
-    const env = { NETWORK: 'mainnet', CREATOR: 'stub', CLAIM_HOST: 'https://c.example', AMOUNT: '1', LIFETIME_S: '1', PER_IP_PER_DAY: '1', PER_EMAIL_PER_DAY: '1', DAILY_CAP: '1', LIMIT_KEY: 'k' };
-    expect((await worker.fetch(new Request('https://f.example/faucet', { method: 'POST', body: '{}' }), env as never)).status).toBe(500);
+  it.each([[{ success: false }, 'failed'], [{ success: 'true' }, 'failed'], [{}, 'failed']])('%j → %s', async (body, out) => {
+    expect(await verifyTurnstile('tok', 's', 'ip', async () => Response.json(body))).toBe(out);
+  });
+  it('HTTP 500 and a thrown fetch are unavailable', async () => {
+    expect(await verifyTurnstile('tok', 's', 'ip', async () => new Response('', { status: 500 }))).toBe('unavailable');
+    expect(await verifyTurnstile('tok', 's', 'ip', async () => { throw new Error('x'); })).toBe('unavailable');
+  });
+});
+
+describe('review m4', () => {
+  const unhexAny = (h: string) => Uint8Array.from(h.match(/../g)!, (x) => parseInt(x, 16));
+  it('parseNearKey rejects a public half from another key', async () => {
+    await expect(parseNearKey(`ed25519:${base58Encode(unhexAny(vectors.keys.signer_seed + vectors.keys.rogue_signer))}`)).rejects.toThrow(/public half/);
+  });
+  const ev = (o: object) => `EVENT_JSON:${JSON.stringify({ standard: 'zarf-near', version: '1.0.0', event: 'campaign_created', data: [{ campaign_id: '3', merkle_root: 'aa'.repeat(32), amount: '1000000', ...o }] })}`;
+  const out = (log: string) => ({ receipts_outcome: [{ outcome: { executor_id: 'esc.testnet', logs: [log] } }] });
+  const want = { merkleRoot: 'aa'.repeat(32), amount: '1000000' };
+  it('campaignIdFrom checks the amount', () => {
+    expect(campaignIdFrom(out(ev({})), 'esc.testnet', want)).toBe('3');
+    expect(campaignIdFrom(out(ev({ amount: '999999' })), 'esc.testnet', want)).toBeNull();
+  });
+  it('campaignIdFrom checks the standard and the event name', () => {
+    expect(campaignIdFrom(out(ev({}).replace('"zarf-near"', '"nep171"')), 'esc.testnet', want)).toBeNull();
+    expect(campaignIdFrom(out(ev({}).replace('campaign_created', 'reclaimed')), 'esc.testnet', want)).toBeNull();
   });
 });

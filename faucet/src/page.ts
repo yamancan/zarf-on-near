@@ -1,9 +1,11 @@
 // The judge's "try it with your Gmail" page (T10). Static, same origin as POST /faucet, no third-party anything.
 
-const CSP = "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'";
+// Turnstile loads its script and its challenge iframe from challenges.cloudflare.com; nothing else is third-party.
+const TS = 'https://challenges.cloudflare.com';
+const CSP = `default-src 'none'; script-src 'self' ${TS}; frame-src ${TS}; style-src 'unsafe-inline'; connect-src 'self' ${TS}; form-action 'none'; base-uri 'none'; frame-ancestors 'none'`;
 const HEADERS = { 'Content-Security-Policy': CSP, 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'Cache-Control': 'no-store' };
 
-const HTML = `<!doctype html>
+const html = (siteKey: string) => `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -25,6 +27,7 @@ const HTML = `<!doctype html>
   button.secondary { margin-left: .5rem; background: transparent; color: var(--fg); border: 1px solid var(--line); }
   :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
   #out { margin-top: 1.5rem; }
+  .cf-turnstile { margin-top: 1rem; min-height: 65px; }
   .error { color: var(--err); }
   code { word-break: break-all; font-size: .85rem; }
 </style>
@@ -34,15 +37,18 @@ const HTML = `<!doctype html>
   <h1>Pay any email: try it</h1>
   <p>Type your Gmail address. We create a NEAR <strong>testnet</strong> campaign that holds 1 test USDC for it, and give you the claim link.
      Open it, sign in with that Google account, and the USDC goes to the NEAR account you choose.</p>
+  <p>Type the address exactly as your Google account shows it.</p>
   <p class="muted">Testnet only, no real money. The email never goes on chain: the chain stores a salted hash.
      Our verifier service does see your email when you claim. One link per email per day.</p>
   <form id="f" novalidate>
     <label for="email">Your Gmail address</label>
     <input id="email" name="email" type="email" autocomplete="email" inputmode="email" required spellcheck="false" autocapitalize="off" placeholder="you@gmail.com">
+    <div class="cf-turnstile" data-sitekey="${siteKey}" data-response-field="false"></div>
     <button id="go" type="submit">Create my claim link</button>
   </form>
   <div id="out" role="status" aria-live="polite"></div>
 </main>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 <script src="/try.js"></script>
 </body>
 </html>`;
@@ -53,6 +59,8 @@ const JS = `(() => {
     RATE_LIMITED_EMAIL: 'This email already got a link today. Use the link you have, or try again tomorrow.',
     RATE_LIMITED_IP: 'Too many links from this network today. Try again tomorrow.',
     DAILY_CAP_REACHED: 'The faucet has given out today\\'s test USDC. Try again tomorrow.',
+    TURNSTILE_FAILED: 'The human check did not pass. Complete it and try again.',
+    TURNSTILE_UNAVAILABLE: 'The human check is unavailable right now. Try again in a minute.',
     FAUCET_NOT_PREPAID: 'The faucet is out of storage funds right now. Please try again later.',
   };
   const f = document.getElementById('f'), go = document.getElementById('go'), out = document.getElementById('out');
@@ -72,10 +80,15 @@ const JS = `(() => {
   };
   f.addEventListener('submit', async (ev) => {
     ev.preventDefault();
+    const turnstile = window.turnstile && window.turnstile.getResponse();
+    if (!turnstile) {
+      show([el('p', { className: 'error' }, 'Please complete the human check first.')]);
+      return;
+    }
     go.disabled = true;
     show([el('p', {}, 'Creating your campaign on NEAR testnet…')]);
     try {
-      const res = await fetch('/faucet', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: f.email.value }) });
+      const res = await fetch('/faucet', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: f.email.value, turnstile }) });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         show([el('p', { className: 'error' }, MESSAGES[body.error] || 'Something went wrong. Please try again in a minute.')]);
@@ -92,10 +105,13 @@ const JS = `(() => {
     } catch {
       show([el('p', { className: 'error' }, 'Could not reach the faucet. Check your connection and try again.')]);
     } finally {
+      if (window.turnstile) window.turnstile.reset(); // a token is single use
       go.disabled = false;
     }
   });
 })();`;
 
-export const tryPage = (): Response => new Response(HTML, { headers: { ...HEADERS, 'Content-Type': 'text/html; charset=utf-8' } });
+const escapeAttr = (s: string) => s.replace(/[^A-Za-z0-9_-]/g, ''); // site keys are [0-9A-Za-z_-]
+
+export const tryPage = (siteKey: string): Response => new Response(html(escapeAttr(siteKey)), { headers: { ...HEADERS, 'Content-Type': 'text/html; charset=utf-8' } });
 export const tryScript = (): Response => new Response(JS, { headers: { ...HEADERS, 'Content-Type': 'text/javascript; charset=utf-8' } });

@@ -3,6 +3,7 @@ import { handleFaucet } from './faucet';
 import type { KvLike } from './limits';
 import { parseNearKey } from './near';
 import { tryPage, tryScript } from './page';
+import { verifyTurnstile } from './turnstile';
 
 export interface Env {
   NETWORK: string;
@@ -17,19 +18,36 @@ export interface Env {
   PER_IP_PER_DAY: string;
   PER_EMAIL_PER_DAY: string;
   DAILY_CAP: string;
+  TURNSTILE_SITE_KEY: string;
   FAUCET_SENDER_KEY?: string; // secret
   LIMIT_KEY?: string; // secret
+  TURNSTILE_SECRET?: string; // secret
   FAUCET_KV: KvLike;
 }
 
 const positive = (s: string) => (/^[1-9]\d*$/.test(s ?? '') ? Number(s) : null);
 
 let creator: { from: string; c: Promise<CampaignCreator> } | undefined;
+const chainChecked = new Map<string, Promise<boolean>>(); // per RPC URL: did `status` say chain_id === "testnet"?
 
-/** Fails closed on any missing or malformed setting; never on mainnet. */
-function makeCreator(env: Env): Promise<CampaignCreator> | null {
-  if (env.CREATOR === 'stub') return Promise.resolve(stubCreator());
-  if (env.CREATOR !== 'testnet' || !env.FAUCET_SENDER_KEY || !env.FAUCET_SENDER_ID || !env.CONTRACT_ID || !env.TOKEN_ID || !env.NEAR_RPC_URL) return null;
+/** The RPC must itself report testnet; a failed lookup is not cached, so the next request retries. */
+function rpcIsTestnet(url: string): Promise<boolean> {
+  let p = chainChecked.get(url);
+  if (!p) {
+    p = httpRpc(url).call<{ chain_id?: string }>('status', []).then((s) => s.chain_id === 'testnet');
+    p.catch(() => chainChecked.delete(url));
+    chainChecked.set(url, p);
+  }
+  return p;
+}
+
+const LOCAL_HOSTS = ['localhost', '127.0.0.1'];
+
+/** Fails closed on any missing or malformed setting; never on mainnet. The stub runs only on a local host. */
+function makeCreator(env: Env, host: string): Promise<CampaignCreator> | null {
+  if (env.CREATOR === 'stub') return LOCAL_HOSTS.includes(host) ? Promise.resolve(stubCreator()) : null;
+  if (env.CREATOR !== 'testnet' || !env.FAUCET_SENDER_KEY || !env.TOKEN_ID || !env.NEAR_RPC_URL) return null;
+  if (!env.FAUCET_SENDER_ID?.endsWith('.testnet') || !env.CONTRACT_ID?.endsWith('.testnet')) return null;
   const from = `${env.FAUCET_SENDER_ID}|${env.FAUCET_SENDER_KEY}`;
   if (creator?.from !== from) {
     creator = {
@@ -46,20 +64,33 @@ const json = (body: unknown, status: number) => Response.json(body, { status, he
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
-    const path = new URL(req.url).pathname;
-    if (req.method === 'GET' && (path === '/' || path === '/try')) return tryPage();
+    const url = new URL(req.url), path = url.pathname;
+    if (req.method === 'GET' && (path === '/' || path === '/try')) return tryPage(env.TURNSTILE_SITE_KEY ?? '');
     if (req.method === 'GET' && path === '/try.js') return tryScript();
     if (req.method !== 'POST' || path !== '/faucet') return json({ error: 'NOT_FOUND' }, 404);
 
     const amount = /^[1-9]\d{0,38}$/.test(env.AMOUNT ?? '') ? env.AMOUNT : null;
     const lifetimeS = positive(env.LIFETIME_S), perIp = positive(env.PER_IP_PER_DAY);
     const perEmail = positive(env.PER_EMAIL_PER_DAY), cap = positive(env.DAILY_CAP);
-    const made = env.NETWORK === 'testnet' ? makeCreator(env) : null;
-    if (!made || !amount || !lifetimeS || !perIp || !perEmail || !cap || !env.LIMIT_KEY || !/^https:\/\//.test(env.CLAIM_HOST ?? '')) {
+    const made = env.NETWORK === 'testnet' ? makeCreator(env, url.hostname) : null;
+    if (!made || !amount || !lifetimeS || !perIp || !perEmail || !cap || !env.LIMIT_KEY || !/^https:\/\//.test(env.CLAIM_HOST ?? '') ||
+        !env.TURNSTILE_SECRET || !env.TURNSTILE_SITE_KEY) {
       return json({ error: 'FAUCET_MISCONFIGURED' }, 500);
     }
+    if (env.CREATOR === 'testnet') {
+      const testnet = await rpcIsTestnet(env.NEAR_RPC_URL).catch(() => null);
+      if (testnet === null) return json({ error: 'UPSTREAM_UNAVAILABLE' }, 503);
+      if (!testnet) return json({ error: 'FAUCET_MISCONFIGURED' }, 500);
+    }
+    // A JSON content type forces a CORS preflight, so a cross-site form cannot post here.
+    if (!/^application\/json\b/i.test(req.headers.get('Content-Type') ?? '')) return json({ error: 'UNSUPPORTED_MEDIA_TYPE' }, 415);
+    const input = (await req.json().catch(() => null)) as { turnstile?: unknown } | null;
     const ip = req.headers.get('CF-Connecting-IP') ?? 'unknown';
-    const { status, body } = await handleFaucet(await req.json().catch(() => null), ip, {
+    // Before the quota: a bot without a valid token spends nobody's daily allowance.
+    const human = await verifyTurnstile(input?.turnstile, env.TURNSTILE_SECRET, ip);
+    if (human === 'unavailable') return json({ error: 'TURNSTILE_UNAVAILABLE' }, 503);
+    if (human === 'failed') return json({ error: 'TURNSTILE_FAILED' }, 403);
+    const { status, body } = await handleFaucet(input, ip, {
       claimHost: env.CLAIM_HOST, amount, lifetimeS, limitKey: env.LIMIT_KEY, kv: env.FAUCET_KV, creator: await made,
       limits: { perIpPerDay: perIp, perEmailPerDay: perEmail, dailyCap: cap },
     });

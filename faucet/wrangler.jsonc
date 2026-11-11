@@ -11,14 +11,15 @@
     "TOKEN_ID": "",
     "NEAR_RPC_URL": "https://rpc.testnet.near.org",
     "FAUCET_SENDER_ID": "",
-    "CREATOR": "stub", // "stub" | "testnet"
+    "CREATOR": "testnet", // "stub" only answers on localhost/127.0.0.1 (local dev)
     "AMOUNT": "1000000", // 1 test USDC (6 decimals)
     "LIFETIME_S": "604800", // claim window: 7 days
     "PER_IP_PER_DAY": "3",
     "PER_EMAIL_PER_DAY": "1",
-    "DAILY_CAP": "50"
+    "DAILY_CAP": "10", // the float: 10 test USDC, 1 per link
+    "TURNSTILE_SITE_KEY": ""
   },
-  // Secrets (wrangler secret put, or .dev.vars locally): FAUCET_SENDER_KEY, LIMIT_KEY.
+  // Secrets (wrangler secret put, or .dev.vars locally): FAUCET_SENDER_KEY, LIMIT_KEY, TURNSTILE_SECRET.
   // No id: local dev simulates it; the owner creates the namespace and adds its id before deploy.
   "kv_namespaces": [{ "binding": "FAUCET_KV" }]
 }
