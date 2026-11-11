@@ -527,7 +527,14 @@
       </details>
     </section>
   {:else}
-    <div class="flex flex-col lg:flex-row lg:items-start gap-10 lg:gap-12">
+    <div class="relative isolate flex flex-col lg:flex-row lg:items-start gap-10 lg:gap-12">
+      {#if step === 0}
+        <!-- Background decor of create step 1 (main repo apps/create/src/routes/wizard/step-0/+page.svelte): the
+             same blob; its own clipping layer, so the sticky preview beside it keeps working -->
+        <div class="absolute inset-0 -z-10 overflow-hidden pointer-events-none" aria-hidden="true">
+          <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-125 h-125 bg-zen-fg/5 rounded-full blur-[120px]"></div>
+        </div>
+      {/if}
       <!-- Form: the step question is the page title -->
       <section class="w-full lg:max-w-xl lg:shrink-0 flex flex-col gap-4" aria-labelledby="step-h">
         <h1 id="step-h" bind:this={stepHeading} tabindex="-1" class="text-2xl md:text-3xl font-light tracking-tight outline-hidden mb-2">{QUESTIONS[step]}</h1>
@@ -658,7 +665,7 @@
         <ZenCard variant="elevated" padding="lg">
           <div class="flex flex-col items-center text-center gap-4" aria-hidden="true">
             <Medallion icon={Mail} />
-            <Amount label="Waiting for you" value={previewAmount} unit={UNIT} />
+            <Amount label="Waiting for you" value={previewAmount} unit={UNIT} glow={false} />
             <span class="text-xs text-zen-fg-muted">From {#if account}<span class="font-mono">{account}</span>{:else}you{/if}{#if previewLeft}{' · '}{previewLeft}{/if}</span>
           </div>
         </ZenCard>

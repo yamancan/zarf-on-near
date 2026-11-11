@@ -35,6 +35,40 @@ button, input, select, textarea { text-rendering: inherit; } /* form controls re
   background-color: #0a0a0b;
 }
 
+/*
+ * RIPPLE BACKGROUND, copied verbatim from the main repo's apps/claim/src/app.css and apps/create/src/app.css
+ * (identical in both): fingerprint-like circles from the bottom-right, white on dark, charcoal on light. Static:
+ * Zarf gives it no motion. Every screen but the landing (owner decision 12 Nov: like today's Zarf apps).
+ */
+.ripple-bg {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.4;
+    background: repeating-radial-gradient(
+        circle at 90% 90%,
+        transparent 0px,
+        transparent 7px,
+        var(--ripple-color) 8px,
+        transparent 9px
+    );
+}
+
+/* Dark mode - white ripples */
+[data-theme='glass-porcelain'] .ripple-bg,
+[data-theme='dark'] .ripple-bg {
+    --ripple-color: oklch(from var(--zen-fg) l c h / 0.03);
+    opacity: 0.5;
+}
+
+/* Light mode - charcoal ripples, subtle */
+[data-theme='paper-porcelain'] .ripple-bg,
+[data-theme='light'] .ripple-bg {
+    --ripple-color: oklch(from var(--zen-fg) l c h / 0.025);
+    opacity: 0.6;
+}
+
 /* Landing grain (main repo apps/landing/src/app.css), used only inside the hero. */
 .landing-grain {
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='turbulence' baseFrequency='0.7' numOctaves='5' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='1'/%3E%3C/svg%3E");

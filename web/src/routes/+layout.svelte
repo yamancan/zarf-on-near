@@ -27,7 +27,11 @@
   </span>
 {/snippet}
 
-<div class="min-h-screen {landing ? 'font-sans' : 'font-app'} bg-zen-bg text-zen-fg flex flex-col">
+<!-- Subtle ripple background texture (main repo apps/claim + apps/create +layout.svelte). Behind the page: the
+     page wrapper below is lifted above it and leaves the ground to <html>, which carries the same --zen-bg. -->
+{#if !landing}<div class="ripple-bg" aria-hidden="true"></div>{/if}
+
+<div class="min-h-screen {landing ? 'font-sans bg-zen-bg' : 'font-app relative z-[1]'} text-zen-fg flex flex-col">
   <!-- ZarfNavbar (main repo): logo and nav on the left, actions on the right, solid ground, one hairline -->
   <header class="h-16 bg-zen-bg border-b-[0.5px] border-zen-border-subtle flex items-center justify-between gap-3 px-4 sm:px-6 sticky top-0 z-50">
     <div class="flex items-center gap-4 sm:gap-5 md:gap-8">
