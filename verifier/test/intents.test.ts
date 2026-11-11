@@ -123,9 +123,10 @@ describe('checkIntentsStatus: pinned assets and the loss bound', () => {
     const s = mutate((x) => (x.quoteResponse.quoteRequest.destinationAsset = fake));
     expect(code(s, { ...claim, destinationAsset: fake })).toBe('INTENTS_WRONG_DESTINATION_ASSET');
   });
-  it('requires minAmountOut to keep 95% of the amount (6-decimal USDC)', () => {
-    expect(code(mutate((x) => (x.quoteResponse.quote.minAmountOut = '1900000')))).toBeUndefined(); // exactly 95%
-    expect(code(mutate((x) => (x.quoteResponse.quote.minAmountOut = '1899999')))).toBe('INTENTS_LOSS_TOO_HIGH');
+  it('requires minAmountOut to keep 98% of the amount (6-decimal USDC)', () => {
+    expect(code(mutate((x) => (x.quoteResponse.quote.minAmountOut = '1960000')))).toBeUndefined(); // exactly 98% (2.00% loss)
+    expect(code(mutate((x) => (x.quoteResponse.quote.minAmountOut = '1959999')))).toBe('INTENTS_LOSS_TOO_HIGH');
+    expect(code(mutate((x) => (x.quoteResponse.quote.minAmountOut = '1959800')))).toBe('INTENTS_LOSS_TOO_HIGH'); // 2.01%
     expect(code(mutate((x) => delete x.quoteResponse.quote.minAmountOut))).toBe('INTENTS_MALFORMED');
   });
   it('refuses the zero address as recipient', () => {
@@ -176,5 +177,16 @@ describe('fetchIntentsStatus', () => {
     const p = fetchIntentsStatus('b'.repeat(64), async () => new Response('', { status: 503 }));
     await expect(p).rejects.toThrow('HTTP 503');
     await expect(p).rejects.not.toBeInstanceOf(IntentsError);
+  });
+});
+
+describe('T-001: 1,000 USDC cross-chain cap (verifier)', () => {
+  const at = (amount: string, minOut: string) => mutate((x) => {
+    x.quoteResponse.quoteRequest.amount = amount;
+    x.quoteResponse.quote.minAmountOut = minOut;
+  });
+  it('1,000 USDC passes; 1,000.000001 is refused with INTENTS_AMOUNT_TOO_HIGH', () => {
+    expect(code(at('1000000000', '1000000000'), { ...claim, amount: '1000000000' })).toBeUndefined();
+    expect(code(at('1000000001', '1000000001'), { ...claim, amount: '1000000001' })).toBe('INTENTS_AMOUNT_TOO_HIGH');
   });
 });

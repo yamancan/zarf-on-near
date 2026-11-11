@@ -538,3 +538,14 @@ describe('readRecoveryFile (Open a backup file)', () => {
     }
   });
 });
+
+describe('T-001: mainnet send cap (app-side)', async () => {
+  const { MAINNET_SEND_CAP, sendCapError } = await import('./recipients');
+  it('100 USDC passes on mainnet; 100.000001 is refused with the unaudited line; testnet is unaffected', () => {
+    expect(MAINNET_SEND_CAP).toBe(100_000_000n);
+    expect(sendCapError(100_000_000n, false)).toBeNull();
+    expect(sendCapError(100_000_001n, false)).toBe('Zarf on NEAR is new and unaudited: up to 100 USDC per send for now.');
+    expect(sendCapError(100_000_001n, true)).toBeNull();
+    expect(sendCapError(10_000_000_000n, true)).toBeNull();
+  });
+});

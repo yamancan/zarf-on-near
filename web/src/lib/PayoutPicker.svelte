@@ -10,7 +10,7 @@
   import ZenInput from '$lib/zen/components/ZenInput.svelte';
   import ZenSelect from '$lib/zen/components/ZenSelect.svelte';
   import {
-    getQuote, lossBps, MAX_LOSS_BPS, PAYOUT_CHAINS, QUOTE_LIFETIME_MS, QuoteError, refusal, resolveAssets, type PayoutAsset, type Quote,
+    getQuote, lossBps, PAYOUT_CHAINS, payoutCapError, withinLossBound, QUOTE_LIFETIME_MS, QuoteError, refusal, resolveAssets, type PayoutAsset, type Quote,
   } from '$lib/intents';
 
   interface Props {
@@ -19,8 +19,11 @@
     refundTo: string; // the campaign sender
     choice: { asset: PayoutAsset; recipient: string } | null; // set only when a fair quote exists
     requote?: number; // bumped by "Get a new quote": takes the dry quote again
+    onUseNear?: () => void; // the way out when a payout cannot go cross-chain
   }
-  let { network, amount, refundTo, requote = 0, choice = $bindable() }: Props = $props();
+  let { network, amount, refundTo, requote = 0, onUseNear, choice = $bindable() }: Props = $props();
+  const capError = $derived(payoutCapError(amount));
+  let tooSmall = $state(false); // the 2% bound refused this payout: say why, offer NEAR
 
   const mainnet = $derived(network === 'mainnet');
   let assets = $state<PayoutAsset[] | null>(null);
@@ -51,7 +54,8 @@
     choice = null;
     quote = null;
     quoteError = '';
-    if (!a || !recipient || a.chain.addressError(recipient)) return;
+    tooSmall = false;
+    if (capError || !a || !recipient || a.chain.addressError(recipient)) return;
     const tag = `${a.assetId}|${recipient}`;
     quoting = true;
     const t = setTimeout(async () => {
@@ -61,9 +65,10 @@
         const deadline = new Date(Date.now() + QUOTE_LIFETIME_MS).toISOString();
         const q = await getQuote(true, { amount, assetId: a.assetId, recipient, refundTo, deadline });
         if (`${asset?.assetId}|${address.trim()}` !== tag) return; // the field changed meanwhile
-        const loss = lossBps(amount, q.minAmountOut, a.decimals);
-        if (loss > MAX_LOSS_BPS) {
-          quoteError = `Sending this amount to ${a.chain.name} could cost up to ${(loss / 100).toFixed(1)}% of it. Claim it to a NEAR account instead.`;
+        if (!withinLossBound(amount, q.minAmountOut, a.decimals)) {
+          const loss = lossBps(amount, q.minAmountOut, a.decimals);
+          quoteError = `The bridge's cost for this payout could be up to ${(loss / 100).toFixed(1)}% of it, above our 2% limit. Small payouts often are. Claim it to a NEAR account instead: that always works.`;
+          tooSmall = true;
           return;
         }
         quote = { for: tag, q };
@@ -95,11 +100,15 @@
     {/each}
   </ul>
   <Note tone="info">This is NEAR testnet, so the claim goes to a NEAR account. On mainnet it can be paid out on these chains through the NEAR Intents bridge.</Note>
+{:else if capError}
+  <Note tone="error">{capError}</Note>
+  {#if onUseNear}<button type="button" class="self-start min-h-11 text-sm underline underline-offset-2 hover:text-zen-fg" onclick={onUseNear}>Use a NEAR account</button>{/if}
 {:else if loadError}
   <Note tone="error">{loadError}</Note>
 {:else if !assets}
   <Note tone="pending">Loading chains…</Note>
 {:else}
+  <p class="text-xs text-zen-fg-muted">Very small payouts may be refused when the bridge's cost is above 2%. A NEAR account always works.</p>
   <span id="chain-l" class="text-sm font-medium text-zen-fg">Chain</span>
   <div id="chain" role="group" aria-labelledby="chain-l">
     <ZenSelect bind:value={key} options={assets.map((a) => ({ value: a.chain.key, label: `USDC on ${a.chain.name}` }))} aria-label="Chain" class="w-full [&>button]:w-full [&>button]:min-h-11 [&>button]:!border [&>button]:!border-[var(--zarf-control-border)]" />
@@ -124,6 +133,7 @@
         <Note tone="pending">Getting a quote…</Note>
       {:else if quoteError}
         <Note tone="error">{quoteError}</Note>
+        {#if tooSmall && onUseNear}<button type="button" class="self-start min-h-11 text-sm underline underline-offset-2 hover:text-zen-fg" onclick={onUseNear}>Use a NEAR account</button>{/if}
       {:else if quote}
         <p class="quote text-sm text-zen-fg" role="status">
           <span class="font-semibold tabular-nums">≈ {twoDecimals(quote.q.amountOutFormatted)} USDC</span> on {asset.chain.name}

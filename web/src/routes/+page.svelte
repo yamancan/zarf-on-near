@@ -5,7 +5,7 @@
   import Hero from '$lib/Hero.svelte';
   import Medallion from '$lib/Medallion.svelte';
   import { themeStore } from '$lib/zen/stores/themeStore.svelte';
-  import { TESTNET, UNIT, USDC_LINES } from '$lib/network';
+  import { TESTNET, UNAUDITED_LINE, UNIT, USDC_LINES } from '$lib/network';
 
   const TRY_URL = 'https://zarf-near-faucet-testnet.sparkling-queen-5e77.workers.dev/try';
   const STEPS = [
@@ -85,5 +85,6 @@
       The email never goes on chain. Our verifier, operated by Trion Labs, sees it once when you claim, to check it
       matches the link, and does not store it. On testnet the USDC is a test token with no value.
     </p>
+    {#if !TESTNET}<p class="mt-2 text-left sm:text-center">{UNAUDITED_LINE}</p>{/if}
   </details>
 </section>

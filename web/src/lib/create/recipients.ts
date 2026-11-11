@@ -89,3 +89,8 @@ export function parseRecipients(text: string): { rows: Row[]; rejected: Rejected
   }
   return { rows, rejected, total: rows.reduce((t, r) => t + r.amount, 0n) };
 }
+
+/** Mainnet only (owner, 12 Nov): the most one send may hold, USDC base units. The app enforces it; the contract does not. */
+export const MAINNET_SEND_CAP = 100_000_000n;
+export const sendCapError = (total: bigint, testnet: boolean): string | null =>
+  !testnet && total > MAINNET_SEND_CAP ? 'Zarf on NEAR is new and unaudited: up to 100 USDC per send for now.' : null;

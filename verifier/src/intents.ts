@@ -26,7 +26,9 @@ export const PAYOUT_ASSETS: ReadonlyMap<string, number> = new Map([
 ]);
 const ORIGIN_DECIMALS = 6; // NEAR USDC
 /** Worst case a quote may lose, as `minAmountOut` against the amount: the claim page refuses more too. */
-export const MAX_LOSS_BPS = 500n;
+export const MAX_LOSS_BPS = 200n; // 2% (owner, 12 Nov): the claim page refuses the same
+/** Largest cross-chain payout, origin base units: 1,000 USDC (owner, 12 Nov). */
+export const MAX_CROSS_CHAIN_PAYOUT = 1_000_000_000n;
 /** Highest slippage we let a quote carry; above it `minAmountOut` drifts toward zero. */
 export const MAX_SLIPPAGE_BPS = 100;
 const FETCH_TIMEOUT_MS = 10_000;
@@ -136,6 +138,7 @@ export function checkIntentsStatus(status: unknown, claim: IntentsClaim): void {
   // EXACT_INPUT refunds a deposit below `amount`, so a mismatch would turn the payout into a refund.
   if (qr.swapType !== 'EXACT_INPUT') fail('INTENTS_WRONG_SWAP_TYPE');
   if (!DECIMAL.test(claim.amount)) fail('INTENTS_BAD_AMOUNT');
+  if (BigInt(claim.amount) > MAX_CROSS_CHAIN_PAYOUT) fail('INTENTS_AMOUNT_TOO_HIGH');
   if (typeof qr.amount !== 'string' || !DECIMAL.test(qr.amount) || qr.amount !== claim.amount) {
     fail('INTENTS_AMOUNT_MISMATCH');
   }
@@ -147,7 +150,7 @@ export function checkIntentsStatus(status: unknown, claim: IntentsClaim): void {
 
   const decimals = PAYOUT_ASSETS.get(claim.destinationAsset);
   if (decimals === undefined || qr.destinationAsset !== claim.destinationAsset) fail('INTENTS_WRONG_DESTINATION_ASSET');
-  // The worst case after fees and slippage, in origin units, must keep 95% of the amount.
+  // The worst case after fees and slippage, in origin units, must keep 98% of the amount (MAX_LOSS_BPS).
   const minOut = q.minAmountOut;
   if (typeof minOut !== 'string' || !DECIMAL.test(minOut)) fail('INTENTS_MALFORMED');
   const minOutOrigin = (BigInt(minOut as string) * 10n ** BigInt(ORIGIN_DECIMALS)) / 10n ** BigInt(decimals!);

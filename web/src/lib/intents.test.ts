@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 // Subset of GET /v0/tokens recorded 2026-11-11; the status body is the verifier's recorded fixture.
 import tokens from './fixtures/1click-tokens.json';
 import pending from './fixtures/1click-status-pending.json';
-import { crossChainOffered, submitDeposit, describeStatus, refusal, evmAddressError, getQuote, getStatus, loadPayout, lossBps, needsRecheck, nextStep, notReturnedYet, recheckReceipt, savePayout, NEAR_USDC_ASSET, PAYOUT_CHAINS, QuoteError, resolveAssets } from './intents';
+import { MAX_CROSS_CHAIN_PAYOUT, MAX_LOSS_BPS, payoutCapError, withinLossBound, crossChainOffered, submitDeposit, describeStatus, refusal, evmAddressError, getQuote, getStatus, loadPayout, lossBps, needsRecheck, nextStep, notReturnedYet, recheckReceipt, savePayout, NEAR_USDC_ASSET, PAYOUT_CHAINS, QuoteError, resolveAssets } from './intents';
 import { loadReceipt, saveReceipt, shownAmount, type Receipt } from './claim';
 
 const json = (body: unknown, status = 200) => vi.fn(async (_u: string, _i?: RequestInit) => new Response(JSON.stringify(body), { status }));
@@ -212,5 +212,24 @@ describe('second audit M1: cross-chain gate and deposit submit', () => {
     expect(JSON.parse(f.mock.calls[0][1]!.body as string)).toEqual({ txHash: 'TX', depositAddress: 'd'.repeat(64), nearSenderAccount: 'relayer.near' });
     await submitDeposit('d'.repeat(64), 'TX', undefined, json({}, 200));
     await expect(submitDeposit('d'.repeat(64), 'TX', 'r', vi.fn(async () => { throw new Error('down'); }))).resolves.toBeUndefined();
+  });
+});
+
+describe('T-001 limits (web): 2% loss bound and 1,000 USDC cross-chain cap', () => {
+  it('the loss bound is 2.00%, exact at the boundary, across decimals', () => {
+    expect(MAX_LOSS_BPS).toBe(200);
+    expect(withinLossBound('1000000', '980000', 6)).toBe(true); // exactly 2.00%
+    expect(withinLossBound('1000000', '979999', 6)).toBe(false); // 2.0001%: no rounding to whole bps
+    expect(withinLossBound('1000000', '979900', 6)).toBe(false); // 2.01%
+    expect(withinLossBound('1000000', '9800000', 7)).toBe(true); // 7-decimal destination, exactly 2%
+    expect(withinLossBound('1000000', '9799999', 7)).toBe(false);
+    expect(withinLossBound('1000000', '987424', 6)).toBe(true); // 1 USDC, a real dry quote: 1.26%
+    expect(withinLossBound('100000', '96602', 6)).toBe(false); // 0.1 USDC, a real dry quote: 3.4%
+  });
+  it('the cap is 1,000 USDC: 1,000 passes, 1,000.000001 is refused before any quote', () => {
+    expect(MAX_CROSS_CHAIN_PAYOUT).toBe(1_000_000_000n);
+    expect(payoutCapError('1000000000')).toBeNull();
+    expect(payoutCapError('1000000001')).toMatch(/up to 1,000 USDC each/);
+    expect(refusal(payoutCapError('1000000001')!, 'Base')).toMatch(/up to 1,000 USDC each/);
   });
 });

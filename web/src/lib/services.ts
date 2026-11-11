@@ -104,6 +104,8 @@ const MESSAGES: Record<string, string> = {
   BAD_DESTINATION: 'That is not a valid NEAR account. Open your claim link and start again.',
   RATE_LIMITED: 'Too many attempts. Wait a minute and try again.',
   LINK_MISMATCH: 'It does not match its campaign on NEAR. Ask the sender for your link again.',
+  INTENTS_AMOUNT_TOO_HIGH: 'Payouts to another chain are up to 1,000 USDC each. Claim this one to a NEAR account.',
+  INTENTS_LOSS_TOO_HIGH: "The bridge's cost for this payout is above our 2% limit. Claim it to a NEAR account instead: that always works.",
   E128_INSUFFICIENT_STORAGE: "This campaign's storage reserve on NEAR has run out, so the claim can't be paid yet. Ask the sender to top it up (fund_campaign_storage); your claim stays open.",
   DESTINATION_IS_CONTRACT: 'That account is the Zarf contract itself; USDC sent there could never be taken out. Choose your own account.',
   DESTINATION_IS_TOKEN: 'That account is the USDC token contract; USDC sent there would be lost. Choose your own account.',

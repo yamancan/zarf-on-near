@@ -8,7 +8,7 @@
     prepayShortfall, readMarker, resolveByRoot, settleAfterUncertain, spendableNear, type StorageCosts, type UnresolvedMarker,
   } from '$lib/create/funding';
   import { saveFile } from '$lib/create/publish';
-  import { formatAmount, parseRecipients } from '$lib/create/recipients';
+  import { formatAmount, parseRecipients, sendCapError } from '$lib/create/recipients';
   import { nearConnectWallet, type SenderWallet } from '$lib/create/wallet';
   import { deadlineText, timeLeft } from '$lib/claim';
   import { formatNear } from '$lib/create/campaigns';
@@ -401,6 +401,11 @@
       error = sendable.reason;
       return;
     }
+    const cap = sendCapError(BigInt(draft!.total), TESTNET);
+    if (cap) {
+      error = cap; // defence in depth: step 1 already refuses this
+      return;
+    }
     busy = WAITING;
     try {
       const d = draft!;
@@ -476,7 +481,8 @@
   const QUESTIONS = ['Who gets it?', 'Until when can they claim?', 'Which wallet pays?', 'Check and send'];
   let uiStep = $state(0);
   const step = $derived(result && draft ? 4 : draft ? 3 : uiStep);
-  const recipientsOk = $derived(parsed.rows.length > 0 && parsed.rejected.length === 0);
+  const capError = $derived(sendCapError(parsed.total, TESTNET));
+  const recipientsOk = $derived(parsed.rows.length > 0 && parsed.rejected.length === 0 && !capError);
   let stepHeading = $state<HTMLElement | null>(null);
   let lastStep = -1;
   $effect(() => {
@@ -870,6 +876,7 @@
           {#if parsed.rows.length}
             <p class="text-sm"><span class="font-semibold tabular-nums">{formatAmount(parsed.total)} <span class="uppercase text-xs tracking-widest font-medium">{UNIT}</span></span> <span class="text-zen-fg-muted">to {people(parsed.rows.length)}</span></p>
           {/if}
+          {#if capError}<Note tone="error">{capError}</Note>{/if}
           {#if parsed.rejected.length}
             <Note tone="error">
               Fix these lines first:
@@ -881,7 +888,7 @@
             Open a backup file
             <input class="sr-only" type="file" accept="application/json,.json" disabled={!config || !!busy} onchange={(e) => openBackup(e.currentTarget.files?.[0])} />
           </label>
-          {@render actions(false, 'Continue', recipientsOk, () => (uiStep = 1), recipientsOk ? '' : parsed.rejected.length ? `Fix line ${parsed.rejected[0].line} first.` : 'Add at least one line.')}
+          {@render actions(false, 'Continue', recipientsOk, () => (uiStep = 1), recipientsOk ? '' : capError ? 'Up to 100 USDC per send.' : parsed.rejected.length ? `Fix line ${parsed.rejected[0].line} first.` : 'Add at least one line.')}
         {:else if step === 1}
           <div class="control-border grid gap-1 p-1 rounded-full" style="grid-template-columns: repeat({picks.length + 1}, minmax(0, 1fr))" role="radiogroup" aria-label="Claim deadline">
             {#each [...picks, 'date' as const] as p (p)}

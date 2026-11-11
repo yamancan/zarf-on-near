@@ -8,11 +8,11 @@
   } from '$lib/claim';
   import { rootFromProof } from '$lib/merkle';
   import { accountExists, ClaimError, describeCheckError, describeError, getCampaign, getClaimState, getNetwork } from '$lib/services';
-  import { crossChainOffered, getQuote, lossBps, MAX_LOSS_BPS, QUOTE_LIFETIME_MS, QuoteError, refusal, type PayoutAsset } from '$lib/intents';
+  import { crossChainOffered, getQuote, payoutCapError, QUOTE_LIFETIME_MS, withinLossBound, QuoteError, refusal, type PayoutAsset } from '$lib/intents';
   import PayoutPicker from '$lib/PayoutPicker.svelte';
   import { AlertTriangle, ArrowUpRight, ChevronDown, Clock, Link2Off, Loader2, Mail, SearchX } from 'lucide-svelte';
   import ClaimRecord from '$lib/ClaimRecord.svelte';
-  import { UNIT, USDC_LINES } from '$lib/network';
+  import { UNAUDITED_LINE, UNIT, USDC_LINES } from '$lib/network';
   import Amount from '$lib/Amount.svelte';
   import Medallion from '$lib/Medallion.svelte';
   import Note from '$lib/Note.svelte';
@@ -174,8 +174,9 @@
       const requestDeadline = new Date(Date.now() + QUOTE_LIFETIME_MS).toISOString();
       busy = 'Getting your quote…';
       try {
+        if (payoutCapError(link!.amount)) throw new QuoteError(payoutCapError(link!.amount)!); // before any real quote
         const q = await getQuote(false, { amount: link!.amount, assetId: asset.assetId, recipient, refundTo: sender, deadline: requestDeadline });
-        if (lossBps(link!.amount, q.minAmountOut, asset.decimals) > MAX_LOSS_BPS) throw new QuoteError('The bridge would pay too little: the price moved too far.');
+        if (!withinLossBound(link!.amount, q.minAmountOut, asset.decimals)) throw new QuoteError('The bridge would pay too little: the price moved too far.');
         to = q.depositAddress!;
         intents = { chainName: asset.chain.name, assetId: asset.assetId, recipient, refundTo: sender, requestDeadline, amountOutFormatted: q.amountOutFormatted };
       } catch (e) {
@@ -266,7 +267,7 @@
           {/if}
 
           {#if mode === 'chain'}
-            <PayoutPicker {network} amount={link!.amount} refundTo={sender} {requote} bind:choice={payout} />
+            <PayoutPicker {network} amount={link!.amount} refundTo={sender} {requote} onUseNear={() => ((error = ''), (mode = 'existing'))} bind:choice={payout} />
           {:else if mode === 'existing'}
             <label for="dest" class="text-sm font-medium text-zen-fg {MODES.length > 1 ? 'sr-only' : ''}">Your NEAR account</label>
             <ZenInput
@@ -363,7 +364,7 @@
               The sign-in only proves the email and is bound to the destination you chose, so it cannot pay anyone else. We
               cannot access your Google account. The USDC usually arrives in about a minute.
             </p>
-            {#if network !== 'mainnet'}<p>This is NEAR testnet: the USDC is a test token with no value. Payouts to Base, Arbitrum and Ethereum run on mainnet.</p>{/if}
+            {#if network !== 'mainnet'}<p>This is NEAR testnet: the USDC is a test token with no value. Payouts to Base, Arbitrum and Ethereum run on mainnet.</p>{:else}<p>{UNAUDITED_LINE}</p>{/if}
             <p>Claim by {deadline}.</p>
           </div>
         </details>

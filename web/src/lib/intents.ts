@@ -10,7 +10,12 @@ export const NEAR_USDC_ASSET = 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac
 const USDC_DECIMALS = 6;
 export const SLIPPAGE_BPS = 100; // the verifier refuses more
 export const QUOTE_LIFETIME_MS = 60 * 60_000; // request deadline: refunds begin after it
-export const MAX_LOSS_BPS = 500; // refuse a quote whose worst case loses more than 5% of the amount
+export const MAX_LOSS_BPS = 200; // refuse a quote whose worst case loses more than 2% of the amount (owner, 12 Nov)
+/** Largest cross-chain payout, NEAR USDC base units: 1,000 USDC (owner, 12 Nov). The verifier enforces the same. */
+export const MAX_CROSS_CHAIN_PAYOUT = 1_000_000_000n;
+/** Over the cap: the sentence to show, before any quote or sign-in; null when within it. */
+export const payoutCapError = (amount: string): string | null =>
+  BigInt(amount) > MAX_CROSS_CHAIN_PAYOUT ? 'Payouts to another chain are up to 1,000 USDC each. Claim this one to a NEAR account.' : null;
 
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 const defaultFetch: Fetch = (u, i) => fetch(u, i);
@@ -119,7 +124,13 @@ export async function getQuote(dry: boolean, a: QuoteArgs, fetchFn: Fetch = defa
   return body.quote;
 }
 
-/** Worst-case loss in basis points of the amount: minAmountOut is after slippage and fees. */
+/** Whether the worst case keeps at least 98% of the amount (exact, the verifier's check: no rounding to whole bps). */
+export function withinLossBound(amount: string, minAmountOut: string, decimals: number): boolean {
+  const out = (BigInt(minAmountOut) * 10n ** BigInt(USDC_DECIMALS)) / 10n ** BigInt(decimals);
+  return out * 10_000n >= BigInt(amount) * BigInt(10_000 - MAX_LOSS_BPS);
+}
+
+/** Worst-case loss in basis points of the amount (display): minAmountOut is after slippage and fees. */
 export function lossBps(amount: string, minAmountOut: string, decimals: number): number {
   const a = BigInt(amount);
   const out = (BigInt(minAmountOut) * 10n ** BigInt(USDC_DECIMALS)) / 10n ** BigInt(decimals);
@@ -267,6 +278,7 @@ export const needsRecheck = (r: Receipt | null): boolean => !!r?.chainName && !!
 
 /** A refused quote in plain words; the bridge's raw message is never shown (critic r2 P2-7). */
 export function refusal(message: string, chainName: string): string {
+  if (/up to 1,000 USDC/.test(message)) return message; // our own cap, already plain
   if (/too low|too small|minimum/i.test(message)) return `This amount is too low to send to ${chainName}. Claim to a NEAR account instead.`;
   if (/price moved|pay too little/i.test(message)) return 'The bridge would pay too little: the price moved too far.';
   return `The bridge cannot pay this out to ${chainName} right now. Claim to a NEAR account instead.`;
