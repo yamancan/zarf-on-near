@@ -180,6 +180,35 @@ export async function settleClaim(
 }
 
 /** After the relayer: its event-based "paid" is final; otherwise poll the chain. */
+/**
+ * The relayer may have submitted the claim before its answer was lost: a network error, an HTTP 5xx, an
+ * upstream failure or an answer without a tx hash. A refusal (a code it chose to send, 4xx) is not lost.
+ */
+export const relayAnswerLost = (e: unknown): boolean =>
+  !(e instanceof ClaimError) || /^HTTP_5\d\d$/.test(e.code) || e.code === 'UPSTREAM_UNAVAILABLE' || e.code === 'RELAYER_NO_TX';
+
+/**
+ * Calls the relayer and settles the claim. When the answer is lost the chain decides: the result follows
+ * claim_state, so the page never says "Not claimed" while the chain says pending or claimed. Only a refusal,
+ * or a lost answer with the claim still unclaimed after settling, is thrown (the original error).
+ */
+export async function relayAndSettle(
+  submit: () => Promise<{ txHash: string; paid: boolean }>,
+  read: () => Promise<ClaimState>,
+  opts?: Parameters<typeof settleClaim>[1],
+): Promise<{ state: ClaimState; txHash: string }> {
+  let relay;
+  try {
+    relay = await submit();
+  } catch (e) {
+    if (!relayAnswerLost(e)) throw e;
+    const state = await settleClaim(read, opts);
+    if (state === 'unclaimed') throw e;
+    return { state, txHash: '' }; // the hash was in the lost answer
+  }
+  return { state: await outcomeAfterRelay(relay, read, opts), txHash: relay.txHash };
+}
+
 export const outcomeAfterRelay = (relay: { paid: boolean }, read: () => Promise<ClaimState>, opts?: Parameters<typeof settleClaim>[1]) =>
   relay.paid ? Promise.resolve<ClaimState>('claimed') : settleClaim(read, opts);
 

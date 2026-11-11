@@ -258,3 +258,27 @@ export const middle = (s: string, keep = 6): string => (s.length > keep * 2 + 1 
 
 /** "9.99558" -> "9.99": display only, never rounds up an amount the recipient may not get. */
 export const twoDecimals = (s: string): string => s.replace(/^(\d+)(\.\d{1,2})?\d*$/, (_, w, f = '') => w + (f && f !== '.00' ? f : ''));
+
+/** Written just before the relayer is called: where this browser sent the claim (nothing secret). */
+export interface Started {
+  destination: string;
+  at: number; // ms
+}
+const startedKey = (contract: string, campaign: string, commitment: string) => `zarf-near:started:${contract}/${campaign}/${commitment}`;
+
+export function saveStarted(contract: string, campaign: string, commitment: string, s: Started, store?: Storage): void {
+  try {
+    (store ?? localStorage).setItem(startedKey(contract, campaign, commitment), JSON.stringify(s));
+  } catch {
+    // best effort: without it "Already claimed" cannot say where this browser sent it
+  }
+}
+
+export function loadStarted(contract: string, campaign: string, commitment: string, store?: Storage, now = Date.now()): Started | null {
+  try {
+    const s = JSON.parse((store ?? localStorage).getItem(startedKey(contract, campaign, commitment)) ?? 'null') as Started | null;
+    return s && typeof s.destination === 'string' && s.destination && typeof s.at === 'number' && now - s.at < RECEIPT_TTL_MS ? s : null;
+  } catch {
+    return null;
+  }
+}

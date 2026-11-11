@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import vectors from '../../../spec/vectors.json';
-import { accountExists, canRetry, ClaimError, describeCheckError, describeError, errorCode, failureHeading, isUnmapped, getCampaign, getClaimState, outcomeAfterRelay, requestSignature, settleClaim, submitClaim, type ClaimState } from './services';
+import { accountExists, canRetry, ClaimError, describeCheckError, describeError, errorCode, failureHeading, isUnmapped, getCampaign, getClaimState, outcomeAfterRelay, relayAndSettle, relayAnswerLost, requestSignature, settleClaim, submitClaim, type ClaimState } from './services';
 
 const reply = (body: unknown, status = 200) => vi.fn(async () => new Response(JSON.stringify(body), { status }));
 afterEach(() => vi.unstubAllGlobals());
@@ -193,5 +193,36 @@ describe('pinned sentences (security review: removal mutants survived)', () => {
     expect(describeError(new ClaimError('INTENTS_SOMETHING_NEW'))).toBe("The cross-chain quote doesn't match what you chose. Open your claim link to get a new one.");
     expect(describeError(new ClaimError('INTENTS_NOT_PENDING'))).toBe('This cross-chain quote was already used. Open your claim link to get a new one.');
     expect(isUnmapped(new ClaimError('INTENTS_SOMETHING_NEW'))).toBe(true);
+  });
+});
+
+describe('relayAndSettle (receipt: the relayer was called)', () => {
+  const clock = (step = 100) => { let t = 0; return () => (t += step); };
+  const o = (step = 100) => ({ timeoutMs: 60_000, graceMs: 0, sleep: async () => {}, now: clock(step) });
+  const states = (...xs: ClaimState[]) => { let i = 0; return async () => xs[Math.min(i++, xs.length - 1)]; };
+  const lost = [new TypeError('Failed to fetch'), new ClaimError('HTTP_502'), new ClaimError('UPSTREAM_UNAVAILABLE'), new ClaimError('RELAYER_NO_TX')];
+
+  it('relayer answer lost after submit: the result follows claim_state, never Not claimed while the chain says pending or claimed', async () => {
+    for (const e of lost) {
+      expect(relayAnswerLost(e)).toBe(true);
+      const fail = async () => { throw e; };
+      expect(await relayAndSettle(fail, states('pending', 'claimed'), o())).toEqual({ state: 'claimed', txHash: '' });
+      expect(await relayAndSettle(fail, states('pending'), o(30_000))).toEqual({ state: 'pending', txHash: '' });
+      // Nothing landed: the original error comes back, so the page offers a retry.
+      await expect(relayAndSettle(fail, states('unclaimed'), o())).rejects.toBe(e);
+    }
+  });
+  it('a refusal is not lost: thrown at once, the chain is not read', async () => {
+    const read = vi.fn(states('claimed'));
+    for (const code of ['E115_TOKEN_TRANSFER_FAILED', 'E105_ALREADY_CLAIMED', 'RATE_LIMITED', 'E101_INVALID_SIGNATURE', 'HTTP_404']) {
+      const e = new ClaimError(code);
+      expect(relayAnswerLost(e)).toBe(false);
+      await expect(relayAndSettle(async () => { throw e; }, read, o())).rejects.toBe(e);
+    }
+    expect(read).not.toHaveBeenCalled();
+  });
+  it('an answer that arrived keeps its hash: paid at once, or a 202 settled from the chain', async () => {
+    expect(await relayAndSettle(async () => ({ txHash: 'H', paid: true }), states('unclaimed'), o())).toEqual({ state: 'claimed', txHash: 'H' });
+    expect(await relayAndSettle(async () => ({ txHash: 'H', paid: false }), states('pending', 'claimed'), o())).toEqual({ state: 'claimed', txHash: 'H' });
   });
 });

@@ -2,10 +2,10 @@
   import { onMount } from 'svelte';
   import { page } from '$app/state';
   import { env } from '$env/dynamic/public';
-  import { claimedAt, clearAttempt, confirmRemembered, isImplicitAccount, loadAttempt, loadReceipt, middle, saveReceipt, settleReceipt, shownAmount, signedIn, type Receipt } from '$lib/claim';
+  import { claimedAt, clearAttempt, saveStarted, confirmRemembered, isImplicitAccount, loadAttempt, loadReceipt, middle, saveReceipt, settleReceipt, shownAmount, signedIn, type Receipt } from '$lib/claim';
   import { UNIT } from '$lib/network';
   import ClaimRecord from '$lib/ClaimRecord.svelte';
-  import { canRetry, ClaimError, describeError, errorCode, failureHeading, getClaimState, isUnmapped, outcomeAfterRelay, requestSignature, submitClaim } from '$lib/services';
+  import { canRetry, ClaimError, describeError, errorCode, failureHeading, getClaimState, isUnmapped, relayAndSettle, requestSignature, submitClaim } from '$lib/services';
   import { formatAmount } from '$lib/create/recipients';
   import { AlertTriangle, ArrowUpRight, Check, ChevronDown, Clock, Loader2, Mail, Undo2 } from 'lucide-svelte';
   import Amount from '$lib/Amount.svelte';
@@ -27,7 +27,7 @@
   const contract = env.PUBLIC_CONTRACT_ID ?? '';
   const campaignId = page.params.campaign!, commitmentId = page.params.commitment!;
   let txHash = $state('');
-  const explorer = $derived(env.PUBLIC_EXPLORER_TX_URL ? `${env.PUBLIC_EXPLORER_TX_URL}${txHash}` : '');
+  const explorer = $derived(env.PUBLIC_EXPLORER_TX_URL && txHash ? `${env.PUBLIC_EXPLORER_TX_URL}${txHash}` : '');
   // A reload after the NEAR claim has no sign-in left, but the payout it started can still be followed.
   const resumed = ok ? null : loadPayout(contract, campaignId, commitmentId);
   const payout = ok ? attempt!.intents : resumed;
@@ -55,7 +55,7 @@
   /** After the NEAR claim lands: follow the 1Click swap every 5 s until it settles. */
   async function followPayout(depositAddress: string, again = false) {
     stalled = false;
-    if (!again) void submitDeposit(depositAddress, txHash);
+    if (!again && txHash) void submitDeposit(depositAddress, txHash); // no hash when the relayer's answer was lost
     for (let i = 0; i < 360; i++) { // 30 min, then stop and say where to look
       try {
         const s = await getStatus(depositAddress);
@@ -104,10 +104,13 @@
         ...(attempt.intents ? { intents: { destination_asset: attempt.intents.assetId, recipient: attempt.intents.recipient } } : {}),
       });
       step = 'paying';
-      const relay = await submitClaim(env.PUBLIC_RELAYER_URL, args); // a reverted transfer (409 E115) throws
-      txHash = relay.txHash;
-      step = 'settling';
-      const state = await outcomeAfterRelay(relay, () => getClaimState(env.PUBLIC_NEAR_RPC_URL, env.PUBLIC_CONTRACT_ID, attempt.campaign, attempt.commitment));
+      saveStarted(contract, attempt.campaign, attempt.commitment, { destination: attempt.intents?.recipient ?? attempt.destination, at: Date.now() });
+      // A reverted transfer (409 E115) and other refusals throw; a lost answer follows the chain (relayAndSettle).
+      const settled = await relayAndSettle(
+        () => submitClaim(env.PUBLIC_RELAYER_URL, args).then((r) => ((txHash = r.txHash), (step = 'settling'), r)),
+        () => getClaimState(env.PUBLIC_NEAR_RPC_URL, env.PUBLIC_CONTRACT_ID, attempt.campaign, attempt.commitment),
+      );
+      const state = settled.state;
       if (state === 'claimed') {
         step = 'done';
         clearAttempt(); // salt and destination are no longer needed in this tab

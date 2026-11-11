@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import vectors from '../../../spec/vectors.json';
 import {
-  classifyDestination, claimState, deadlineText, timeLeft, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isImplicitAccount, isValidAccountId, loadAttempt, newAttemptId,
+  loadStarted, saveStarted, classifyDestination, claimState, deadlineText, timeLeft, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isImplicitAccount, isValidAccountId, loadAttempt, newAttemptId,
   decodeProof, encodeProof, parseCallback, parseLinkFragment, saveAttempt, clearAttempt, saveReceipt, loadReceipt, settleReceipt, claimedAt, middle, twoDecimals, shownAmount, confirmRemembered, RECEIPT_TTL_MS,
 } from './claim';
 
@@ -274,5 +274,20 @@ describe('display helpers', () => {
     expect(twoDecimals('2.5')).toBe('2.5');
     expect(twoDecimals('9.009')).toBe('9');
     expect(twoDecimals('7.001')).toBe('7');
+  });
+});
+
+describe('saveStarted / loadStarted (the note written before the relayer is called)', () => {
+  const mem = () => { const m = new Map<string, string>(); return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k) } as unknown as Storage; };
+  it('round-trips per contract, campaign and commitment; holds only the destination and the time', () => {
+    const s = mem();
+    saveStarted('c.testnet', '2', 'ab', { destination: 'alice.testnet', at: 1000 }, s);
+    expect(loadStarted('c.testnet', '2', 'ab', s, 2000)).toEqual({ destination: 'alice.testnet', at: 1000 });
+    expect(loadStarted('c.testnet', '3', 'ab', s, 2000)).toBeNull();
+  });
+  it('tolerates garbage and a storage that throws', () => {
+    const broken = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); } } as unknown as Storage;
+    expect(() => saveStarted('c', '2', 'ab', { destination: 'a', at: 1 }, broken)).not.toThrow();
+    expect(loadStarted('c', '2', 'ab', broken)).toBeNull();
   });
 });
