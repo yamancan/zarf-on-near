@@ -12,9 +12,11 @@ const LINK = v.links.main[0];
 const [, , CAMP, COMMIT] = LINK.split('#')[0].split('/');
 const DEP = 'd'.repeat(64);
 const TX = '6zgh2u9DqHHiXzdy9ouTP7oGky2T4nugqzqt9wJZwNFm';
-const IMPLICIT = 'a'.repeat(64);
+const IMPLICIT = require('node:crypto').createHash('sha256').update('zarf-near render').digest('hex'); // a plausible ed25519 hex id
 const EVM = '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed';
-const FUTURE = '1894488400000000000', PAST = '1700000000000000000';
+// Sample deadlines near the render date: a week left, closed two days ago (critic r2 P1-14).
+const NS = (ms) => (BigInt(Math.floor(ms)) * 1_000_000n).toString();
+const FUTURE = NS(Date.now() + 7 * 86_400_000 + 3_600_000), PAST = NS(Date.now() - 2 * 86_400_000);
 const camp = (o = {}) => ({ sender: 'sender.testnet', merkle_root: v.campaigns.main.merkle_root, deadline_ns: FUTURE, ...o });
 const cview = (o) => ({ sender: 'sender.testnet', token: 'usdc', amount: '37500000', merkle_root: 'x', balance: '27500000', in_flight: '0', policy: '', snapshot: [], storage_reserved: '12000000000000000000000', deadline_ns: FUTURE, ...o });
 
@@ -68,7 +70,7 @@ async function oneclick(p, final, o = {}) {
       if (mode === 'hang') return;
       if (mode === 'refuse') return r.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ message: 'Amount is too low for this route.' }) });
       if (mode === 'down') return r.fulfill({ status: 500, body: '{}' });
-      if (mode === 'loss') return r.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ quote: { amountIn: b.amount, amountOut: '9000000', amountOutFormatted: '9.0', minAmountOut: '8900000', timeEstimate: 22 } }) });
+      if (mode === 'loss') return r.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ quote: { amountIn: b.amount, amountOut: '9000000', amountOutFormatted: '9.0', minAmountOut: '8900000', timeEstimate: 22, ...(b.dry ? {} : { depositAddress: DEP }) } }) });
       return r.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ quote: { amountIn: b.amount, amountOut: '9995580', amountOutFormatted: '9.99558', minAmountOut: '9895624', timeEstimate: 22, ...(b.dry ? {} : { depositAddress: DEP }) } }) });
     }
     if (u.pathname === '/v0/deposit/submit') return r.fulfill({ status: 200, body: '{}' });
@@ -153,15 +155,30 @@ const wallet = (ctx, id = 'sender.testnet') => ctx.addInitScript((a) => {
   localStorage.setItem('near-wallet-selector:recentlySignedInWallets', JSON.stringify(['my-near-wallet']));
 }, id);
 
+const heroShown = (p) => p.waitForFunction(() => { const a = [...document.querySelectorAll('a')].find((x) => /Try it with Google/.test(x.textContent)); return a && getComputedStyle(a.parentElement).opacity === '1'; }, null, { timeout: 15000 }).then(() => p.waitForTimeout(200));
+// Without PUBLIC_GOOGLE_CLIENT_ID (row 46): blank the value in the served env, nothing else changes.
+const noGoogle = (p) => p.route((u) => u.pathname.startsWith('/claim/') && !u.pathname.includes('.'), async (r) => {
+  const res = await r.fetch(); const body = (await res.text()).replace(/"PUBLIC_GOOGLE_CLIENT_ID":\s*"[^"]*"/, '"PUBLIC_GOOGLE_CLIENT_ID":""');
+  await r.fulfill({ response: res, body });
+});
 const CSV = 'alice@gmail.com,10\nbob@gmail.com,2.5\nchen@gmail.com,25';
 const S = {
-  landing: async (p) => { await rpc(p); await p.goto(base + '/'); await p.waitForSelector('h1'); await p.waitForTimeout(2800); return { full: true }; },
+  // The hero's buttons fade in ~1.2 s after load (Zarf's Hero): wait until they are fully shown.
+  landing: async (p) => { await rpc(p); await p.goto(base + '/'); await p.waitForSelector('h1'); await heroShown(p); return { full: true }; },
+  // Reduced motion: the buttons must be there at once, no wait.
+  'landing-reduced': async (p) => { await p.emulateMedia({ reducedMotion: 'reduce' }); await rpc(p); await p.goto(base + '/'); await p.waitForSelector('h1'); await p.waitForTimeout(150); return {}; },
   'landing-detail': async (p) => { await rpc(p); await p.goto(base + '/'); await p.waitForSelector('h1'); await p.getByText('Who sees the email?').click(); await p.waitForTimeout(2800); return { full: true }; },
   'claim-near': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.fill('#dest', 'alice.testnet'); await p.waitForTimeout(1200); return { full: true }; },
   'claim-near-missing': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.fill('#dest', 'alise.testnet'); await p.waitForTimeout(1200); return { full: true }; },
-  'claim-testnet-detail': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText('The email never goes on chain').click(); await p.waitForTimeout(400); return { full: true }; },
+  'claim-testnet-detail': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText('Who sees the email?').click(); await p.waitForTimeout(400); return { full: true }; },
   'claim-chain-mainnet': async (p) => { await rpc(p, { network: 'mainnet', camp: { sender: 'sender.near' } }); await oneclick(p, 'SUCCESS'); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText('Another chain', { exact: true }).click(); await p.waitForSelector('#chain'); await p.fill('#addr', EVM); await p.waitForSelector('.quote'); await p.waitForTimeout(300); return { full: true }; },
-  'claim-checking': async (p) => { await p.route(/fastnear|rpc/, () => {}); await p.goto(base + LINK); await p.waitForTimeout(800); return {}; },
+  // RPC never answers: wait for the app's own checking card, not the boot mark (critic r2 coverage row 23).
+  'claim-checking': async (p) => { await p.route(/fastnear|rpc/, () => {}); await p.goto(base + LINK); await p.getByRole('heading', { name: 'Checking your claim…' }).waitFor({ timeout: 20000 }); await p.waitForTimeout(300); return {}; },
+  // The app's script never arrives: the first paint the recipient sees on a slow phone.
+  'boot-opening': async (p) => { await p.route(/\/(src|node_modules|@vite|@fs|\.svelte-kit|@id)\//, (r) => r.abort()); await p.goto(base + LINK, { waitUntil: 'commit' }); await p.waitForSelector('#boot-line'); await p.waitForTimeout(800); return {}; },
+  'claim-no-google': async (p) => { await noGoogle(p); await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.fill('#dest', 'alice.testnet'); await p.getByText('found').waitFor(); await p.locator('button.google').click(); await p.waitForTimeout(400); return { full: true }; },
+  'claim-no-account': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText('No NEAR account?').click(); await p.waitForTimeout(400); return { full: true }; },
+  'claim-chain-testnet': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText('Another chain', { exact: true }).click(); await p.waitForTimeout(400); return { full: true }; },
   'term-unknown': async (p) => { await rpc(p, { campaign: null }); await p.goto(base + LINK); await p.waitForSelector('h1'); return {}; },
   'term-mismatch': async (p) => { await rpc(p, { camp: { merkle_root: 'f'.repeat(64) } }); await p.goto(base + LINK); await p.waitForSelector('h1'); return {}; },
   'term-claimed': async (p) => { await rpc(p, { claimState: 'claimed' }); await p.goto(base + LINK); await p.waitForSelector('h1'); return {}; },
@@ -193,23 +210,24 @@ const S = {
   'claim-chain-detail': async (p) => { const o = await chainClaim(p, { stopAt: 'quoted' }); await p.getByText('Details', { exact: true }).click(); await p.waitForTimeout(300); return o; },
   'claim-signin-busy': (p) => chainClaim(p, { q: { real: 'hang' }, stopAt: 'signin' }),
   'claim-signin-quote-failed': (p) => chainClaim(p, { q: { real: 'down' }, stopAt: 'signin' }),
+  'claim-signin-quote-refused': (p) => chainClaim(p, { q: { real: 'loss' }, stopAt: 'signin' }),
   'auth-signing': async (p, ctx) => {
-    await ctx.addInitScript(([c, k]) => sessionStorage.setItem('zarf-near:attempt', JSON.stringify({ campaign: c, commitment: k, salt: 's', amount: '1', proof: [], destination: 'alice.testnet', attemptId: 'x' })), [CAMP, COMMIT]);
+    await ctx.addInitScript(([c, k]) => sessionStorage.setItem('zarf-near:attempt', JSON.stringify({ campaign: c, commitment: k, salt: 's', amount: '10000000', proof: [], destination: 'alice.testnet', attemptId: 'x' })), [CAMP, COMMIT]);
     // "Signing you in" lasts only until the receipt route loads: delay that module and catch the frame.
     await p.route(/receipt\/\+page\.svelte/, async (r) => { await new Promise((ok) => setTimeout(ok, 8000)); await r.continue(); });
     await p.goto(base + `/auth/google#id_token=h.p.s&state=${encodeURIComponent(`${CAMP}/${COMMIT}/x`)}`, { waitUntil: 'commit' });
     await p.getByText('Signing you in').waitFor({ timeout: 7000 }); return {};
   },
   'auth-cancelled-back': async (p, ctx) => {
-    await ctx.addInitScript(([c, k]) => sessionStorage.setItem('zarf-near:attempt', JSON.stringify({ campaign: c, commitment: k, salt: 's', amount: '1', proof: [], destination: 'alice.testnet', attemptId: 'x' })), [CAMP, COMMIT]);
+    await ctx.addInitScript(([c, k]) => sessionStorage.setItem('zarf-near:attempt', JSON.stringify({ campaign: c, commitment: k, salt: 's', amount: '10000000', proof: [], destination: 'alice.testnet', attemptId: 'x' })), [CAMP, COMMIT]);
     await p.goto(base + '/auth/google#error=access_denied'); await p.waitForSelector('h1'); return {};
   },
   'auth-error': async (p, ctx) => {
-    await ctx.addInitScript(([c, k]) => sessionStorage.setItem('zarf-near:attempt', JSON.stringify({ campaign: c, commitment: k, salt: 's', amount: '1', proof: [], destination: 'alice.testnet', attemptId: 'x' })), [CAMP, COMMIT]);
+    await ctx.addInitScript(([c, k]) => sessionStorage.setItem('zarf-near:attempt', JSON.stringify({ campaign: c, commitment: k, salt: 's', amount: '10000000', proof: [], destination: 'alice.testnet', attemptId: 'x' })), [CAMP, COMMIT]);
     await p.goto(base + '/auth/google#error=server_error'); await p.waitForSelector('h1'); return {};
   },
   'auth-mismatch': async (p, ctx) => {
-    await ctx.addInitScript(([c, k]) => sessionStorage.setItem('zarf-near:attempt', JSON.stringify({ campaign: c, commitment: k, salt: 's', amount: '1', proof: [], destination: 'alice.testnet', attemptId: 'x' })), [CAMP, COMMIT]);
+    await ctx.addInitScript(([c, k]) => sessionStorage.setItem('zarf-near:attempt', JSON.stringify({ campaign: c, commitment: k, salt: 's', amount: '10000000', proof: [], destination: 'alice.testnet', attemptId: 'x' })), [CAMP, COMMIT]);
     await p.goto(base + '/auth/google#id_token=h.p.s&state=other'); await p.waitForSelector('h1'); return {};
   },
   'receipt-checking': (p) => nearClaim(p, { verifierHang: true }),
@@ -218,12 +236,19 @@ const S = {
   'receipt-reverted': (p) => nearClaim(p, { relayer: 'reverted' }),
   'receipt-unsettled': (p) => nearClaim(p, { relayer: 'submitted', rpc: { claimStateAfterFirst: 'pending' }, wait: 63000 }),
   'receipt-failed-final': (p) => nearClaim(p, { verifierError: 'E105_ALREADY_CLAIMED' }),
+  'receipt-expired': (p) => nearClaim(p, { verifierError: 'EXPIRED' }),
   'receipt-failed-unmapped': (p) => nearClaim(p, { verifierError: 'BAD_AUDIENCE' }),
-  'receipt-reload': async (p) => { await nearClaim(p); await p.reload(); await p.waitForSelector('h1'); await p.waitForTimeout(800); return { full: true }; },
+  'receipt-reload': async (p) => { await nearClaim(p); await p.unrouteAll(); await rpc(p, { claimState: 'claimed' }); await p.reload(); await p.waitForSelector('h1'); await p.waitForTimeout(800); return { full: true }; },
   'term-claimed-paid': async (p) => { await nearClaim(p); await p.unrouteAll(); await rpc(p, { claimState: 'claimed' }); await p.goto(base + LINK); await p.waitForSelector('h1'); await p.waitForTimeout(500); return {}; },
   'receipt-quote-expired': async (p, ctx) => { await lateClock(ctx); return chainClaim(p, { wait: 1500 }); },
   'receipt-chain-failed': (p) => chainClaim(p, { final: 'FAILED' }),
-  'receipt-chain-stalled': async (p, ctx) => { await fastTimers(ctx); return chainClaim(p, { final: 'PROCESSING', wait: 20000 }); },
+  'receipt-chain-stalled': async (p, ctx) => { await fastTimers(ctx); const o = await chainClaim(p, { final: 'PROCESSING', wait: 500 }); await p.getByText('Still processing after 30 minutes').waitFor({ timeout: 90000 }); await p.waitForTimeout(300); return o; },
+  // A cross-chain claim reopened in a new tab while the bridge has not reported: "Claimed on NEAR", never "Paid out".
+  'term-claimed-chain-transit': async (p) => { await chainClaim(p, { final: 'PROCESSING', wait: 1500 }); const s = await p.evaluate(() => Object.entries(localStorage).filter(([k]) => k.startsWith('zarf-near:receipt:'))); const pg = await p.context().newPage(); await pg.addInitScript((s) => s.forEach(([k, v]) => localStorage.setItem(k, v)), s); await rpc(pg, { network: 'mainnet', claimState: 'claimed', camp: { sender: 'sender.near' } }); await pg.goto(base + LINK); await pg.waitForSelector('h1'); await pg.waitForTimeout(500); return { page: pg }; },
+  'term-claimed-chain-failed': async (p) => { await chainClaim(p, { final: 'FAILED', wait: 2500 }); await p.unrouteAll(); await rpc(p, { network: 'mainnet', claimState: 'claimed', camp: { sender: 'sender.near' } }); await p.goto(base + LINK); await p.waitForSelector('h1'); await p.waitForTimeout(500); return {}; },
+  'term-claimed-chain-paid': async (p) => { await chainClaim(p, { final: 'SUCCESS', wait: 2500 }); await p.unrouteAll(); await rpc(p, { network: 'mainnet', claimState: 'claimed', camp: { sender: 'sender.near' } }); await p.goto(base + LINK); await p.waitForSelector('h1'); await p.waitForTimeout(500); return {}; },
+  // A remembered receipt the chain does not confirm (another contract, a reset): never shown.
+  'receipt-reload-unconfirmed': async (p) => { await nearClaim(p); await p.unrouteAll(); await rpc(p, { claimState: 'unclaimed' }); await p.reload(); await p.waitForSelector('h1'); await p.waitForTimeout(800); return {}; },
   'receipt-chain-resumed': async (p) => { await chainClaim(p, { final: 'PROCESSING', wait: 2000 }); await p.reload(); await p.waitForSelector('h1'); await p.waitForTimeout(1500); return { full: true }; },
   'receipt-chain-checking': (p) => chainClaim(p, { verifierHang: true, wait: 1500 }),
   'receipt-chain-notclaimed': (p) => chainClaim(p, { verifierError: 'COMMITMENT_MISMATCH', wait: 1500 }),
@@ -264,7 +289,7 @@ const S = {
   'create-send-created': async (p, ctx) => { await wallet(ctx); await funding(ctx, { txHash: TX }); await rpc(p, { tx: receipts([TOKEN], [CONTRACT, { logs: [ev('campaign_created', { campaign_id: 14, merkle_root: ROOT, amount: '37500000' })] }]) }); await p.goto(base + '/create'); await p.waitForTimeout(5000); return { full: true }; },
   'create-other-tab': async (p, ctx) => { await ctx.addInitScript((m) => localStorage.setItem('zarf-near:unresolved', JSON.stringify({ ...m, at: Date.now() })), { root: ROOT, sender: 'sender.testnet', total: '37500000' }); await rpc(p); await p.goto(base + '/create'); await p.waitForTimeout(4500); return { full: true }; },
   'campaigns-connect': async (p) => { await rpc(p); await p.goto(base + '/campaigns'); await p.waitForTimeout(4000); return { full: true }; },
-  'campaigns-list': async (p, ctx) => { await wallet(ctx); await rpc(p, { campaigns: { 12: cview({ deadline_ns: PAST }), 13: cview({ amount: '5000000', balance: '5000000' }) } }); await p.goto(base + '/campaigns'); await p.waitForTimeout(4000); return { full: true }; },
+  'campaigns-list': async (p, ctx) => { await wallet(ctx); await rpc(p, { campaigns: { 12: cview({ deadline_ns: PAST }), 13: cview({ amount: '5000000', balance: '5000000' }) } }); await p.goto(base + '/campaigns'); await p.getByText('Campaign 13').waitFor({ timeout: 20000 }); await p.waitForTimeout(300); return { full: true }; },
   'campaigns-detail': async (p, ctx) => { await wallet(ctx); await rpc(p, { campaigns: { 12: cview({ deadline_ns: PAST }), 13: cview({ amount: '5000000', balance: '5000000' }) } }); await p.goto(base + '/campaigns'); await p.waitForTimeout(4000); await p.getByText('Details', { exact: true }).first().click(); await p.waitForTimeout(300); return { full: true }; },
   'campaigns-setup-error': async (p) => { await rpc(p, { rpcDown: true }); await p.goto(base + '/campaigns'); await p.waitForTimeout(4000); return {}; },
   'campaigns-loading': async (p, ctx) => { await wallet(ctx); await rpc(p, { hang: 'campaigns_of' }); await p.goto(base + '/campaigns'); await p.waitForTimeout(4000); return {}; },
@@ -306,7 +331,7 @@ const S = {
       const errs = []; p.on('pageerror', (e) => errs.push(String(e))); p.on('console', (m) => m.type() === 'error' && errs.push(m.text().slice(0, 140)));
       try {
         const o = (await fn(p, ctx)) || {};
-        await p.screenshot({ path: `${out}/${name}-${theme}-${w}.png`, fullPage: !!o.full });
+        await (o.page ?? p).screenshot({ path: `${out}/${name}-${theme}-${w}.png`, fullPage: !!o.full });
         if (errs.length && theme === 'dark' && w === 390) console.log(name, 'console:', errs.slice(0, 3).join(' | '));
       } catch (e) { console.log(name, theme, w, 'FAIL', String(e).split('\n')[0]); }
       await ctx.close();

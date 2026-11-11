@@ -142,7 +142,7 @@
   {#if final}
     <ZenButton href="/" variant="secondary" class="rounded-full min-h-11">What is Zarf?</ZenButton>
   {:else if canGoBack}
-    <ZenButton href={claimHref} variant="primary" class="rounded-full min-h-11">Back to your claim</ZenButton>
+    <ZenButton href={claimHref} variant="primary" class="rounded-full min-h-11 w-full sm:w-auto">Back to your claim</ZenButton>
   {:else}
     <p class="text-xs text-zen-fg-muted">Open your claim link again to try once more.</p>
   {/if}
@@ -172,7 +172,7 @@
   {:else if step === 'failed' && failCode === 'COMMITMENT_MISMATCH'}
     <Medallion icon={AlertTriangle} tone="error" />
     <h1 class="text-xl font-semibold tracking-tight">Different Google account</h1>
-    <Note tone="error" class="justify-center !text-center">{error}</Note>
+    <Note tone="error" center>{error}</Note>
     {@render back()}
     <p class="text-xs text-zen-fg-muted">Nothing was paid. Your claim is still open.</p>
   {:else}
@@ -188,13 +188,13 @@
 
 {#snippet failure()}
   {#if step === 'reverted'}
-    <Note tone="error" class="justify-center !text-center">The transfer failed and your claim is open again.</Note>
+    <Note tone="error" center>The transfer failed and your claim is open again.</Note>
     {@render back()}
   {:else if step === 'unsettled'}
     <p class="text-sm text-zen-fg-muted max-w-xs">The transaction was sent but has not settled yet. There is no need to claim again.</p>
     {#if explorer}{@render explorerButton(explorer, 'View the transaction')}{/if}
   {:else if step === 'failed'}
-    <Note tone="error" class="justify-center !text-center">{error}</Note>
+    <Note tone="error" center>{error}</Note>
     {@render back()}
     {#if code}{@render details('Code', code)}{/if}
   {/if}
@@ -225,7 +225,7 @@
         <Medallion icon={AlertTriangle} tone="error" />
         <h1 class="text-xl font-semibold tracking-tight">Could not check this claim</h1>
         <p class="text-sm text-zen-fg-muted max-w-xs" role="alert">NEAR is not answering right now.</p>
-        <ZenButton variant="primary" class="rounded-full min-h-11" onclick={verifyRemembered}>Check again</ZenButton>
+        <ZenButton variant="primary" class="rounded-full min-h-11 w-full sm:w-auto" onclick={verifyRemembered}>Check again</ZenButton>
       {:else if stored && !stored.chainName}
         {@render nearDone(stored.amount, stored.destination, stored.txHash)}
       {:else if stored}
@@ -286,7 +286,7 @@
           {#if bridge?.destinationTx}
             {#if bridge.destinationTx.explorerUrl}{@render explorerButton(bridge.destinationTx.explorerUrl, `View it on ${payout.chainName}`)}{:else}<p class="text-xs text-zen-fg-muted">{payout.chainName} transaction <span class="font-mono">{middle(bridge.destinationTx.hash, 8)}</span></p>{/if}
           {/if}
-          {#if stalled && !bridgeView?.done}<Note tone="info" class="justify-center !text-center">Still processing after 30 minutes. Keep this page and contact the sender.</Note>{/if}
+          {#if stalled && !bridgeView?.done}<Note tone="info" center>Still processing after 30 minutes. Keep this page and contact the sender.</Note>{/if}
           {#if refunded || lost || stalled}{@render details('Bridge deposit address', depositAddress)}{/if}
         {/if}
       {:else if attempt}

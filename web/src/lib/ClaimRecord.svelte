@@ -12,6 +12,8 @@
 
   let { r, amount, title }: { r: Receipt | null; amount: string; title: string } = $props();
   const state = $derived(!r ? 'unknown' : r.chainName ? (r.bridge ?? 'in-transit') : 'paid');
+  // What the bridge paid on the other chain (cross-chain is mainnet only, so plain USDC).
+  const paidOut = $derived(state === 'paid' && !!r?.chainName && !!r.amountOut);
 </script>
 
 {#if state === 'paid'}<Medallion icon={Check} tone="success" />
@@ -22,8 +24,8 @@
 <h1 class="text-xl font-semibold tracking-tight">{title}</h1>
 <Amount
   label={state === 'unknown' ? 'This link held' : state === 'paid' ? 'Paid out' : state === 'in-transit' ? 'Claimed on NEAR' : state === 'refunded' ? 'Returned to the sender' : 'Not delivered'}
-  value={formatAmount(BigInt(amount))}
-  unit={UNIT}
+  value={paidOut ? twoDecimals(r!.amountOut!) : formatAmount(BigInt(amount))}
+  unit={paidOut ? 'USDC' : UNIT}
   struck={state === 'refunded'}
 />
 {#if !r}
@@ -31,9 +33,9 @@
 {:else}
   <p class="text-sm text-zen-fg-muted max-w-xs">
     {#if state === 'paid'}
-      to <span class="font-mono text-zen-fg" title={r.destination}>{middle(r.destination, 8)}</span>{#if r.chainName}{' '}on {r.chainName}{#if r.amountOut}{' · '}≈ {twoDecimals(r.amountOut)} USDC{/if}{/if}
+      to <span class="font-mono text-zen-fg" title={r.destination}>{middle(r.destination, r.chainName ? 6 : 8)}</span>{#if r.chainName}{' '}on {r.chainName}{/if}
     {:else if state === 'in-transit'}
-      On its way to <span class="font-mono text-zen-fg" title={r.destination}>{middle(r.destination)}</span> on {r.chainName}. The bridge had not confirmed it when this browser last checked.
+      On its way to <span class="font-mono text-zen-fg" title={r.destination}>{middle(r.destination)}</span> on {r.chainName}; the bridge has not confirmed it yet.
     {:else if state === 'refunded'}
       The bridge could not pay it out on {r.chainName} and returned it to the sender on NEAR.
     {:else}

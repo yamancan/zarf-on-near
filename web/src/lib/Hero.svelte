@@ -193,7 +193,7 @@
     </h1>
 
     <p
-      class="text-base md:text-lg text-zen-fg/60 max-w-xl text-center leading-normal transition-all duration-700 ease-out {mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-5'}"
+      class="text-base md:text-lg text-zen-fg/60 max-w-xl text-center leading-normal [text-wrap:balance] transition-all duration-700 ease-out {mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-5'}"
       style="transition-delay: 600ms;"
     >
       They claim with Google. The email never goes on chain.
@@ -212,13 +212,6 @@
       </ZenButton>
     </div>
 
-    <!-- Status line: "Live on" raised from Zarf's /35 to /55 (2.6:1 there; critic P2-12) -->
-    <p
-      class="inline-flex items-center gap-1.5 text-[11px] font-medium tracking-[0.15em] uppercase text-zen-fg/55 transition-opacity duration-700 ease-out {mounted ? 'opacity-100' : 'opacity-0'}"
-      style="transition-delay: 1500ms;"
-    >
-      Live on <span class="text-zen-fg/70">NEAR testnet</span>
-    </p>
   </div>
 
   <!-- Scroll indicator -->
@@ -232,6 +225,12 @@
 </div>
 
 <style>
+  /* Reduced motion: the reveal shows at once (no fade, no 1.2 s wait for the buttons). */
+  @media (prefers-reduced-motion: reduce) {
+    .hero-container :global(*) {
+      transition: none !important;
+    }
+  }
   /* Wave grid (spotlight), main repo values */
   .wave-grid-spotlight {
     background-image: repeating-radial-gradient(

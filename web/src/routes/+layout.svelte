@@ -22,21 +22,21 @@
 {#snippet lockup(small: boolean)}
   <!-- Brand kit lockup: the mark as tall as the "f" of zarf.to; ink gap mark→"z" 0.4x the mark (the "z" side
        bearing and the mark's own edge add about 2 px to the box gap, measured from renders) -->
-  <span class="flex items-center {small ? 'gap-[1.5px] text-xs' : 'gap-[3px] text-base'} font-semibold tracking-tight">
+  <span class="flex items-center {small ? 'gap-[2px] text-xs' : 'gap-[3px] text-base'} font-semibold tracking-tight">
     <ZarfMark size={small ? 9 : 12} />zarf.to
   </span>
 {/snippet}
 
 <div class="min-h-screen {landing ? 'font-sans' : 'font-app'} bg-zen-bg text-zen-fg flex flex-col">
   <!-- ZarfNavbar (main repo): logo and nav on the left, actions on the right, solid ground, one hairline -->
-  <header class="h-16 bg-zen-bg border-b-[0.5px] border-zen-border-subtle flex items-center justify-between px-6 sticky top-0 z-50">
-    <div class="flex items-center gap-5 md:gap-8">
+  <header class="h-16 bg-zen-bg border-b-[0.5px] border-zen-border-subtle flex items-center justify-between gap-3 px-4 sm:px-6 sticky top-0 z-50">
+    <div class="flex items-center gap-4 sm:gap-5 md:gap-8">
       <a href="/" class="group flex items-center min-h-11 opacity-80 hover:opacity-100 transition-opacity" aria-label="zarf.to home">
         {@render lockup(false)}
       </a>
       <!-- Zarf hides the nav below md; here Send stays reachable on phones (critic P1-24), but not for recipients -->
       {#if !recipient}
-      <nav class="flex items-center gap-4 md:gap-6" aria-label="Main">
+      <nav class="flex items-center gap-3 sm:gap-4 md:gap-6" aria-label="Main">
         {#each NAV as n (n.href)}
           <a
             href={n.href}
@@ -48,9 +48,9 @@
       </nav>
       {/if}
     </div>
-    <div class="flex items-center gap-4">
+    <div class="flex items-center gap-3 sm:gap-4">
       {#if TESTNET}
-        <span class="text-[10px] font-medium uppercase tracking-[0.15em] text-zen-fg-muted">NEAR testnet</span>
+        <span class="whitespace-nowrap text-[10px] font-medium uppercase tracking-[0.15em] text-zen-fg-muted">NEAR testnet</span>
       {/if}
       <a
         href="https://x.com/zarfto"

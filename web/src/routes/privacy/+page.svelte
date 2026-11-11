@@ -14,12 +14,12 @@
   Your email never goes on chain.
 </p>
 <p>
-  The <a href="https://zarf-near-faucet-testnet.sparkling-queen-5e77.workers.dev/try" class="underline underline-offset-2 hover:text-zen-fg">judge page</a>
+  The <a href="https://zarf-near-faucet-testnet.sparkling-queen-5e77.workers.dev/try" class="underline underline-offset-2 hover:text-zen-fg">test page</a>
   uses the email you type only to create your test claim link. For its daily limits it keeps counters keyed by a
   keyed hash of the email and of your IP address, never either one in the clear.
 </p>
 <p>
-  We ask Google only for <code>openid</code> and <code>email</code>. We use no analytics. The judge page loads
+  We ask Google only for <code>openid</code> and <code>email</code>. We use no analytics. The test page loads
   Cloudflare Turnstile, a human check, from challenges.cloudflare.com; the claim and send pages load no third-party
   scripts.
 </p>

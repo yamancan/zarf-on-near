@@ -1,5 +1,6 @@
 <script lang="ts">
-    // Copied from the main repo (web/packages/ui/lib/components/ui); only change: min-h-11 on the label (44 px target).
+    // Copied from the main repo (web/packages/ui/lib/components/ui). Changes: min-h-11 on the label (44 px target);
+    // disabled dims the box only, so the label stays readable (critic r2 P2-12).
     import type { HTMLInputAttributes } from 'svelte/elements';
     import { Check } from 'lucide-svelte';
 
@@ -19,14 +20,14 @@
 
 <label
     class="flex items-center gap-2 min-h-11 cursor-pointer group {disabled
-        ? 'opacity-50 cursor-not-allowed'
+        ? 'cursor-not-allowed'
         : ''}"
 >
     <div class="relative">
         <input type="checkbox" class="sr-only peer" bind:checked {disabled} {...rest} />
         <div
             class="
-                w-4 h-4 rounded
+                w-4 h-4 rounded peer-disabled:opacity-50
                 border-[0.5px] border-zen-border-strong
                 bg-transparent
                 transition-all duration-[var(--zen-motion-base)]

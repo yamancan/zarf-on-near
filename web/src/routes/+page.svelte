@@ -5,12 +5,13 @@
   import Hero from '$lib/Hero.svelte';
   import Medallion from '$lib/Medallion.svelte';
   import { themeStore } from '$lib/zen/stores/themeStore.svelte';
+  import { UNIT } from '$lib/network';
 
   const TRY_URL = 'https://zarf-near-faucet-testnet.sparkling-queen-5e77.workers.dev/try';
   const STEPS = [
     { title: 'Add emails and amounts', line: 'Fund them once from a NEAR wallet.' },
     { title: 'They claim with Google', line: 'Pick a NEAR account, then sign in with Google.' },
-    { title: 'USDC arrives', line: 'On NEAR, or another chain via NEAR Intents.' },
+    { title: 'USDC arrives', line: 'On NEAR. On mainnet, also on another chain.' },
   ];
 </script>
 
@@ -38,7 +39,7 @@
             </div>
           {:else if i === 1}
             <div class="w-full max-w-[220px] flex flex-col items-center gap-2.5">
-              <span class="text-3xl font-light tracking-tighter tabular-nums">10 <span class="text-xs font-medium uppercase tracking-widest text-zen-primary">USDC</span></span>
+              <span class="text-3xl font-light tracking-tighter tabular-nums">10 <span class="text-xs font-medium uppercase tracking-widest text-zen-primary">{UNIT}</span></span>
               <div class="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg border-[0.5px] border-zen-border">
                 <span class="text-xs font-mono text-zen-fg/80">alice.testnet</span>
                 <span class="flex items-center gap-1 text-[11px] text-zen-success-content"><Check class="w-3 h-3" />found</span>
@@ -48,7 +49,7 @@
           {:else}
             <div class="flex flex-col items-center gap-3">
               <Medallion icon={Check} tone="success" />
-              <span class="text-3xl font-light tracking-tighter tabular-nums">+10 <span class="text-xs font-medium uppercase tracking-widest text-zen-primary">USDC</span></span>
+              <span class="text-3xl font-light tracking-tighter tabular-nums">+10 <span class="text-xs font-medium uppercase tracking-widest text-zen-primary">{UNIT}</span></span>
               <span class="text-xs font-mono text-zen-fg-muted">alice.testnet</span>
             </div>
           {/if}

@@ -47,7 +47,7 @@
         <h1 class="text-xl font-semibold tracking-tight">{failed.title}</h1>
         <p class="text-sm text-zen-fg-muted max-w-xs" role={failed.cancelled ? 'status' : 'alert'}>{failed.line}</p>
         {#if back}
-          <ZenButton href={back} variant="primary" class="rounded-full min-h-11 mt-2">Back to your claim</ZenButton>
+          <ZenButton href={back} variant="primary" class="rounded-full min-h-11 mt-2 w-full sm:w-auto">Back to your claim</ZenButton>
         {:else}
           {#if !failed.cancelled}<p class="text-xs text-zen-fg-muted max-w-xs">Open your claim link again to try once more.</p>{/if}
           <ZenButton href="/" variant="secondary" class="rounded-full min-h-11 mt-2">What is Zarf?</ZenButton>

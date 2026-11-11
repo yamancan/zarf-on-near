@@ -10,7 +10,7 @@
   import { accountExists, ClaimError, describeCheckError, describeError, getCampaign, getClaimState, getNetwork } from '$lib/services';
   import { getQuote, lossBps, MAX_LOSS_BPS, QUOTE_LIFETIME_MS, QuoteError, refusal, type PayoutAsset } from '$lib/intents';
   import PayoutPicker from '$lib/PayoutPicker.svelte';
-  import { AlertTriangle, ArrowUpRight, ChevronDown, Clock, Link2Off, Loader2, Mail, SearchX, ShieldCheck } from 'lucide-svelte';
+  import { AlertTriangle, ArrowUpRight, ChevronDown, Clock, Link2Off, Loader2, Mail, SearchX } from 'lucide-svelte';
   import ClaimRecord from '$lib/ClaimRecord.svelte';
   import { UNIT } from '$lib/network';
   import Amount from '$lib/Amount.svelte';
@@ -202,7 +202,7 @@
     <h1 class="text-xl font-semibold tracking-tight">{title}</h1>
     <p class="text-sm text-zen-fg-muted max-w-xs" role={tone === 'error' ? 'alert' : undefined}>{line}</p>
     {#if action === 'recheck'}
-      <ZenButton variant="primary" class="rounded-full min-h-11 mt-2" onclick={() => link && checkLink(link)}>Check again</ZenButton>
+      <ZenButton variant="primary" class="rounded-full min-h-11 mt-2 w-full sm:w-auto" onclick={() => link && checkLink(link)}>Check again</ZenButton>
     {:else if action === 'home'}
       <ZenButton href="/" variant="secondary" class="rounded-full min-h-11 mt-2">What is Zarf?</ZenButton>
     {/if}
@@ -233,8 +233,8 @@
       {:else if loaded && check === 'checking'}
         <div class="flex flex-col items-center text-center gap-4 py-6">
           <Medallion icon={Loader2} tone="muted" spin />
-          <h1 class="text-xl font-semibold tracking-tight" role="status">Checking your claim…</h1>
-          <p class="text-sm text-zen-fg-muted max-w-xs">Reading this link's campaign on NEAR.</p>
+          <h1 class="text-xl font-semibold tracking-tight">Checking your claim…</h1>
+          <p class="text-sm text-zen-fg-muted max-w-xs" role="status">Reading this link's campaign on NEAR.</p>
         </div>
       {:else if loaded}
         <!-- Header: medallion, the amount as the hero figure, one muted line -->
@@ -332,7 +332,7 @@
             <img src={themeStore.isDark ? '/google/signin-dark.svg' : '/google/signin-light.svg'} alt="Sign in with Google" width="180" height="40" />
           </button>
           <p class="text-xs text-zen-fg-muted text-center">Another account? Pick it on Google's screen.</p>
-          {#if error}<Note tone="error" class="justify-center !text-center">{error}</Note>{/if}
+          {#if error}<Note tone="error" center>{error}</Note>{/if}
           {#if quoteFailed && mode === 'chain'}
             <div class="flex flex-wrap justify-center gap-3">
               <ZenButton variant="secondary" class="rounded-full min-h-11" onclick={() => ((error = ''), (quoteFailed = false), (requote += 1))}>Get a new quote</ZenButton>
@@ -344,12 +344,11 @@
         <!-- One honest line; the rest one layer down -->
         <details class="group text-xs text-zen-fg-muted border-t-[0.5px] border-zen-border-subtle pt-4">
           <summary class="flex items-center justify-center gap-2 min-h-11 cursor-pointer list-none hover:text-zen-fg">
-            <ShieldCheck class="w-4 h-4 shrink-0" aria-hidden="true" />
-            The email never goes on chain
+            Who sees the email?
             <ChevronDown class="w-3.5 h-3.5 transition-transform group-open:rotate-180" aria-hidden="true" />
           </summary>
           <div class="mt-2 flex flex-col gap-2 leading-relaxed">
-            <p>Our verifier, operated by Trion Labs, sees your email once to check this claim, and does not store it.</p>
+            <p>The email never goes on chain. Our verifier, operated by Trion Labs, sees your email once to check this claim, and does not store it.</p>
             <p>
               The sign-in only proves the email and is bound to the destination you chose, so it cannot pay anyone else. We
               cannot access your Google account. The USDC usually arrives in about a minute.
