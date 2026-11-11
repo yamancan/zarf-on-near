@@ -1,6 +1,6 @@
 # Faucet (`/try`) go-live and rollback
 
-Worker `zarf-near-faucet-testnet` on Cloudflare account `f0b938c1641f5223c48199ec45751913`,
+Worker `zarf-near-faucet-testnet` on the Cloudflare account in `faucet/wrangler.jsonc`,
 URL https://zarf-near-faucet-testnet.sparkling-queen-5e77.workers.dev.
 Testnet only. Rehearsed 2026-11-12 from a detached checkout at 99777d2;
 nothing was deployed.
@@ -35,7 +35,7 @@ Run from a checkout of the approved commit, in `faucet/`:
 ```bash
 pnpm install --frozen-lockfile && pnpm test && pnpm typecheck           # expect 85 passed
 export CLOUDFLARE_API_TOKEN=…   # an API token for this account
-npx wrangler whoami                       # must show f0b938c1641f5223c48199ec45751913, else STOP
+npx wrangler whoami                       # must show the account in wrangler.jsonc, else STOP
 npx wrangler deploy --dry-run             # FAUCET_KV 4c8e6091…, 13 vars, CREATOR testnet
 npx wrangler deploy                       # no --env; write down the new version id
 ```
@@ -56,7 +56,7 @@ No secret or KV change is needed: the design touches only the page and its asset
 
 ```bash
 export CLOUDFLARE_API_TOKEN=…   # an API token for this account
-npx wrangler whoami                       # f0b938…, else STOP
+npx wrangler whoami                       # the account in wrangler.jsonc, else STOP
 npx wrangler rollback e733e5cd-27b8-4776-a0e7-c9f32776886f -m "back to pre-design /try" -y
 ```
 
