@@ -73,13 +73,13 @@ Read this before using it with real money.
   tells the recipient to contact the sender, who can ask NEAR Intents support with the deposit
   address.
 - **The sender's wallet code comes from the wallets.** The send pages connect through NEAR Connect with a
-  pinned list of wallets (Meteor, Intear, Nightly, Ethereum Wallets for MetaMask; HOT on mainnet). Each
-  wallet's code runs in a sandboxed iframe that cannot read the page. The code from GitHub is pinned to a
-  commit; Intear's and Ethereum Wallets' (evm-on-near.dev) are served by their makers and not pinned. A changed
-  wallet script could ask the wallet to sign a different transaction, so the wallet's own approval screen,
-  which shows the receiver and amount, is the last check before signing. The claim page uses the same list
-  only to read the recipient's account name ("Use my wallet"), never to sign; the recipient still confirms
-  that name before Google sign-in.
+  pinned list of wallets (Meteor, Intear, Nightly; HOT on mainnet). Each wallet's code runs in a sandboxed
+  iframe that cannot read the page. The code from GitHub is pinned to a commit; Intear's is served by Intear
+  and not pinned. A changed wallet script could ask the wallet to sign a different transaction, so the
+  wallet's own approval screen, which shows the receiver and amount, is the last check before signing. The
+  claim page uses the same list only to read the recipient's account name ("Use my wallet"), never to sign,
+  and the recipient confirms that name before Google sign-in. With 0x accounts switched on there it also
+  offers Ethereum Wallets (MetaMask), whose code evm-on-near.dev serves unpinned; senders never get it.
 - **Circle controls USDC.** Circle can pause USDC or block an account. That would stop claims and take-backs
   (`reclaim`) until Circle lifts it, and nothing in Zarf can override it.
 - **Unaudited, and capped by the app.** Zarf on NEAR has not had a security audit. On mainnet the create app
@@ -207,7 +207,7 @@ History: [hackathon-submission](https://github.com/yamancan/zarf-on-near/tree/ha
 | relayer (tests only) | `@near-js/transactions` 2.5.1, `@near-js/crypto` 2.5.1 | reference implementation the transaction bytes are checked against |
 | web | `@sveltejs/kit`, `svelte`, `vite`, `@sveltejs/adapter-cloudflare` | apps |
 | web (claim, cross-chain step) | `@noble/hashes` 1.8.0 | keccak-256 for the EIP-55 address checksum |
-| web (send pages; claim form reads the account only) | `@hot-labs/near-connect` 0.12.0, with a pinned wallet list (Meteor, Intear, Nightly, Ethereum Wallets; HOT on mainnet) | sender wallet: NEAR Connect, NEAR's replacement for the deprecated wallet selector (MyNearWallet stopped accepting app connections in Nov 2026) |
+| web (send pages; claim form reads the account only) | `@hot-labs/near-connect` 0.12.0, with a pinned wallet list (Meteor, Intear, Nightly; HOT on mainnet; Ethereum Wallets on the claim form with 0x on) | sender wallet: NEAR Connect, NEAR's replacement for the deprecated wallet selector (MyNearWallet stopped accepting app connections in Nov 2026) |
 | all | `typescript`, `vitest`, `wrangler`, `svelte-check` | build and tests |
 | contract | `near-sdk` 5.26.1 (Rust 1.86.0) | the escrow; built with `cargo-near` |
 | contract (tests only) | `near-workspaces` 0.24.0 (Rust 1.95.0), `near-contract-standards` 5.26.1 (the test-only `mock-ft`), `tokio`, `ed25519-dalek` 2, `sha2` 0.10 | sandbox integration tests and a test-only `mock-ft` token |

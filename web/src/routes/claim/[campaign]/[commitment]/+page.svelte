@@ -57,8 +57,9 @@
   ] as [typeof mode, string][]);
   // MyNearWallet stopped creating accounts (Nov 2026). Meteor creates named accounts on both networks.
   const METEOR = 'https://wallet.meteorwallet.app';
+  const ethOn = env.PUBLIC_ETH_ACCOUNTS === 'on'; // 0x (NEP-518) destinations, off until a real claim proves them
 
-  const dest = $derived(classifyDestination(typed, { escrow: env.PUBLIC_CONTRACT_ID, token: env.PUBLIC_TOKEN_ID, eth: env.PUBLIC_ETH_ACCOUNTS === 'on' }));
+  const dest = $derived(classifyDestination(typed, { escrow: env.PUBLIC_CONTRACT_ID, token: env.PUBLIC_TOKEN_ID, eth: ethOn }));
   const destination = $derived(mode === 'existing' ? (dest.kind === 'named' || dest.kind === 'implicit' ? dest.id : '') : (implicit?.accountId ?? ''));
   // The typed account, read on chain before sign-in: a typo must never be paid (NEAR account-validation guide).
   let acct = $state<AccountCheck>(null);
@@ -75,8 +76,9 @@
     walletNote = 'Opening your wallet…';
     try {
       const { nearConnectWallet } = await import('$lib/create/wallet');
-      const w = await nearConnectWallet(network, env.PUBLIC_NEAR_RPC_URL ?? '');
-      typed = w.accountId() ?? (await w.signIn());
+      // MetaMask (0x ids) only when the field accepts them; signIn always opens the picker, never a stale connection.
+      const w = await nearConnectWallet(network, env.PUBLIC_NEAR_RPC_URL ?? '', { ethereum: ethOn });
+      typed = await w.signIn();
       walletNote = '';
     } catch {
       walletNote = 'No account came back from the wallet. Try again, or type the account name.';

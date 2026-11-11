@@ -5,8 +5,10 @@
 import type { Tx } from './funding';
 // Pinned copy of NEAR Connect's manifest (hot-dao/near-selector repository/manifest.json, v1.1.0, 12 Nov 2026),
 // cut to the wallets we offer: no runtime manifest fetch, and no wallet appears that we have not looked at.
-// ethereum-wallets (MetaMask on NEAR, NEP-518) is copied verbatim; its executor is served unpinned by evm-on-near.dev.
 import manifest from './wallets.json';
+// MetaMask on NEAR (NEP-518), the upstream entry copied verbatim; its executor is served unpinned by evm-on-near.dev.
+// Offered only on the claim form with 0x ids on (it reads an account name there), never to senders who sign funding.
+import ethereumWallets from './ethereum-wallets.json';
 
 
 export interface SenderWallet {
@@ -26,14 +28,14 @@ export const walletRequest = (txs: Tx[]) => ({
   }),
 });
 
-export async function nearConnectWallet(networkId: string, rpcUrl: string): Promise<SenderWallet> {
+export async function nearConnectWallet(networkId: string, rpcUrl: string, { ethereum = false } = {}): Promise<SenderWallet> {
   const { NearConnector } = await import('@hot-labs/near-connect');
   const network = networkId === 'mainnet' ? 'mainnet' : 'testnet';
   const connector = new NearConnector({
     network,
     providers: { [network]: [rpcUrl] },
     features: { signAndSendTransactions: true },
-    manifest: manifest as never,
+    manifest: (ethereum ? { ...manifest, wallets: [...manifest.wallets, ethereumWallets] } : manifest) as never,
     excludedWallets: ['mynearwallet'], // retired: it refuses new app connections
     autoConnect: true,
     // The wallet code runs in srcdoc iframes, which inherit this page's CSP: its inline scripts need our nonce.
