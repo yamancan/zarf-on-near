@@ -198,6 +198,7 @@ describe('worker', () => {
       if (body.method === 'status') seen.push(`${url}#status`);
       if (body.method === 'status') return Response.json({ jsonrpc: '2.0', id: 1, result: { chain_id: o.chainId ?? 'testnet' } });
       if (body.method === 'query' && body.params.request_type === 'call_function') {
+        seen.push(`${url}#view`);
         if (o.viewsDown) throw new Error('rpc down');
         const value = body.params.method_name === 'ft_balance_of' ? (o.float ?? '9000000') : '499100000000000000000000';
         return Response.json({ jsonrpc: '2.0', id: 1, result: { result: [...new TextEncoder().encode(JSON.stringify(value))] } });
@@ -304,6 +305,38 @@ describe('worker', () => {
     expect((await post(fullEnv())).body).toEqual({ error: 'BAD_EMAIL' }); // exactly one link left is enough
   });
 
+  it('caches the float read for ~20 s across /health and POST; a failed read is retried', async () => {
+    const views = () => seen.filter((u) => u === `${env.NEAR_RPC_URL}#view`).length;
+    let seen = net();
+    const env = fullEnv();
+    const { default: worker } = await import('../src/index');
+    const t0 = Date.now();
+    const now = vi.spyOn(Date, 'now').mockReturnValue(t0);
+    await worker.fetch(new Request('https://f.example/health'), env as never);
+    await post(env);
+    await worker.fetch(new Request('https://f.example/health'), env as never);
+    expect(views()).toBe(2); // one round: ft_balance_of + prepay_balance_of
+    now.mockReturnValue(t0 + 20_001);
+    await post(env);
+    expect(views()).toBe(4); // window over: read again
+    // A failed read is not cached: the next call inside the window reads again.
+    const env2 = fullEnv();
+    net({ viewsDown: true });
+    expect((await post(env2)).status).toBe(503);
+    seen = net();
+    expect((await post(env2)).body).toEqual({ error: 'BAD_EMAIL' });
+    expect(seen.filter((u) => u === `${env2.NEAR_RPC_URL}#view`).length).toBe(2);
+    now.mockRestore();
+  });
+
+  it('concurrent requests share one in-flight read', async () => {
+    const seen = net();
+    const env = fullEnv();
+    const { default: worker } = await import('../src/index');
+    await Promise.all([1, 2, 3].map(() => worker.fetch(new Request('https://f.example/health'), env as never)));
+    expect(seen.filter((u) => u === `${env.NEAR_RPC_URL}#view`).length).toBe(2);
+  });
+
   it('503s when the float cannot be read', async () => {
     net({ viewsDown: true });
     expect(await post(fullEnv())).toEqual({ status: 503, body: { error: 'UPSTREAM_UNAVAILABLE' } });
@@ -320,7 +353,7 @@ describe('worker', () => {
     const dump = JSON.stringify(body);
     for (const s of [env.FAUCET_SENDER_KEY, env.LIMIT_KEY, env.TURNSTILE_SECRET] as string[]) expect(dump).not.toContain(s);
     net({ viewsDown: true });
-    expect((await worker.fetch(new Request('https://f.example/health'), env as never)).status).toBe(503);
+    expect((await worker.fetch(new Request('https://f.example/health'), fullEnv() as never)).status).toBe(503); // fresh env: no cached value
   });
 
   it('a missing token never reaches siteverify', async () => {

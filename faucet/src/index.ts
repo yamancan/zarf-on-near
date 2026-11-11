@@ -60,8 +60,27 @@ function makeCreator(env: Env, host: string): Promise<CampaignCreator> | null {
   return creator.c;
 }
 
+type Float = { float: string; prepay: string };
+const FLOAT_TTL_MS = 20_000;
+// Per isolate. /health and POST /faucet share it, so a loop on either costs at most one RPC round per
+// 20 s, not two views per request against FastNEAR's per-IP limit. A stale "not empty" is harmless:
+// the create itself fails on an empty float. A failed read is never cached.
+const floatCache = new Map<string, { at: number; value: Promise<Float> }>();
+
+function cachedFloat(env: Env, nowMs = Date.now()): Promise<Float> {
+  const key = `${env.NEAR_RPC_URL}|${env.TOKEN_ID}|${env.CONTRACT_ID}|${env.FAUCET_SENDER_ID}`;
+  const hit = floatCache.get(key);
+  if (hit && nowMs - hit.at < FLOAT_TTL_MS) return hit.value;
+  const value = readFloat(env);
+  floatCache.set(key, { at: nowMs, value });
+  value.catch(() => {
+    if (floatCache.get(key)?.value === value) floatCache.delete(key);
+  });
+  return value;
+}
+
 /** The faucet's float on chain: its USDC balance and its free storage pre-pay on the escrow. Public data. */
-async function readFloat(env: Env): Promise<{ float: string; prepay: string }> {
+async function readFloat(env: Env): Promise<Float> {
   const rpc = httpRpc(env.NEAR_RPC_URL);
   const [float, prepay] = await Promise.all([
     viewCall<string>(rpc, env.TOKEN_ID, 'ft_balance_of', { account_id: env.FAUCET_SENDER_ID }),
@@ -82,7 +101,7 @@ export default {
       // Public: chain ids and balances only, never a secret. 503 when the chain read fails.
       if (env.CREATOR !== 'testnet') return json({ ok: true, stub: true }, 200);
       try {
-        const { float, prepay } = await readFloat(env);
+        const { float, prepay } = await cachedFloat(env);
         const per = /^[1-9]\d{0,38}$/.test(env.AMOUNT ?? '') ? BigInt(env.AMOUNT) : 0n;
         return json({
           ok: true, network: env.NETWORK, contract_id: env.CONTRACT_ID, sender_id: env.FAUCET_SENDER_ID, token_id: env.TOKEN_ID,
@@ -114,7 +133,7 @@ export default {
     if (!/^application\/json\b/i.test(req.headers.get('Content-Type') ?? '')) return json({ error: 'UNSUPPORTED_MEDIA_TYPE' }, 415);
     if (env.CREATOR === 'testnet') {
       // Before the human check and the quota: an empty faucet spends nobody's token or allowance.
-      const f = await readFloat(env).catch(() => null);
+      const f = await cachedFloat(env).catch(() => null);
       if (!f) return json({ error: 'UPSTREAM_UNAVAILABLE' }, 503);
       if (BigInt(f.float) < BigInt(amount)) return json({ error: 'FAUCET_EMPTY' }, 503);
     }
