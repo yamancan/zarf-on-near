@@ -223,6 +223,8 @@ describe('T-001 limits (web): 2% loss bound and 1,000 USDC cross-chain cap', () 
     expect(withinLossBound('1000000', '979900', 6)).toBe(false); // 2.01%
     expect(withinLossBound('1000000', '9800000', 7)).toBe(true); // 7-decimal destination, exactly 2%
     expect(withinLossBound('1000000', '9799999', 7)).toBe(false);
+    expect(withinLossBound('1000005', '9800049', 7)).toBe(true); // 1.000005 → 0.9800049: exactly 2%, not truncated away
+    expect(withinLossBound('1000005', '9800048', 7)).toBe(false);
     expect(withinLossBound('1000000', '987424', 6)).toBe(true); // 1 USDC, a real dry quote: 1.26%
     expect(withinLossBound('100000', '96602', 6)).toBe(false); // 0.1 USDC, a real dry quote: 3.4%
   });

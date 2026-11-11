@@ -63,8 +63,11 @@ Read this before using it with real money.
   the destination address and the amount go to NEAR Intents 1Click, which pays out from a one-time
   deposit address. 1Click's status for that address is public, so the claim can be linked to the
   destination address. Payout assets are pinned to Circle USDC on Base, Arbitrum and Ethereum, and
-  the verifier refuses a quote that could lose more than 2%, a payout above 1,000 USDC, or a refund anywhere
-  but the sender. Very small payouts often cost the bridge more than 2%; a NEAR account always works.
+  for a payout requested through the claim page's cross-chain step the verifier refuses a quote that could
+  lose more than 2%, a payout above 1,000 USDC, or a refund anywhere but the sender. These limits protect the
+  recipient from a bad quote; a recipient who pastes a bridge deposit address as their NEAR account bypasses
+  them, with their own funds. Very small payouts often cost the bridge more than 2%; claiming to a NEAR
+  account has no such limit.
   If the bridge does not complete the payout by its deadline, it refunds the campaign sender on
   NEAR. A payout that ends in the bridge's FAILED state is not documented as refunded: the page
   tells the recipient to contact the sender, who can ask NEAR Intents support with the deposit

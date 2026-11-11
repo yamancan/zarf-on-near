@@ -153,8 +153,10 @@ export function checkIntentsStatus(status: unknown, claim: IntentsClaim): void {
   // The worst case after fees and slippage, in origin units, must keep 98% of the amount (MAX_LOSS_BPS).
   const minOut = q.minAmountOut;
   if (typeof minOut !== 'string' || !DECIMAL.test(minOut)) fail('INTENTS_MALFORMED');
-  const minOutOrigin = (BigInt(minOut as string) * 10n ** BigInt(ORIGIN_DECIMALS)) / 10n ** BigInt(decimals!);
-  if (minOutOrigin * 10_000n < BigInt(claim.amount) * (10_000n - MAX_LOSS_BPS)) fail('INTENTS_LOSS_TOO_HIGH');
+  // Cross-multiplied, so no unit conversion truncates (a 7-decimal asset at exactly 2% passes).
+  if (BigInt(minOut as string) * 10n ** BigInt(ORIGIN_DECIMALS) * 10_000n < BigInt(claim.amount) * 10n ** BigInt(decimals!) * (10_000n - MAX_LOSS_BPS)) {
+    fail('INTENTS_LOSS_TOO_HIGH');
+  }
   if (qr.recipientType !== 'DESTINATION_CHAIN' || !sameAddress(qr.recipient, claim.recipient) || /^0x0{40}$/i.test(claim.recipient)) {
     fail('INTENTS_WRONG_RECIPIENT');
   }

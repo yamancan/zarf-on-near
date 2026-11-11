@@ -190,3 +190,12 @@ describe('T-001: 1,000 USDC cross-chain cap (verifier)', () => {
     expect(code(at('1000000001', '1000000001'), { ...claim, amount: '1000000001' })).toBe('INTENTS_AMOUNT_TOO_HIGH');
   });
 });
+
+describe('T-001: the loss check is exact, no truncation (Duo P2)', () => {
+  // 98% of 1.000005 USDC is 0.9800049: 980005 base units keeps it, 980004 does not.
+  const odd = (minOut: string) => mutate((x) => { x.quoteResponse.quoteRequest.amount = '1000005'; x.quoteResponse.quote.minAmountOut = minOut; });
+  it('odd amounts at the 2% boundary', () => {
+    expect(code(odd('980005'), { ...claim, amount: '1000005' })).toBeUndefined();
+    expect(code(odd('980004'), { ...claim, amount: '1000005' })).toBe('INTENTS_LOSS_TOO_HIGH');
+  });
+});

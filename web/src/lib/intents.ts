@@ -126,8 +126,8 @@ export async function getQuote(dry: boolean, a: QuoteArgs, fetchFn: Fetch = defa
 
 /** Whether the worst case keeps at least 98% of the amount (exact, the verifier's check: no rounding to whole bps). */
 export function withinLossBound(amount: string, minAmountOut: string, decimals: number): boolean {
-  const out = (BigInt(minAmountOut) * 10n ** BigInt(USDC_DECIMALS)) / 10n ** BigInt(decimals);
-  return out * 10_000n >= BigInt(amount) * BigInt(10_000 - MAX_LOSS_BPS);
+  // Cross-multiplied, so no unit conversion truncates: minOut / 10^dec >= amount / 10^6 * (1 - bound).
+  return BigInt(minAmountOut) * 10n ** BigInt(USDC_DECIMALS) * 10_000n >= BigInt(amount) * 10n ** BigInt(decimals) * BigInt(10_000 - MAX_LOSS_BPS);
 }
 
 /** Worst-case loss in basis points of the amount (display): minAmountOut is after slippage and fees. */

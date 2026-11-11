@@ -10,7 +10,7 @@
   import ZenInput from '$lib/zen/components/ZenInput.svelte';
   import ZenSelect from '$lib/zen/components/ZenSelect.svelte';
   import {
-    getQuote, lossBps, PAYOUT_CHAINS, payoutCapError, withinLossBound, QUOTE_LIFETIME_MS, QuoteError, refusal, resolveAssets, type PayoutAsset, type Quote,
+    getQuote, PAYOUT_CHAINS, payoutCapError, withinLossBound, QUOTE_LIFETIME_MS, QuoteError, refusal, resolveAssets, type PayoutAsset, type Quote,
   } from '$lib/intents';
 
   interface Props {
@@ -66,8 +66,7 @@
         const q = await getQuote(true, { amount, assetId: a.assetId, recipient, refundTo, deadline });
         if (`${asset?.assetId}|${address.trim()}` !== tag) return; // the field changed meanwhile
         if (!withinLossBound(amount, q.minAmountOut, a.decimals)) {
-          const loss = lossBps(amount, q.minAmountOut, a.decimals);
-          quoteError = `The bridge's cost for this payout could be up to ${(loss / 100).toFixed(1)}% of it, above our 2% limit. Small payouts often are. Claim it to a NEAR account instead: that always works.`;
+          quoteError = `The bridge's cost for this payout could be more than 2% of it, our limit. Small payouts often are. Claim it to a NEAR account instead: that has no such limit.`;
           tooSmall = true;
           return;
         }
@@ -108,7 +107,7 @@
 {:else if !assets}
   <Note tone="pending">Loading chains…</Note>
 {:else}
-  <p class="text-xs text-zen-fg-muted">Very small payouts may be refused when the bridge's cost is above 2%. A NEAR account always works.</p>
+  <p class="text-xs text-zen-fg-muted">Very small payouts may be refused when the bridge's cost is above 2%. Claiming to a NEAR account has no such limit.</p>
   <span id="chain-l" class="text-sm font-medium text-zen-fg">Chain</span>
   <div id="chain" role="group" aria-labelledby="chain-l">
     <ZenSelect bind:value={key} options={assets.map((a) => ({ value: a.chain.key, label: `USDC on ${a.chain.name}` }))} aria-label="Chain" class="w-full [&>button]:w-full [&>button]:min-h-11 [&>button]:!border [&>button]:!border-[var(--zarf-control-border)]" />
