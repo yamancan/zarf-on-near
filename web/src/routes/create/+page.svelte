@@ -421,8 +421,9 @@
   {/if}
   {#if account}
     <div class="flex items-center justify-between gap-3 min-h-11 border-y-[0.5px] border-zen-border-subtle">
-      <span class="text-sm min-w-0 truncate">
-        <span class="text-zen-fg-muted">From</span> <span class="font-mono">{account}</span>{#if balance !== null}<span class="text-zen-fg-muted">{' · '}{formatAmount(BigInt(balance))} {UNIT}</span>{/if}
+      <span class="min-w-0 flex flex-col py-1.5 text-sm">
+        <span class="truncate"><span class="text-zen-fg-muted">From</span> <span class="font-mono">{account}</span></span>
+        {#if balance !== null}<span class="whitespace-nowrap text-xs text-zen-fg-muted tabular-nums">Balance {formatAmount(BigInt(balance))} {UNIT}</span>{/if}
       </span>
       {#if !pinned}<ZenButton variant="ghost" size="sm" class="rounded-full min-h-11 !text-zen-fg" onclick={disconnect} disabled={!!busy}>Disconnect</ZenButton>{/if}
     </div>
@@ -494,7 +495,7 @@
       <ul class="links flex flex-col border-y-[0.5px] border-zen-border-subtle">
         {#each linkRows as { r, link }, i (r.commitment)}
           <li class="flex items-center gap-1 min-h-12 border-b-[0.5px] border-zen-border-subtle last:border-b-0">
-            <span class="flex-1 min-w-0 flex items-baseline gap-1.5 text-sm"><span class="truncate min-w-0">{r.email}</span><span class="shrink-0 whitespace-nowrap text-zen-fg-muted tabular-nums">· {formatAmount(BigInt(r.amount))} {UNIT}</span></span>
+            <span class="flex-1 min-w-0 flex flex-col py-1.5 text-sm"><span class="truncate" title={r.email}>{r.email}</span><span class="whitespace-nowrap text-xs text-zen-fg-muted tabular-nums">{formatAmount(BigInt(r.amount))} {UNIT}</span></span>
             <ZenButton variant="ghost" size="sm" class="rounded-full min-h-11 !text-zen-fg" onclick={() => copyOne(i)}>{copiedRow === i ? 'Copied' : 'Copy'}</ZenButton>
             <ZenButton href={mailtoHref(r, link)} variant="ghost" size="sm" class="rounded-full min-h-11 !text-zen-fg">Open in mail</ZenButton>
           </li>
@@ -570,7 +571,7 @@
         {:else}
           <div class="flex flex-col gap-2">
             <p class="text-sm">
-              <span class="font-semibold tabular-nums">{formatAmount(BigInt(draft!.total))} {UNIT}</span> to {draft!.recipients.length} {draft!.recipients.length === 1 ? 'person' : 'people'}{#if storageNear !== null}<span class="text-zen-fg-muted">{storageNear === '0' ? ' · storage already pre-paid' : ` + ${storageNear} NEAR storage`}</span>{/if}
+              <span class="font-semibold tabular-nums">{formatAmount(BigInt(draft!.total))} {UNIT}</span> to {draft!.recipients.length} {draft!.recipients.length === 1 ? 'person' : 'people'}{#if storageNear !== null}<span class="text-zen-fg-muted">{storageNear === '0' ? ' · storage deposit already paid' : ` + ${storageNear} NEAR storage deposit`}</span>{/if}
             </p>
             <ul class="flex flex-col text-sm border-y-[0.5px] border-zen-border-subtle max-h-64 overflow-auto">
               {#each draft!.recipients as r (r.commitment)}

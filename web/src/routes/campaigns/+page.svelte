@@ -210,7 +210,7 @@
     <div class="mt-8 pt-6 border-t-[0.5px] border-zen-border-subtle flex flex-col items-start gap-2">
       <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
         <span><span class="tabular-nums">{formatNear(freePrepay)} NEAR</span> <span class="text-zen-fg-muted">storage deposit</span></span>
-        {#if BigInt(freePrepay) > 0n}
+        {#if BigInt(freePrepay) > 0n && !(result?.for === 'prepay' && result.tone === 'success')}
           <ZenButton variant="ghost" size="sm" class="rounded-full min-h-11 !text-zen-fg" disabled={!!busy} onclick={() => run('Withdrawing…', withdrawTx(account!, contract!), 'prepay')}>Withdraw</ZenButton>
         {/if}
       </div>

@@ -326,7 +326,7 @@
 
         <!-- Sign in: which account first, then Google's own pill asset -->
         <div class="flex flex-col items-center gap-3 pt-1">
-          <p class="flex items-center gap-2 text-sm text-zen-fg text-center"><Mail class="w-4 h-4 shrink-0 text-zen-fg-muted" aria-hidden="true" />Use the Google account this link was sent to.</p>
+          <p class="text-sm text-zen-fg text-center max-w-xs"><Mail class="inline-block w-4 h-4 mr-1.5 -mt-0.5 align-middle text-zen-fg-muted" aria-hidden="true" />Use the Google account this link was sent to.</p>
           {#if busy}<Note tone="pending">{busy}</Note>{/if}
           <button class="google" disabled={!ready} onclick={signIn}>
             <img src={themeStore.isDark ? '/google/signin-dark.svg' : '/google/signin-light.svg'} alt="Sign in with Google" width="180" height="40" />

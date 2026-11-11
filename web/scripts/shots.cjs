@@ -331,6 +331,7 @@ const S = {
       const errs = []; p.on('pageerror', (e) => errs.push(String(e))); p.on('console', (m) => m.type() === 'error' && errs.push(m.text().slice(0, 140)));
       try {
         const o = (await fn(p, ctx)) || {};
+        await (o.page ?? p).evaluate(() => window.scrollTo(0, 0)); // a sticky navbar otherwise lands mid-page in full shots
         await (o.page ?? p).screenshot({ path: `${out}/${name}-${theme}-${w}.png`, fullPage: !!o.full });
         if (errs.length && theme === 'dark' && w === 390) console.log(name, 'console:', errs.slice(0, 3).join(' | '));
       } catch (e) { console.log(name, theme, w, 'FAIL', String(e).split('\n')[0]); }
