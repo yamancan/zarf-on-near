@@ -129,6 +129,16 @@ export function describeError(e: unknown): string {
   return MESSAGES[code] ?? 'Something went wrong. Open your claim link and try again.';
 }
 
+/**
+ * The receipt's failure title, so it never contradicts the sentence under it (critic r3 M6): a link already
+ * claimed is not "Not claimed", and a claim another tab is paying is not a failure. `muted`: no red.
+ */
+export function failureHeading(code: string): { title: string; muted: boolean } {
+  if (code === 'E105_ALREADY_CLAIMED') return { title: 'Already claimed', muted: true };
+  if (code === 'E123_CLAIM_PENDING') return { title: 'Already being paid', muted: true };
+  return { title: 'Not claimed', muted: false };
+}
+
 /** True when describeError fell back to a generic sentence, so the code is worth showing as a detail. */
 export const isUnmapped = (e: unknown): boolean => !MESSAGES[errorCode(e)];
 

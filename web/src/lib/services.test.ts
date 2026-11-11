@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import vectors from '../../../spec/vectors.json';
-import { accountExists, canRetry, ClaimError, describeCheckError, describeError, errorCode, isUnmapped, getCampaign, getClaimState, outcomeAfterRelay, requestSignature, settleClaim, submitClaim, type ClaimState } from './services';
+import { accountExists, canRetry, ClaimError, describeCheckError, describeError, errorCode, failureHeading, isUnmapped, getCampaign, getClaimState, outcomeAfterRelay, requestSignature, settleClaim, submitClaim, type ClaimState } from './services';
 
 const reply = (body: unknown, status = 200) => vi.fn(async () => new Response(JSON.stringify(body), { status }));
 afterEach(() => vi.unstubAllGlobals());
@@ -175,6 +175,14 @@ describe('describeCheckError (claim page, before any claim)', () => {
   });
   it('keeps the set-up message for missing config', () => {
     expect(describeCheckError(new ClaimError('NOT_CONFIGURED:PUBLIC_NEAR_RPC_URL'))).toMatch(/not fully set up/);
+  });
+});
+
+describe('failureHeading (receipt title agrees with its sentence, critic r3 M6)', () => {
+  it('maps already claimed and already being paid; everything else is Not claimed', () => {
+    expect(failureHeading('E105_ALREADY_CLAIMED')).toEqual({ title: 'Already claimed', muted: true });
+    expect(failureHeading('E123_CLAIM_PENDING')).toEqual({ title: 'Already being paid', muted: true });
+    for (const c of ['RPC_ERROR', 'E125_CAMPAIGN_ENDED', 'UNEXPECTED', '']) expect(failureHeading(c)).toEqual({ title: 'Not claimed', muted: false });
   });
 });
 

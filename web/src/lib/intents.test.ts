@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 // Subset of GET /v0/tokens recorded 2026-11-11; the status body is the verifier's recorded fixture.
 import tokens from './fixtures/1click-tokens.json';
 import pending from './fixtures/1click-status-pending.json';
-import { describeStatus, refusal, evmAddressError, getQuote, getStatus, loadPayout, lossBps, savePayout, NEAR_USDC_ASSET, PAYOUT_CHAINS, QuoteError, resolveAssets } from './intents';
+import { describeStatus, refusal, evmAddressError, getQuote, getStatus, loadPayout, lossBps, needsRecheck, nextStep, recheckReceipt, savePayout, NEAR_USDC_ASSET, PAYOUT_CHAINS, QuoteError, resolveAssets } from './intents';
+import { loadReceipt, saveReceipt, shownAmount, type Receipt } from './claim';
 
 const json = (body: unknown, status = 200) => vi.fn(async (_u: string, _i?: RequestInit) => new Response(JSON.stringify(body), { status }));
 
@@ -89,16 +90,70 @@ describe('getStatus and describeStatus', () => {
     expect(d('PENDING_DEPOSIT')).toMatchObject({ done: false, ok: true, outcome: 'in-transit', text: 'Sent from NEAR, waiting for the bridge.' });
     expect(d('KNOWN_DEPOSIT_TX')).toMatchObject({ done: false, outcome: 'in-transit' });
     expect(d('PROCESSING')).toMatchObject({ text: 'Paying out on Base.', outcome: 'in-transit' });
-    expect(d('SUCCESS', { amountOutFormatted: '1.99558' })).toEqual({ done: true, ok: true, outcome: 'paid', text: 'Arrived on Base: 1.99 USDC.' });
-    expect(d('REFUNDED')).toMatchObject({ done: true, ok: false, outcome: 'refunded', text: 'Returned to sender.near on NEAR.' });
+    expect(d('SUCCESS', { amountOutFormatted: '1.99558' })).toEqual({ done: true, ok: true, outcome: 'paid', text: 'Arrived on Base.' });
+    expect(d('REFUNDED')).toMatchObject({ done: true, ok: false, outcome: 'refunded', text: 'Went back to sender.near on NEAR.' });
+    expect(d('FAILED')).toMatchObject({ done: true, ok: false, outcome: 'failed', text: 'Not paid out on Base.' });
+  });
+  it('never shows the bridge\'s raw refund reason on the surface (critic r3 M4)', () => {
+    expect(describeStatus({ status: 'REFUNDED', refundReason: 'route unavailable' }, 'Base', 'sender.near').text).not.toMatch(/route unavailable|\(/);
   });
   it('never calls a failed payout returned (critic r2 P0-2): only REFUNDED is a refund', () => {
-    const d = (status: string) => describeStatus({ status: status as never }, 'Base', 'sender.near');
-    for (const s of ['FAILED', 'INCOMPLETE_DEPOSIT', 'SOMETHING_NEW']) {
-      expect(d(s)).toMatchObject({ done: true, ok: false, outcome: 'failed' });
-      expect(d(s).text).not.toMatch(/return(ed)? to|went back|refund/i);
-      expect(d(s).text).toMatch(/could not pay this out on Base.*contact the sender/);
+    expect(describeStatus({ status: 'FAILED' }, 'Base', 'sender.near').text).not.toMatch(/return(ed)? to|went back|refund/i);
+  });
+  it('keeps polling INCOMPLETE_DEPOSIT and any unknown status: still processing, not final (round 3 A2)', () => {
+    for (const s of ['INCOMPLETE_DEPOSIT', 'SOMETHING_NEW']) {
+      expect(describeStatus({ status: s as never }, 'Base', 'sender.near')).toEqual({ done: false, ok: true, outcome: 'in-transit', text: 'Still processing on the bridge.' });
     }
+  });
+  it('says what happens next after a payout that did not arrive, without "Keep this page" (round 3 A3)', () => {
+    expect(nextStep('failed', 'sender.near')).toBe('The USDC goes back to sender.near on NEAR. The sender can send you a new link.');
+    expect(nextStep('refunded', 'sender.near')).toBe('The sender can send you a new link.');
+    expect(nextStep('in-transit', 'sender.near')).toBe('');
+    expect(nextStep('paid', 'sender.near')).toBe('');
+  });
+});
+
+describe('recheckReceipt (a reopened cross-chain record asks the bridge again, round 3 A1)', () => {
+  const mem = (): Storage => {
+    const m = new Map<string, string>();
+    return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => void m.set(k, v), removeItem: (k) => void m.delete(k) } as Storage;
+  };
+  const K = 'zarf-near-1112.testnet', NOW = Date.UTC(2026, 10, 12, 14, 0);
+  const rec: Receipt = { amount: '10000000', destination: '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed', txHash: '6zgh2u9DqHHiXzdy9ouTP7oGky2T4nugqzqt9wJZwNFm', chainName: 'Base', bridge: 'in-transit', depositAddress: 'd'.repeat(64), refundTo: 'sender.near', savedAt: NOW };
+  it('asks again only for an unsettled cross-chain record with a deposit address', () => {
+    expect(needsRecheck(rec)).toBe(true);
+    expect(needsRecheck({ ...rec, bridge: 'failed' })).toBe(true);
+    expect(needsRecheck({ ...rec, bridge: 'paid' })).toBe(false);
+    expect(needsRecheck({ ...rec, bridge: 'refunded' })).toBe(false);
+    expect(needsRecheck({ ...rec, depositAddress: undefined })).toBe(false);
+    expect(needsRecheck({ amount: '1', destination: 'alice.testnet', txHash: rec.txHash })).toBe(false);
+    expect(needsRecheck(null)).toBe(false);
+  });
+  it('an in-transit record learns SUCCESS later: saved as paid with the amount the bridge paid', async () => {
+    const s = mem();
+    saveReceipt(K, '7', 'c', rec, s, NOW);
+    const f = json({ status: 'SUCCESS', swapDetails: { amountOutFormatted: '9.99558' } });
+    const a = await recheckReceipt(K, '7', 'c', rec, f, s, NOW + 60_000);
+    expect(f.mock.calls[0][0]).toContain(`depositAddress=${'d'.repeat(64)}`);
+    expect(a.done).toBe(true);
+    expect(loadReceipt(K, '7', 'c', s, NOW + 60_000)).toMatchObject({ bridge: 'paid', amountOut: '9.99558', checkedAt: NOW + 60_000 });
+    expect(shownAmount(a.r, '10', 'USDC')).toEqual({ value: '9.99', unit: 'USDC' });
+  });
+  it('learns a refund, and keeps asking while the bridge still processes', async () => {
+    const s = mem();
+    saveReceipt(K, '7', 'c', rec, s, NOW);
+    const busy = await recheckReceipt(K, '7', 'c', rec, json({ status: 'INCOMPLETE_DEPOSIT' }), s, NOW + 1);
+    expect(busy).toMatchObject({ done: false, r: { bridge: 'in-transit', checkedAt: NOW + 1 } });
+    const back = await recheckReceipt(K, '7', 'c', { ...rec, bridge: 'failed' }, json({ status: 'REFUNDED' }), s, NOW + 2);
+    expect(back).toMatchObject({ done: true, r: { bridge: 'refunded' } });
+    expect(loadReceipt(K, '7', 'c', s, NOW + 2)!.bridge).toBe('refunded');
+  });
+  it('a failed read or an unknown address changes nothing (the "last checked" time stays)', async () => {
+    const s = mem();
+    saveReceipt(K, '7', 'c', { ...rec, checkedAt: NOW }, s, NOW);
+    await expect(recheckReceipt(K, '7', 'c', rec, json({}, 500), s, NOW + 5)).rejects.toThrow();
+    expect(await recheckReceipt(K, '7', 'c', rec, json({}, 404), s, NOW + 5)).toEqual({ r: rec, done: false });
+    expect(loadReceipt(K, '7', 'c', s, NOW + 5)!.checkedAt).toBe(NOW);
   });
 });
 
@@ -115,21 +170,25 @@ describe('savePayout / loadPayout (receipt reload)', () => {
     const m = new Map<string, string>();
     return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) } as unknown as Storage;
   };
-  const p = { depositAddress: 'd'.repeat(64), txHash: 'tx', chainName: 'Base', recipient: '0x' + 'ab'.repeat(20), refundTo: 'sender.near', amountOutFormatted: '9.99' };
-  it('round-trips per campaign and commitment', () => {
+  const p = { depositAddress: 'd'.repeat(64), txHash: 'tx', chainName: 'Base', recipient: '0x' + 'ab'.repeat(20), refundTo: 'sender.near', amountOutFormatted: '9.99', amount: '10000000' };
+  const K = 'zarf-near-1112.testnet';
+  it('round-trips per contract, campaign and commitment', () => {
     const s = mem();
-    savePayout('7', 'c1', p, s);
-    expect(loadPayout('7', 'c1', s)).toEqual(p);
-    expect(loadPayout('7', 'c2', s)).toBeNull();
+    savePayout(K, '7', 'c1', p, s);
+    expect(loadPayout(K, '7', 'c1', s)).toEqual(p);
+    expect(loadPayout(K, '7', 'c2', s)).toBeNull();
+    expect(loadPayout('old-contract.testnet', '7', 'c1', s)).toBeNull(); // round 3: the contract id is in the key
+    savePayout(K, '7', 'c3', { ...p, amount: '-1' }, s);
+    expect(loadPayout(K, '7', 'c3', s)).toBeNull();
   });
   it('tolerates garbage and a storage that throws', () => {
     const s = mem();
-    s.setItem('zarf-near:payout:7/c1', '{');
-    expect(loadPayout('7', 'c1', s)).toBeNull();
-    s.setItem('zarf-near:payout:7/c1', JSON.stringify({ ...p, depositAddress: 'alice.near' }));
-    expect(loadPayout('7', 'c1', s)).toBeNull();
+    s.setItem(`zarf-near:payout:${K}/7/c1`, '{');
+    expect(loadPayout(K, '7', 'c1', s)).toBeNull();
+    s.setItem(`zarf-near:payout:${K}/7/c1`, JSON.stringify({ ...p, depositAddress: 'alice.near' }));
+    expect(loadPayout(K, '7', 'c1', s)).toBeNull();
     const broken = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); } } as unknown as Storage;
-    expect(() => savePayout('7', 'c1', p, broken)).not.toThrow();
-    expect(loadPayout('7', 'c1', broken)).toBeNull();
+    expect(() => savePayout(K, '7', 'c1', p, broken)).not.toThrow();
+    expect(loadPayout(K, '7', 'c1', broken)).toBeNull();
   });
 });

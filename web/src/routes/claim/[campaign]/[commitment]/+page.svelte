@@ -222,7 +222,7 @@
         {@render terminal(SearchX, 'muted', 'Campaign not found', 'Ask the sender for your link again.', 'home')}
       {:else if check === 'claimed'}
         <div class="flex flex-col items-center text-center gap-4 py-2">
-          <ClaimRecord r={paid} amount={link!.amount} title="Already claimed" />
+          <ClaimRecord r={paid} amount={link!.amount} title="Already claimed" contract={env.PUBLIC_CONTRACT_ID ?? ''} {campaign} {commitment} />
         </div>
       {:else if check === 'pending'}
         {@render terminal(Clock, 'muted', 'This claim is being paid', 'It usually settles within a minute.', 'recheck')}

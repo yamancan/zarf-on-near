@@ -1,6 +1,7 @@
 // Browser pass for the cross-chain claim with every network stubbed: chain views (mainnet), 1Click,
 // Google, verifier and relayer. Walks picker → dry quote → real quote → sign-in → receipt, for
-// 1Click ending SUCCESS and REFUNDED. Nothing leaves the browser.
+// 1Click ending SUCCESS, REFUNDED and FAILED, plus a claim reopened in a new tab after the first one closed
+// while the bridge was still processing, which must ask the bridge again and learn SUCCESS. Nothing leaves the browser.
 // Usage: PLAYWRIGHT_CORE=/path/to/playwright-core node scripts/intents-e2e.cjs http://localhost:5181
 // (the page must run with PUBLIC_GOOGLE_CLIENT_ID set, e.g. wrangler dev --var PUBLIC_GOOGLE_CLIENT_ID:test).
 const { chromium } = require(process.env.PLAYWRIGHT_CORE || 'playwright-core');
@@ -15,19 +16,24 @@ const enc = (o) => [...Buffer.from(JSON.stringify(o))];
 const assert = (c, m) => { if (!c) throw new Error(`FAIL: ${m}`); };
 
 async function run(final) {
+  const reopen = final === 'REOPENED';
+  const bridge = { status: reopen ? 'PROCESSING' : final };
+  const chain = { claimed: false };
   const b = await chromium.launch();
-  const p = await b.newPage({ viewport: { width: 390, height: 844 } });
+  const ctx = await b.newContext({ viewport: { width: 390, height: 844 } });
+  const p = await ctx.newPage();
   const errs = [], quotes = [], seen = {};
   p.on('pageerror', (e) => errs.push(String(e)));
   p.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
-  await p.route(/rpc|fastnear|near\.org/, async (r) => {
+  await ctx.route(/rpc|fastnear|near\.org/, async (r) => {
     const q = JSON.parse(r.request().postData()).params;
     const res = q.method_name === 'get_network' ? 'mainnet'
       : q.method_name === 'get_campaign' ? { sender: 'sender.near', merkle_root: v.campaigns.main.merkle_root, deadline_ns: '1894488400000000000' }
+      : q.method_name === 'claim_state' && chain.claimed ? 'claimed'
       : 'unclaimed';
     await r.fulfill({ contentType: 'application/json', body: JSON.stringify({ jsonrpc: '2.0', id: 1, result: { result: enc(res) } }) });
   });
-  await p.route('https://1click.chaindefuser.com/**', async (r) => {
+  await ctx.route('https://1click.chaindefuser.com/**', async (r) => {
     const u = new URL(r.request().url());
     if (u.pathname === '/v0/tokens') return r.fulfill({ contentType: 'application/json', body: JSON.stringify(tokens) });
     if (u.pathname === '/v0/quote') {
@@ -38,10 +44,11 @@ async function run(final) {
     }
     if (u.pathname === '/v0/deposit/submit') { seen.submit = JSON.parse(r.request().postData()); return r.fulfill({ status: 200, body: '{}' }); }
     if (u.pathname === '/v0/status') {
-      const swapDetails = final === 'SUCCESS'
+      seen.statusReads = (seen.statusReads ?? 0) + 1;
+      const swapDetails = bridge.status === 'SUCCESS'
         ? { amountOutFormatted: '9.99558', destinationChainTxHashes: [{ hash: '0xabc', explorerUrl: 'https://basescan.org/tx/0xabc' }] }
         : { refundReason: 'route unavailable' };
-      return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ status: final, swapDetails }) });
+      return r.fulfill({ contentType: 'application/json', body: JSON.stringify({ status: bridge.status, swapDetails }) });
     }
     return r.fulfill({ status: 404, body: '{}' });
   });
@@ -74,7 +81,7 @@ async function run(final) {
   assert(/returns to sender\.near on NEAR/.test(detail), 'refund copy names the sender');
   await p.locator('button.google').click();
   await p.waitForURL(/receipt/);
-  const title = { SUCCESS: 'Arrived on Base', REFUNDED: 'Not delivered', FAILED: 'Payout failed' }[final];
+  const title = { SUCCESS: 'Arrived on Base', REFUNDED: 'Not delivered', FAILED: 'Payout failed', REOPENED: 'Sending to Base' }[final];
   await p.waitForFunction((t) => document.querySelector('h1')?.textContent?.includes(t), title, { timeout: 20000 });
   const text = await p.locator('main').innerText();
 
@@ -85,11 +92,32 @@ async function run(final) {
   assert(seen.verifier.destination === DEP && seen.verifier.intents.recipient === RECIPIENT && seen.verifier.intents.destination_asset.startsWith('nep141:base-'), 'verifier body');
   assert(seen.submit?.depositAddress === DEP, 'deposit submitted');
   if (final === 'SUCCESS') assert(/basescan\.org/.test(await p.locator('a[href*=basescan]').getAttribute('href')), 'Base explorer link');
-  else if (final === 'REFUNDED') assert(/Returned to sender\.near on NEAR/.test(text), 'refund copy');
-  else assert(/could not pay this out on Base/.test(text) && !/Returned to/.test(text), 'a failed payout is never called returned');
-  // Remembered as the bridge reported it, never as paid before that.
-  const rec = await p.evaluate(() => Object.entries(localStorage).find(([k]) => k.startsWith('zarf-near:receipt:'))?.[1]);
-  assert(JSON.parse(rec).bridge === { SUCCESS: 'paid', REFUNDED: 'refunded', FAILED: 'failed' }[final], `stored bridge outcome: ${rec}`);
+  else if (final === 'REFUNDED') assert(/Went back to sender\.near on NEAR/.test(text) && /new link/.test(text) && !/route unavailable/.test(text), 'refund copy, raw reason only under Details');
+  else if (final === 'FAILED') assert(/Not paid out on Base/.test(text) && /goes back to sender\.near on NEAR\. The sender can send you a new link/.test(text) && !/Keep this page|Returned to/.test(text), 'a failed payout says what happens next and is never called returned');
+  // One amount: the link's 10 USDC until the bridge confirms, then what it paid.
+  assert(final === 'SUCCESS' ? /9\.99\s*USDC/.test(text) : /10\s*(TEST )?USDC/.test(text), `receipt amount: ${text}`);
+  // Remembered as the bridge reported it, never as paid before that, with the deposit address for a reopened link.
+  const rec = JSON.parse(await p.evaluate(() => Object.entries(localStorage).find(([k]) => k.startsWith('zarf-near:receipt:'))?.[1]));
+  assert(rec.bridge === { SUCCESS: 'paid', REFUNDED: 'refunded', FAILED: 'failed', REOPENED: 'in-transit' }[final] && rec.depositAddress === DEP && rec.refundTo === 'sender.near', `stored record: ${JSON.stringify(rec)}`);
+  if (reopen) {
+    // The first tab closes while the bridge still processes; later the bridge pays. The link is opened again from the email.
+    await p.close();
+    bridge.status = 'SUCCESS'; chain.claimed = true;
+    const before = seen.statusReads;
+    const q = await ctx.newPage();
+    q.on('pageerror', (e) => errs.push(String(e)));
+    await q.goto(base + v.links.main[0]);
+    await q.waitForFunction(() => /Paid out/i.test(document.querySelector('main')?.innerText ?? ''), null, { timeout: 20000 });
+    const again = await q.locator('main').innerText();
+    assert(seen.statusReads > before, 'the reopened link asked the bridge again');
+    assert(/Already claimed/.test(again) && /9\.99\s*USDC/.test(again) && !/On its way/i.test(again), `reopened record: ${again}`);
+    const after = JSON.parse(await q.evaluate(() => Object.entries(localStorage).find(([k]) => k.startsWith('zarf-near:receipt:'))?.[1]));
+    assert(after.bridge === 'paid' && after.amountOut === '9.99558' && typeof after.checkedAt === 'number', `record updated: ${JSON.stringify(after)}`);
+    assert(!errs.length, `console errors: ${errs.join(' | ')}`);
+    console.log(`${final}: PASS · ${again.split('\n').slice(0, 4).join(' / ')}`);
+    await b.close();
+    return;
+  }
   // A judge reloads: the receipt resumes following the payout from sessionStorage.
   await p.reload();
   await p.waitForFunction((t) => document.querySelector('h1')?.textContent?.includes(t), title, { timeout: 20000 });
@@ -102,4 +130,5 @@ async function run(final) {
   await run('SUCCESS');
   await run('REFUNDED');
   await run('FAILED');
+  await run('REOPENED');
 })().catch((e) => { console.error(e.message); process.exit(1); });

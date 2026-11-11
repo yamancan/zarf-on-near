@@ -172,7 +172,14 @@ export interface Receipt {
   chainName?: string; // set for a cross-chain payout
   bridge?: BridgeOutcome; // set for a cross-chain payout
   amountOut?: string; // cross-chain: what the bridge reported paying, "9.99558" (display only)
+  depositAddress?: string; // cross-chain: the 1Click deposit address (public), so a reopened link can ask the bridge again
+  refundTo?: string; // cross-chain: where a refund goes (the campaign sender)
+  checkedAt?: number; // cross-chain: when the bridge last answered (ms)
+  savedAt?: number; // when this browser first saved the record; it expires RECEIPT_TTL_MS later
 }
+
+/** A remembered receipt is cleared when read 30 days after it was saved (it names a destination and an amount). */
+export const RECEIPT_TTL_MS = 30 * 86_400_000;
 
 /** A cross-chain payout as last reported by the bridge. Only 'paid' means it arrived. */
 export type BridgeOutcome = 'in-transit' | 'paid' | 'refunded' | 'failed';
@@ -182,19 +189,28 @@ const OUTCOMES: BridgeOutcome[] = ['in-transit', 'paid', 'refunded', 'failed'];
 const receiptKey = (contract: string, campaign: string, commitment: string) => `zarf-near:receipt:${contract}/${campaign}/${commitment}`;
 
 // localStorage, not sessionStorage: the recipient often reopens the link from the email in a new tab.
-export function saveReceipt(contract: string, campaign: string, commitment: string, r: Receipt, store?: Storage): void {
+export function saveReceipt(contract: string, campaign: string, commitment: string, r: Receipt, store?: Storage, now = Date.now()): void {
   try {
-    (store ?? localStorage).setItem(receiptKey(contract, campaign, commitment), JSON.stringify(r));
+    (store ?? localStorage).setItem(receiptKey(contract, campaign, commitment), JSON.stringify({ ...r, savedAt: r.savedAt ?? now }));
   } catch {
     // best effort: without it a reload shows "Already claimed" without the transaction
   }
 }
 
-export function loadReceipt(contract: string, campaign: string, commitment: string, store?: Storage): Receipt | null {
+export function loadReceipt(contract: string, campaign: string, commitment: string, store?: Storage, now = Date.now()): Receipt | null {
   try {
-    const r = JSON.parse((store ?? localStorage).getItem(receiptKey(contract, campaign, commitment)) ?? 'null') as Receipt | null;
+    const s = store ?? localStorage;
+    const key = receiptKey(contract, campaign, commitment);
+    const r = JSON.parse(s.getItem(key) ?? 'null') as Receipt | null;
     if (!r || !/^[1-9]\d{0,38}$/.test(r.amount) || typeof r.destination !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(r.txHash)) return null;
+    if (!(typeof r.savedAt === 'number' && now - r.savedAt < RECEIPT_TTL_MS)) {
+      s.removeItem(key); // expired, or from before records had a date
+      return null;
+    }
     if (r.amountOut !== undefined && !/^\d+(\.\d+)?$/.test(r.amountOut)) delete r.amountOut;
+    if (r.depositAddress !== undefined && !/^[0-9a-f]{64}$/.test(r.depositAddress)) delete r.depositAddress;
+    if (r.refundTo !== undefined && typeof r.refundTo !== 'string') delete r.refundTo;
+    if (r.checkedAt !== undefined && typeof r.checkedAt !== 'number') delete r.checkedAt;
     // A cross-chain record without a known outcome is still in transit, whatever else it says.
     return r.chainName ? { ...r, bridge: OUTCOMES.includes(r.bridge!) ? r.bridge : 'in-transit' } : r;
   } catch {
@@ -203,9 +219,26 @@ export function loadReceipt(contract: string, campaign: string, commitment: stri
 }
 
 /** Records the bridge's outcome on a cross-chain receipt already saved; nothing happens without one. */
-export function settleReceipt(contract: string, campaign: string, commitment: string, bridge: BridgeOutcome, amountOut?: string, store?: Storage): void {
-  const r = loadReceipt(contract, campaign, commitment, store);
-  if (r?.chainName) saveReceipt(contract, campaign, commitment, { ...r, bridge, ...(bridge === 'paid' && amountOut ? { amountOut } : {}) }, store);
+export function settleReceipt(contract: string, campaign: string, commitment: string, bridge: BridgeOutcome, amountOut?: string, store?: Storage, now = Date.now()): Receipt | null {
+  const r = loadReceipt(contract, campaign, commitment, store, now);
+  if (!r?.chainName) return r;
+  const next = { ...r, bridge, checkedAt: now, ...(bridge === 'paid' && amountOut ? { amountOut } : {}) };
+  saveReceipt(contract, campaign, commitment, next, store, now);
+  return next;
+}
+
+/**
+ * The one amount a claim shows, on its receipt and on "Already claimed" alike: what the bridge paid once it
+ * confirmed the payout, otherwise the link's amount (on its way, returned or not delivered).
+ */
+export function shownAmount(r: Pick<Receipt, 'chainName' | 'bridge' | 'amountOut'>, linkValue: string, linkUnit: string): { value: string; unit: string } {
+  return r.chainName && r.bridge === 'paid' && r.amountOut ? { value: twoDecimals(r.amountOut), unit: 'USDC' } : { value: linkValue, unit: linkUnit };
+}
+
+/** A remembered receipt is shown only once the chain says this claim is claimed (security review m1). */
+export async function confirmRemembered(remembered: Receipt | null, readState: () => Promise<string>): Promise<Receipt | null> {
+  if (!remembered) return null;
+  return (await readState()) === 'claimed' ? remembered : null; // a failed read throws: the page offers "Check again"
 }
 
 /** "12 Nov 2026, 14:02": when a remembered claim landed, in the reader's own zone. */

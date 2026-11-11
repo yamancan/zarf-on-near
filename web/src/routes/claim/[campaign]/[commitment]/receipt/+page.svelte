@@ -2,10 +2,10 @@
   import { onMount } from 'svelte';
   import { page } from '$app/state';
   import { env } from '$env/dynamic/public';
-  import { clearAttempt, isImplicitAccount, loadAttempt, loadReceipt, middle, saveReceipt, settleReceipt, signedIn, twoDecimals, type Receipt } from '$lib/claim';
+  import { clearAttempt, confirmRemembered, isImplicitAccount, loadAttempt, loadReceipt, middle, saveReceipt, settleReceipt, shownAmount, signedIn, type Receipt } from '$lib/claim';
   import { UNIT } from '$lib/network';
   import ClaimRecord from '$lib/ClaimRecord.svelte';
-  import { canRetry, ClaimError, describeError, errorCode, getClaimState, isUnmapped, outcomeAfterRelay, requestSignature, submitClaim } from '$lib/services';
+  import { canRetry, ClaimError, describeError, errorCode, failureHeading, getClaimState, isUnmapped, outcomeAfterRelay, requestSignature, submitClaim } from '$lib/services';
   import { formatAmount } from '$lib/create/recipients';
   import { AlertTriangle, ArrowUpRight, Check, ChevronDown, Clock, Loader2, Mail, Undo2 } from 'lucide-svelte';
   import Amount from '$lib/Amount.svelte';
@@ -13,7 +13,7 @@
   import Note from '$lib/Note.svelte';
   import ZenButton from '$lib/zen/components/ZenButton.svelte';
   import ZenCard from '$lib/zen/components/ZenCard.svelte';
-  import { describeStatus, getStatus, loadPayout, savePayout, submitDeposit, type StatusView } from '$lib/intents';
+  import { describeStatus, getStatus, loadPayout, nextStep, savePayout, submitDeposit, type StatusView } from '$lib/intents';
 
   const attempt = loadAttempt();
   const idToken = signedIn.idToken;
@@ -28,7 +28,7 @@
   let txHash = $state('');
   const explorer = $derived(env.PUBLIC_EXPLORER_TX_URL ? `${env.PUBLIC_EXPLORER_TX_URL}${txHash}` : '');
   // A reload after the NEAR claim has no sign-in left, but the payout it started can still be followed.
-  const resumed = ok ? null : loadPayout(page.params.campaign!, page.params.commitment!);
+  const resumed = ok ? null : loadPayout(contract, campaignId, commitmentId);
   const payout = ok ? attempt!.intents : resumed;
   const depositAddress = ok ? attempt!.destination : (resumed?.depositAddress ?? '');
   // A reload or another tab after a claim: what this browser remembers (claim.ts saveReceipt), shown only once
@@ -39,8 +39,7 @@
   async function verifyRemembered() {
     recall = 'checking';
     try {
-      const s = await getClaimState(env.PUBLIC_NEAR_RPC_URL, contract, campaignId, commitmentId);
-      if (s === 'claimed') stored = remembered;
+      stored = await confirmRemembered(remembered, () => getClaimState(env.PUBLIC_NEAR_RPC_URL, contract, campaignId, commitmentId));
       recall = null;
     } catch {
       recall = 'error';
@@ -53,17 +52,18 @@
   const bridgeView = $derived(bridge && payout ? describeStatus(bridge, payout.chainName, payout.refundTo) : null);
 
   /** After the NEAR claim lands: follow the 1Click swap every 5 s until it settles. */
-  async function followPayout(depositAddress: string) {
-    void submitDeposit(depositAddress, txHash);
+  async function followPayout(depositAddress: string, again = false) {
+    stalled = false;
+    if (!again) void submitDeposit(depositAddress, txHash);
     for (let i = 0; i < 360; i++) { // 30 min, then stop and say where to look
       try {
         const s = await getStatus(depositAddress);
-        if (s) bridge = s;
-        if (bridgeView?.done) {
-          // Remembered only now: until the bridge reports, a reopened link says "in transit", never "paid out".
-          settleReceipt(contract, campaignId, commitmentId, bridgeView.outcome, bridge?.amountOutFormatted);
-          return;
+        if (s) {
+          bridge = s;
+          // Every answer is remembered with its time; "paid" only after SUCCESS (describeStatus).
+          settleReceipt(contract, campaignId, commitmentId, bridgeView!.outcome, s.amountOutFormatted);
         }
+        if (bridgeView?.done) return;
       } catch {
         // keep polling: a status read failing says nothing about the swap
       }
@@ -110,12 +110,12 @@
         clearAttempt(); // salt and destination are no longer needed in this tab
         saveReceipt(contract, attempt.campaign, attempt.commitment, {
           amount: attempt.amount, txHash, at: Date.now(), destination: attempt.intents?.recipient ?? attempt.destination,
-          ...(attempt.intents ? { chainName: attempt.intents.chainName, bridge: 'in-transit' as const } : {}),
+          ...(attempt.intents ? { chainName: attempt.intents.chainName, bridge: 'in-transit' as const, depositAddress, refundTo: attempt.intents.refundTo } : {}),
         });
         if (attempt.intents) {
           const i = attempt.intents;
-          savePayout(attempt.campaign, attempt.commitment, {
-            depositAddress, txHash, chainName: i.chainName, recipient: i.recipient, refundTo: i.refundTo, amountOutFormatted: i.amountOutFormatted,
+          savePayout(contract, attempt.campaign, attempt.commitment, {
+            depositAddress, txHash, chainName: i.chainName, recipient: i.recipient, refundTo: i.refundTo, amountOutFormatted: i.amountOutFormatted, amount: attempt.amount,
           });
           void followPayout(depositAddress);
         }
@@ -155,10 +155,11 @@
   </ZenButton>
 {/snippet}
 
-{#snippet details(text: string, value: string)}
+{#snippet details(text: string, value: string, more = '')}
   <details class="group text-xs text-zen-fg-muted">
     <summary class="inline-flex items-center gap-1.5 min-h-11 cursor-pointer list-none hover:text-zen-fg">Details <ChevronDown class="w-3.5 h-3.5 transition-transform group-open:rotate-180" aria-hidden="true" /></summary>
     <p class="break-all">{text} <span class="font-mono">{value}</span></p>
+    {#if more}<p class="break-words mt-1">{more}</p>{/if}
   </details>
 {/snippet}
 
@@ -175,13 +176,20 @@
     <Note tone="error" center>{error}</Note>
     {@render back()}
     <p class="text-xs text-zen-fg-muted">Nothing was paid. Your claim is still open.</p>
+  {:else if step === 'failed' && failCode === 'E105_ALREADY_CLAIMED'}
+    <!-- The title and the sentence say the same thing: as "Already claimed" on the claim page -->
+    <Medallion icon={Check} tone="muted" />
+    <h1 class="text-xl font-semibold tracking-tight">Already claimed</h1>
+    <p class="text-sm text-zen-fg-muted max-w-xs" role="alert">If that was not you, contact the sender.</p>
+    {@render back()}
   {:else}
-    {#if step === 'unsettled'}
+    {@const head = step === 'unsettled' ? { title: 'Still settling', muted: true } : step === 'reverted' ? { title: 'Not claimed', muted: false } : failureHeading(failCode)}
+    {#if head.muted}
       <Medallion icon={Clock} tone="muted" />
     {:else}
       <Medallion icon={AlertTriangle} tone="error" />
     {/if}
-    <h1 class="text-xl font-semibold tracking-tight">{step === 'unsettled' ? 'Still settling' : 'Not claimed'}</h1>
+    <h1 class="text-xl font-semibold tracking-tight">{head.title}</h1>
     {@render failure()}
   {/if}
 {/snippet}
@@ -191,7 +199,7 @@
     <Note tone="error" center>The transfer failed and your claim is open again.</Note>
     {@render back()}
   {:else if step === 'unsettled'}
-    <p class="text-sm text-zen-fg-muted max-w-xs">The transaction was sent but has not settled yet. There is no need to claim again.</p>
+    <p class="text-sm text-zen-fg-muted max-w-xs">Sent, not settled yet. No need to claim again.</p>
     {#if explorer}{@render explorerButton(explorer, 'View the transaction')}{/if}
   {:else if step === 'failed'}
     <Note tone="error" center>{error}</Note>
@@ -229,7 +237,7 @@
       {:else if stored && !stored.chainName}
         {@render nearDone(stored.amount, stored.destination, stored.txHash)}
       {:else if stored}
-        <ClaimRecord r={stored} amount={stored.amount} title={stored.bridge === 'paid' ? `Arrived on ${stored.chainName}` : stored.bridge === 'in-transit' ? 'Claimed on NEAR' : stored.bridge === 'failed' ? 'Payout failed' : 'Not delivered'} />
+        <ClaimRecord r={stored} amount={stored.amount} {contract} campaign={campaignId} commitment={commitmentId} />
       {:else if !resumed && (!ok || !attempt)}
         <Medallion icon={Mail} tone="muted" />
         <h1 class="text-xl font-semibold tracking-tight">Nothing to show yet</h1>
@@ -244,6 +252,8 @@
         {@const arrived = outcome === 'paid'}
         {@const refunded = outcome === 'refunded'}
         {@const lost = outcome === 'failed'}
+        {@const waiting = stalled && !bridgeView?.done}
+        {@const shown = shownAmount({ chainName: payout.chainName, bridge: outcome, amountOut: bridge?.amountOutFormatted }, formatAmount(BigInt(ok ? attempt!.amount : (resumed?.amount ?? '0'))), UNIT)}
         {#if step === 'done' || working}
           {#if arrived}
             <Medallion icon={Check} tone="success" />
@@ -251,16 +261,18 @@
             <Medallion icon={Undo2} tone="error" />
           {:else if lost}
             <Medallion icon={AlertTriangle} tone="error" />
+          {:else if waiting}
+            <Medallion icon={Clock} tone="muted" />
           {:else}
             <Medallion icon={Loader2} tone="muted" spin />
           {/if}
           <h1 class="text-xl font-semibold tracking-tight">
-            {#if step === 'checking'}Checking your claim…{:else if working}Sending your tokens…{:else if arrived}Arrived on {payout.chainName}{:else if refunded}Not delivered{:else if lost}Payout failed{:else}Sending to {payout.chainName}…{/if}
+            {#if step === 'checking'}Checking your claim…{:else if working}Sending your tokens…{:else if arrived}Arrived on {payout.chainName}{:else if refunded}Not delivered{:else if lost}Payout failed{:else if waiting}Still on its way to {payout.chainName}{:else}Sending to {payout.chainName}…{/if}
           </h1>
           <Amount
             label={arrived ? 'You received' : refunded ? 'Returned to the sender' : lost ? 'Not delivered' : 'On its way'}
-            value={twoDecimals(arrived && bridge?.amountOutFormatted ? bridge.amountOutFormatted : payout.amountOutFormatted)}
-            approx={!arrived}
+            value={shown.value}
+            unit={shown.unit}
             struck={refunded}
           />
           <p class="text-sm text-zen-fg-muted">to <span class="font-mono text-zen-fg" title={payout.recipient}>{middle(payout.recipient)}</span> on {payout.chainName}</p>
@@ -279,15 +291,19 @@
               {#if arrived}<Check class="w-4 h-4 text-zen-success-content shrink-0" aria-hidden="true" />
               {:else if refunded}<Undo2 class="w-4 h-4 text-zen-error-content shrink-0" aria-hidden="true" />
               {:else if lost}<AlertTriangle class="w-4 h-4 text-zen-error-content shrink-0" aria-hidden="true" />
+              {:else if waiting}<Clock class="w-4 h-4 text-zen-fg-muted shrink-0" aria-hidden="true" />
               {:else}<Loader2 class="w-4 h-4 text-zen-fg-muted shrink-0 animate-spin" aria-hidden="true" />{/if}
-              <span class="flex-1 {refunded || lost ? 'text-zen-error-content' : ''}" role="status">{bridgeView?.text ?? 'Sent from NEAR, waiting for the bridge.'}</span>
+              <span class="flex-1 {refunded || lost ? 'text-zen-error-content' : ''}" role="status">{waiting ? 'Waiting for the bridge for 30 minutes.' : (bridgeView?.text ?? 'Sent from NEAR, waiting for the bridge.')}</span>
             </li>
           </ol>
+          {#if refunded || lost}<p class="text-sm text-zen-fg-muted max-w-xs">{nextStep(outcome, payout.refundTo)}</p>{/if}
           {#if bridge?.destinationTx}
             {#if bridge.destinationTx.explorerUrl}{@render explorerButton(bridge.destinationTx.explorerUrl, `View it on ${payout.chainName}`)}{:else}<p class="text-xs text-zen-fg-muted">{payout.chainName} transaction <span class="font-mono">{middle(bridge.destinationTx.hash, 8)}</span></p>{/if}
           {/if}
-          {#if stalled && !bridgeView?.done}<Note tone="info" center>Still processing after 30 minutes. Keep this page and contact the sender.</Note>{/if}
-          {#if refunded || lost || stalled}{@render details('Bridge deposit address', depositAddress)}{/if}
+          {#if waiting}
+            <ZenButton variant="secondary" class="rounded-full min-h-11" onclick={() => followPayout(depositAddress, true)}>Check again</ZenButton>
+          {/if}
+          {#if refunded || lost || waiting}{@render details('Bridge deposit address', depositAddress, bridge?.refundReason ? `The bridge said: ${bridge.refundReason}` : '')}{/if}
         {/if}
       {:else if attempt}
         {#if step === 'done'}
@@ -297,6 +313,7 @@
           <h1 class="text-xl font-semibold tracking-tight">{step === 'checking' ? 'Checking your claim…' : 'Sending your tokens…'}</h1>
           <Amount label="Claiming" value={formatAmount(BigInt(attempt.amount))} unit={UNIT} />
           <p class="text-sm text-zen-fg-muted">to <span class="font-mono text-zen-fg" title={attempt.destination}>{middle(attempt.destination, 8)}</span></p>
+          {#if step !== 'checking'}<p class="text-xs text-zen-fg-muted max-w-xs">Keep this page open. It usually settles within a minute.</p>{/if}
         {:else}
           {@render failureCard()}
         {/if}

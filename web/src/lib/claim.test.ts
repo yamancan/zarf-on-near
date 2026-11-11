@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import vectors from '../../../spec/vectors.json';
 import {
   classifyDestination, claimState, deadlineText, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isImplicitAccount, isValidAccountId, loadAttempt, newAttemptId,
-  decodeProof, encodeProof, parseCallback, parseLinkFragment, saveAttempt, clearAttempt, saveReceipt, loadReceipt, settleReceipt, claimedAt, middle, twoDecimals,
+  decodeProof, encodeProof, parseCallback, parseLinkFragment, saveAttempt, clearAttempt, saveReceipt, loadReceipt, settleReceipt, claimedAt, middle, twoDecimals, shownAmount, confirmRemembered, RECEIPT_TTL_MS,
 } from './claim';
 
 const main = vectors.campaigns.main;
@@ -165,7 +165,7 @@ describe('receipt record (reload or reopened link after a paid claim)', () => {
     const s = mem();
     expect(loadReceipt(K, '7', 'c', s)).toBeNull();
     saveReceipt(K, '7', 'c', r, s);
-    expect(loadReceipt(K, '7', 'c', s)).toEqual(r);
+    expect(loadReceipt(K, '7', 'c', s)).toMatchObject(r);
     expect(loadReceipt(K, '7', 'd', s)).toBeNull();
     s.setItem(`zarf-near:receipt:${K}/7/c`, '{');
     expect(loadReceipt(K, '7', 'c', s)).toBeNull();
@@ -215,6 +215,40 @@ describe('receipt record (reload or reopened link after a paid claim)', () => {
     const s = mem();
     saveReceipt(K, '7', 'c', { ...r, chainName: 'Base', bridge: 'paid', amountOut: '<b>9</b>' }, s);
     expect(loadReceipt(K, '7', 'c', s)!.amountOut).toBeUndefined();
+  });
+  it('expires 30 days after it was saved, and is cleared when read after that (security nit)', () => {
+    const s = mem(), t = Date.UTC(2026, 10, 12);
+    saveReceipt(K, '7', 'c', r, s, t);
+    saveReceipt(K, '7', 'c', loadReceipt(K, '7', 'c', s, t)!, s, t + RECEIPT_TTL_MS - 2); // a later save keeps the first date
+    expect(loadReceipt(K, '7', 'c', s, t + RECEIPT_TTL_MS - 1)).toMatchObject({ ...r, savedAt: t });
+    expect(loadReceipt(K, '7', 'c', s, t + RECEIPT_TTL_MS)).toBeNull();
+    expect(s.getItem(`zarf-near:receipt:${K}/7/c`)).toBeNull();
+    s.setItem(`zarf-near:receipt:${K}/7/c`, JSON.stringify(r)); // undated (round 2 records): cleared too
+    expect(loadReceipt(K, '7', 'c', s)).toBeNull();
+    expect(s.getItem(`zarf-near:receipt:${K}/7/c`)).toBeNull();
+  });
+  it('keeps a valid deposit address and drops a malformed one', () => {
+    const s = mem();
+    saveReceipt(K, '7', 'c', { ...r, chainName: 'Base', depositAddress: 'd'.repeat(64), refundTo: 'sender.near' }, s);
+    expect(loadReceipt(K, '7', 'c', s)).toMatchObject({ depositAddress: 'd'.repeat(64), refundTo: 'sender.near' });
+    saveReceipt(K, '7', 'c', { ...r, chainName: 'Base', depositAddress: 'javascript:x' }, s);
+    expect(loadReceipt(K, '7', 'c', s)!.depositAddress).toBeUndefined();
+  });
+  it('shows one amount: the bridge payout once paid, otherwise the link amount (round 3 A4)', () => {
+    expect(shownAmount({ chainName: 'Base', bridge: 'paid', amountOut: '9.99558' }, '10', 'USDC')).toEqual({ value: '9.99', unit: 'USDC' });
+    for (const bridge of ['in-transit', 'failed', 'refunded'] as const) expect(shownAmount({ chainName: 'Base', bridge, amountOut: '9.99558' }, '10', 'USDC')).toEqual({ value: '10', unit: 'USDC' });
+    expect(shownAmount({ chainName: 'Base', bridge: 'paid' }, '10', 'USDC')).toEqual({ value: '10', unit: 'USDC' });
+    expect(shownAmount({}, '10', 'test USDC')).toEqual({ value: '10', unit: 'test USDC' });
+  });
+  it('confirmRemembered shows a record only when the chain says claimed; a failed read throws (receipt page verifyRemembered)', async () => {
+    const rec = { ...r, savedAt: 1 };
+    expect(await confirmRemembered(rec, async () => 'claimed')).toBe(rec);
+    expect(await confirmRemembered(rec, async () => 'unclaimed')).toBeNull();
+    expect(await confirmRemembered(rec, async () => 'pending')).toBeNull();
+    let read = false;
+    expect(await confirmRemembered(null, async () => { read = true; return 'claimed'; })).toBeNull();
+    expect(read).toBe(false);
+    await expect(confirmRemembered(rec, async () => { throw new Error('rpc'); })).rejects.toThrow('rpc');
   });
   it('dates a remembered claim in en-GB', () => {
     expect(claimedAt(Date.UTC(2026, 10, 12, 14, 2), 'UTC')).toBe('12 Nov 2026, 14:02');
