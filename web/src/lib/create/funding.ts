@@ -239,12 +239,21 @@ export async function lookupOutcome(d: Pick<FundDeps, 'outcome' | 'lookupRetries
   }
 }
 
-/** For a funding tx already sent (e.g. after a reload): look it up and classify it. Never sends. */
-export const checkCreation = async (
-  d: Pick<FundDeps, 'outcome' | 'lookupRetries' | 'sleep' | 'contractId' | 'tokenId'>,
+/**
+ * For a funding tx already sent (right after sending, or after a reload): look it up and classify it. Never sends.
+ * An E132 refund means this root already funded a campaign (an earlier send landed): that one is ours, so it
+ * resolves to that campaign and is never reported as "refunded" (the money sits there, not in the wallet).
+ */
+export async function checkCreation(
+  d: Pick<FundDeps, 'outcome' | 'lookupRetries' | 'sleep' | 'contractId' | 'tokenId' | 'campaignByRoot' | 'campaign' | 'sender'>,
   txHash: string,
   expect: { merkleRoot: string; total: string },
-): Promise<Creation> => classifyCreation(await lookupOutcome(d, txHash), txHash, d, expect);
+): Promise<Creation> {
+  const c = classifyCreation(await lookupOutcome(d, txHash), txHash, d, expect);
+  if (c.kind !== 'refunded' || !c.code.startsWith('E132')) return c;
+  const existing = await resolveByRoot(d, expect);
+  return existing ? { kind: 'created', campaignId: existing, txHash } : { kind: 'unclear', txHash };
+}
 
 /**
  * Pre-pays the storage shortfall and sends the tokens; returns the new campaign id.
@@ -277,12 +286,6 @@ export async function fundCampaign(
     const c = await checkCreation(d, txHash, expect);
     if (c.kind === 'created') return { campaignId: c.campaignId, txHash };
     if (c.kind === 'unclear') throw new OutcomeUnclear(txHash);
-    if (c.code.startsWith('E132')) {
-      // This root already funded a campaign (an earlier send landed): that one is ours.
-      const existing = await resolveByRoot(d, expect);
-      if (existing) return { campaignId: existing, txHash };
-      throw new OutcomeUnclear(txHash);
-    }
     if (attempt === 0 && c.code.startsWith('E128')) continue;
     throw new NotCreated(c.code, txHash);
   }

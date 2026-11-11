@@ -393,6 +393,13 @@ describe('fundCampaign', () => {
     expect(err.txHash).toBe('h1-1');
     expect(f.sent).toHaveLength(1);
   });
+  it('checkCreation (after a reload) resolves an E132 refund to the existing campaign, never "refunded"', async () => {
+    const want = { merkleRoot: p.merkleRoot, total: p.total };
+    expect(await checkCreation(fake([panicked('E132_DUPLICATE_CAMPAIGN')], '0', { byRoot: '33' }).d, 'h2-1', want)).toEqual({ kind: 'created', campaignId: '33', txHash: 'h2-1' });
+    // E132 but the contract shows no campaign for this root: never claim the tokens came back.
+    expect(await checkCreation(fake([panicked('E132_DUPLICATE_CAMPAIGN')], '0', { byRoot: null }).d, 'h2-1', want)).toEqual({ kind: 'unclear', txHash: 'h2-1' });
+  });
+
   it('checkCreation later proves the refund (Create re-enabled) or finds the campaign', async () => {
     const want = { merkleRoot: p.merkleRoot, total: p.total };
     expect(await checkCreation(fake([panicked('E119_INVALID_DEADLINE')]).d, 'h1-1', want)).toEqual({ kind: 'refunded', code: 'E119_INVALID_DEADLINE', txHash: 'h1-1' });

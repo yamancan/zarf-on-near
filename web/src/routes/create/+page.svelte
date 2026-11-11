@@ -348,7 +348,7 @@
     txState = 'checking';
     busy = 'Checking the transaction…';
     try {
-      const c = await checkCreation(lookup, txHash, { merkleRoot: draft!.merkleRoot, total: draft!.total });
+      const c = await checkCreation({ ...lookup, ...byRoot() }, txHash, { merkleRoot: draft!.merkleRoot, total: draft!.total });
       if (c.kind === 'created') await created(c);
       else if (c.kind === 'refunded') failed(new NotCreated(c.code, txHash));
       else txState = 'unclear';
