@@ -111,6 +111,8 @@ export const attachedGas = (shortfall: bigint): bigint => (shortfall > 0n ? 230n
 /**
  * Since nearcore 2.13 a transaction buys its attached gas up front at no less than 0.001 NEAR per Tgas (1e9 yocto per
  * gas), whatever the burn price; the unused part is refunded after. So to START, the wallet needs this much free.
+ * Source: nearcore 2.13.0 release notes, NEP-642 (https://github.com/near/nearcore/releases/tag/2.13.0); read live on
+ * 12 Nov 2026 as min_gas_purchase_price = 1000000000 in EXPERIMENTAL_protocol_config on testnet and mainnet.
  */
 export const MIN_GAS_PRICE_TO_START = 1_000_000_000n;
 
