@@ -22,6 +22,7 @@ const HTML = `<!doctype html>
   input { width: 100%; font: inherit; padding: .7rem .8rem; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; }
   button, a.button { display: inline-block; margin-top: 1rem; font: inherit; font-weight: 600; padding: .7rem 1.2rem; border: 0; border-radius: 6px; background: var(--fg); color: var(--bg); cursor: pointer; text-decoration: none; }
   button:disabled { opacity: .5; cursor: wait; }
+  button.secondary { margin-left: .5rem; background: transparent; color: var(--fg); border: 1px solid var(--line); }
   :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
   #out { margin-top: 1.5rem; }
   .error { color: var(--err); }
@@ -57,6 +58,18 @@ const JS = `(() => {
   const f = document.getElementById('f'), go = document.getElementById('go'), out = document.getElementById('out');
   const show = (nodes) => out.replaceChildren(...nodes);
   const el = (tag, props, text) => Object.assign(document.createElement(tag), props, text ? { textContent: text } : {});
+  const copyButton = (url) => {
+    const btn = el('button', { type: 'button', className: 'secondary' }, 'Copy link');
+    btn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(url);
+        btn.textContent = 'Copied';
+      } catch {
+        btn.textContent = 'Copy failed: long-press the button above';
+      }
+    });
+    return btn;
+  };
   f.addEventListener('submit', async (ev) => {
     ev.preventDefault();
     go.disabled = true;
@@ -72,7 +85,8 @@ const JS = `(() => {
       show([
         el('p', {}, usdc + ' test USDC is waiting for ' + f.email.value.trim() + '.'),
         el('a', { className: 'button', href: body.claim_url }, 'Open my claim link'),
-        el('p', { className: 'muted' }, 'Sign in with this same Google account. The link works for 7 days; keep it private.'),
+        copyButton(body.claim_url),
+        el('p', { className: 'muted' }, 'Sign in with this same Google account. The link works until ' + new Date(Number(BigInt(body.deadline_ns) / 1000000n)).toLocaleString() + '; keep it private.'),
         ...(body.stub ? [el('p', { className: 'error' }, 'Demo mode: this campaign was not created on chain.')] : []),
       ]);
     } catch {
