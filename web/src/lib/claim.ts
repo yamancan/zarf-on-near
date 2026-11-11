@@ -147,9 +147,110 @@ export function deadlineText(deadlineMs: number, nowMs: number, timeZone?: strin
   const when = new Intl.DateTimeFormat('en-GB', {
     day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short', timeZone,
   }).format(deadlineMs);
-  const left = deadlineMs - nowMs;
-  if (left <= 0) return when;
-  const h = Math.floor(left / 3_600_000);
-  const rest = h >= 48 ? `${Math.floor(h / 24)} days left` : h >= 1 ? `${h} hour${h === 1 ? '' : 's'} left` : 'less than an hour left';
-  return `${when}, ${rest}`;
+  const rest = timeLeft(deadlineMs, nowMs);
+  return rest ? `${when}, ${rest}` : when;
 }
+
+/** "6 days left", "3 hours left", "less than an hour left"; '' once it has passed. */
+export function timeLeft(deadlineMs: number, nowMs: number): string {
+  const left = deadlineMs - nowMs;
+  if (left <= 0) return '';
+  const h = Math.floor(left / 3_600_000);
+  return h >= 48 ? `${Math.floor(h / 24)} days left` : h >= 1 ? `${h} hour${h === 1 ? '' : 's'} left` : 'less than an hour left';
+}
+
+/**
+ * What a finished claim paid, kept so a reload or a reopened link can still show it. Nothing here is secret.
+ * It never says more than was confirmed: a cross-chain payout stays 'in-transit' until the bridge reports
+ * an outcome, and the page shows the record only after the chain says the claim is claimed.
+ */
+export interface Receipt {
+  amount: string; // USDC base units (the link's amount)
+  destination: string; // the NEAR account, or for a cross-chain payout the address on that chain
+  txHash: string; // the NEAR claim tx
+  at?: number; // when this browser saw the claim land (ms)
+  chainName?: string; // set for a cross-chain payout
+  bridge?: BridgeOutcome; // set for a cross-chain payout
+  amountOut?: string; // cross-chain: what the bridge reported paying, "9.99558" (display only)
+  depositAddress?: string; // cross-chain: the 1Click deposit address (public), so a reopened link can ask the bridge again
+  refundTo?: string; // cross-chain: where a refund goes (the campaign sender)
+  checkedAt?: number; // cross-chain: when the bridge last answered (ms)
+  savedAt?: number; // when this browser first saved the record; it expires RECEIPT_TTL_MS later
+}
+
+/** A remembered receipt is cleared when read 30 days after it was saved (it names a destination and an amount). */
+export const RECEIPT_TTL_MS = 30 * 86_400_000;
+
+/**
+ * A cross-chain payout as last reported by the bridge. Only 'paid' means it arrived, only 'refunded' that it went
+ * back. 'refunding': 1Click did not accept the deposit (INCOMPLETE_DEPOSIT), which its docs say is refunded by the
+ * deadline. 'failed': 1Click reported an error; its docs promise nothing about where that money goes.
+ */
+export type BridgeOutcome = 'in-transit' | 'paid' | 'refunded' | 'refunding' | 'failed';
+const OUTCOMES: BridgeOutcome[] = ['in-transit', 'paid', 'refunded', 'refunding', 'failed'];
+
+// The contract id is in the key: the same host has served more than one contract.
+const receiptKey = (contract: string, campaign: string, commitment: string) => `zarf-near:receipt:${contract}/${campaign}/${commitment}`;
+
+// localStorage, not sessionStorage: the recipient often reopens the link from the email in a new tab.
+export function saveReceipt(contract: string, campaign: string, commitment: string, r: Receipt, store?: Storage, now = Date.now()): void {
+  try {
+    (store ?? localStorage).setItem(receiptKey(contract, campaign, commitment), JSON.stringify({ ...r, savedAt: r.savedAt ?? now }));
+  } catch {
+    // best effort: without it a reload shows "Already claimed" without the transaction
+  }
+}
+
+export function loadReceipt(contract: string, campaign: string, commitment: string, store?: Storage, now = Date.now()): Receipt | null {
+  try {
+    const s = store ?? localStorage;
+    const key = receiptKey(contract, campaign, commitment);
+    const r = JSON.parse(s.getItem(key) ?? 'null') as Receipt | null;
+    if (!r || !/^[1-9]\d{0,38}$/.test(r.amount) || typeof r.destination !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(r.txHash)) return null;
+    if (!(typeof r.savedAt === 'number' && now - r.savedAt < RECEIPT_TTL_MS)) {
+      s.removeItem(key); // expired, or from before records had a date
+      return null;
+    }
+    if (r.amountOut !== undefined && !/^\d+(\.\d+)?$/.test(r.amountOut)) delete r.amountOut;
+    if (r.depositAddress !== undefined && !/^[0-9a-f]{64}$/.test(r.depositAddress)) delete r.depositAddress;
+    if (r.refundTo !== undefined && typeof r.refundTo !== 'string') delete r.refundTo;
+    if (r.checkedAt !== undefined && typeof r.checkedAt !== 'number') delete r.checkedAt;
+    // A cross-chain record without a known outcome is still in transit, whatever else it says.
+    return r.chainName ? { ...r, bridge: OUTCOMES.includes(r.bridge!) ? r.bridge : 'in-transit' } : r;
+  } catch {
+    return null;
+  }
+}
+
+/** Records the bridge's outcome on a cross-chain receipt already saved; nothing happens without one. */
+export function settleReceipt(contract: string, campaign: string, commitment: string, bridge: BridgeOutcome, amountOut?: string, store?: Storage, now = Date.now()): Receipt | null {
+  const r = loadReceipt(contract, campaign, commitment, store, now);
+  if (!r?.chainName) return r;
+  const next = { ...r, bridge, checkedAt: now, ...(bridge === 'paid' && amountOut ? { amountOut } : {}) };
+  saveReceipt(contract, campaign, commitment, next, store, now);
+  return next;
+}
+
+/**
+ * The one amount a claim shows, on its receipt and on "Already claimed" alike: what the bridge paid once it
+ * confirmed the payout, otherwise the link's amount (on its way, returned or not delivered).
+ */
+export function shownAmount(r: Pick<Receipt, 'chainName' | 'bridge' | 'amountOut'>, linkValue: string, linkUnit: string): { value: string; unit: string } {
+  return r.chainName && r.bridge === 'paid' && r.amountOut ? { value: twoDecimals(r.amountOut), unit: 'USDC' } : { value: linkValue, unit: linkUnit };
+}
+
+/** A remembered receipt is shown only once the chain says this claim is claimed (security review m1). */
+export async function confirmRemembered(remembered: Receipt | null, readState: () => Promise<string>): Promise<Receipt | null> {
+  if (!remembered) return null;
+  return (await readState()) === 'claimed' ? remembered : null; // a failed read throws: the page offers "Check again"
+}
+
+/** "12 Nov 2026, 14:02": when a remembered claim landed, in the reader's own zone. */
+export const claimedAt = (ms: number, timeZone?: string): string =>
+  new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone }).format(ms);
+
+/** "0x5aAe…1BeAed": long addresses on one line; the full value stays in a title and on copy. */
+export const middle = (s: string, keep = 6): string => (s.length > keep * 2 + 1 ? `${s.slice(0, keep)}…${s.slice(-keep)}` : s);
+
+/** "9.99558" -> "9.99": display only, never rounds up an amount the recipient may not get. */
+export const twoDecimals = (s: string): string => s.replace(/^(\d+)(\.\d{1,2})?\d*$/, (_, w, f = '') => w + (f && f !== '.00' ? f : ''));

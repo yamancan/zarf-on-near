@@ -46,10 +46,14 @@ const unquote = (cell: string) => {
 };
 const MAX_LEAVES = 1 << 20; // proof.len() <= 20
 
-/** One recipient per line: `email,amount` (comma, semicolon or tab). A first line naming the columns is skipped. */
+/**
+ * One recipient per line: `email,amount` (comma, semicolon or tab). A first line naming the columns is skipped.
+ * A repeated email is refused (as Zarf's create app does): the contract would accept it, but it makes two links and two payouts.
+ */
 export function parseRecipients(text: string): { rows: Row[]; rejected: Rejected[]; total: bigint } {
   const rows: Row[] = [];
   const rejected: Rejected[] = [];
+  const firstLine = new Map<string, number>(); // canonical email -> the line it first appeared on
   text.replace(/^\uFEFF/, '').split('\n').forEach((raw, i) => {
     const line = i + 1;
     if (!raw.trim()) return;
@@ -67,6 +71,9 @@ export function parseRecipients(text: string): { rows: Row[]; rejected: Rejected
     if (!ADDR_SPEC.test(email)) return reject('not an email address');
     // Google never puts a +tag Gmail alias in the id_token, so such a row could never be claimed.
     if (/^[^@]*\+[^@]*@(gmail|googlemail)\.com$/.test(email)) return reject('Gmail +aliases cannot sign in; use the account address');
+    const seen = firstLine.get(email);
+    if (seen !== undefined) return reject(`same email as line ${seen}`);
+    firstLine.set(email, line);
     let amount: bigint;
     try {
       amount = parseAmount(cells[1]);

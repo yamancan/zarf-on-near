@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import vectors from '../../../../spec/vectors.json';
 import { parseLinkFragment } from '../claim';
-import { buildDraft, claimLink, commitment, mailtoHref, newSalt, recoveryFile } from './campaign';
+import { buildDraft, claimLink, commitment, mailtoHref, messageText, newSalt, recoveryFile } from './campaign';
 import {
+  fundsShort,
   campaignIdFrom, checkCreation, failedWith, fundCampaign, fundingTxs, LookupPending, minDeadlineMs, NotCreated, OutcomeUnclear, ownerKeySlack,
   NotSent, prepayShortfall, resolveByRoot, SendUncertain, settleAfterUncertain, mayCreate, readMarker, MARKER_TTL_MS, type FundDeps, type Outcome,
 } from './funding';
@@ -12,6 +13,9 @@ const { campaigns } = vectors;
 // CSV as a sender would paste it: USDC amounts, Windows line endings, the vector emails as given.
 const csvOf = (rs: typeof campaigns.main.recipients) =>
   'email,amount\r\n' + rs.map((r) => `${r.email.replace(/[\r\n]+$/, '')},${formatAmount(BigInt(r.amount))}`).join('\r\n');
+// The vector campaign repeats alice@example.com on purpose (the protocol allows it); the create app refuses a
+// repeat, so CSV tests that need main's full u128 total rename that one row. Its leaf is not hashed here.
+const uniqueMain = campaigns.main.recipients.map((r, i) => (i === 4 ? { ...r, email: 'alice2@example.com', canonical_email: 'alice2@example.com' } : r));
 // Rows straight from the vectors (the tree is defined per leaf; CSV parsing is tested separately).
 const rowsOf = (rs: typeof campaigns.main.recipients) => rs.map((r, i) => ({ line: i + 1, email: r.canonical_email, amount: BigInt(r.amount) }));
 const saltsOf = (rs: { salt: string }[]) => {
@@ -38,14 +42,14 @@ describe('parseAmount / formatAmount (USDC, 6 decimals)', () => {
 
 describe('parseRecipients', () => {
   it('reads the vector campaign (canonical emails, amounts), skipping the header; total is exactly u128::MAX', () => {
-    const { rows, rejected, total } = parseRecipients(csvOf(campaigns.main.recipients));
+    const { rows, rejected, total } = parseRecipients(csvOf(uniqueMain));
     expect(rejected).toEqual([]);
-    expect(rows.map((r) => r.email)).toEqual(campaigns.main.recipients.map((r) => r.canonical_email));
-    expect(rows.map((r) => r.amount.toString())).toEqual(campaigns.main.recipients.map((r) => r.amount));
+    expect(rows.map((r) => r.email)).toEqual(uniqueMain.map((r) => r.canonical_email));
+    expect(rows.map((r) => r.amount.toString())).toEqual(uniqueMain.map((r) => r.amount));
     expect(total).toBe((1n << 128n) - 1n);
   });
   it('one more base unit on top of the vector campaign is refused', () => {
-    const { rejected } = parseRecipients(`${csvOf(campaigns.main.recipients)}\r\nz@example.com,0.000001`);
+    const { rejected } = parseRecipients(`${csvOf(uniqueMain)}\r\nz@example.com,0.000001`);
     expect(rejected).toEqual([expect.objectContaining({ reason: expect.stringContaining('token maximum') })]);
   });
   it.each(vectors.rejected_emails)('rejects %j as non-ASCII with its line number', (e) => {
@@ -98,16 +102,24 @@ describe('parseRecipients', () => {
     expect(parseRecipients('\uFEFFa@example.com,1').rows).toHaveLength(1);
     expect(parseRecipients('a@example.com,1\n\uFEFFb@example.com,1').rejected[0].reason).toContain('ASCII');
   });
-  it('keeps duplicate emails as separate allocations', () => {
-    expect(parseRecipients('a@example.com,1\na@example.com;2').rows).toHaveLength(2);
+  it('refuses a repeated email (after canonicalising) with the line it repeats, as Zarf does', () => {
+    const { rows, rejected, total } = parseRecipients('email,amount\na@example.com,1\nb@example.com,2\n A@Example.com ;3');
+    expect(rows.map((r) => r.email)).toEqual(['a@example.com', 'b@example.com']);
+    expect(total).toBe(3_000_000n);
+    expect(rejected).toEqual([{ line: 4, raw: ' A@Example.com ;3', reason: 'same email as line 2' }]);
+  });
+  it('the vector campaign, which repeats an email, is refused at the repeat', () => {
+    const { rejected } = parseRecipients(csvOf(campaigns.main.recipients));
+    expect(rejected).toEqual([expect.objectContaining({ line: 6, reason: 'same email as line 2' })]);
   });
 });
 
-describe('the CSV path creates campaigns.main end to end', () => {
-  it('pasted CSV -> rows -> salts -> root, proofs, and the ft_transfer_call for the full total', async () => {
+describe('campaigns.main end to end', () => {
+  it('rows -> salts -> root, proofs, and the ft_transfer_call for the full total', async () => {
     const c = campaigns.main;
-    const { rows, rejected, total } = parseRecipients(csvOf(c.recipients));
-    expect(rejected).toEqual([]);
+    // main repeats an email, which the CSV path now refuses: everything after the parse is checked on its rows.
+    const rows = rowsOf(c.recipients);
+    const total = rows.reduce((t, r) => t + r.amount, 0n);
     const draft = await buildDraft(rows, saltsOf(c.recipients));
     expect(draft.merkleRoot).toBe(c.merkle_root);
     expect(draft.total).toBe(total.toString());
@@ -128,7 +140,7 @@ describe('buildDraft reproduces the spec campaigns', () => {
     expect(draft.merkleRoot).toBe(c.merkle_root);
   });
   it('draws a fresh 32-byte salt per row by default', async () => {
-    const { rows } = parseRecipients('a@example.com,1\na@example.com,1');
+    const rows = [{ line: 1, email: 'a@example.com', amount: 1n }, { line: 2, email: 'a@example.com', amount: 1n }];
     const d = await buildDraft(rows);
     expect(d.recipients[0].salt).toMatch(/^[0-9a-f]{64}$/);
     expect(d.recipients[0].salt).not.toBe(d.recipients[1].salt);
@@ -164,10 +176,27 @@ describe('outputs', () => {
     const csvLine = `${r.email},1,${link}`; // as the create page writes it
     const fromCsv = csvLine.split(',').slice(2).join(',');
     expect(fromCsv).toBe(link);
-    const body = new URL(mailtoHref(r, link)).searchParams.get('body')!;
+    const body = new URL(mailtoHref(r, messageText(r, link, { unit: 'USDC', testnet: false, deadlineMs: 0 }))).searchParams.get('body')!;
     const fromMail = body.split('\n').find((l) => l.startsWith('https://'))!;
     expect(fromMail).toBe(link);
     for (const l of [link, fromCsv, fromMail]) expect(parseLinkFragment(new URL(l).hash)).toEqual(want);
+  });
+  it.each([
+    [true, 'test USDC', '10 test USDC for you'],
+    [false, 'USDC', '10 USDC for you'],
+  ])('the ready-made message (testnet %s) names its unit, and on testnet says the token has no value', (testnet, unit, subject) => {
+    const r = { email: 'alice@gmail.com', amount: '10000000' };
+    const m = messageText(r, 'https://claim.example/claim/1/ab#s=1', { unit, testnet, deadlineMs: Date.UTC(2026, 10, 19, 6, 20), timeZone: 'UTC' });
+    expect(m.subject).toBe(subject);
+    expect(m.body).toContain(`I sent you 10 ${unit} with Zarf.`);
+    expect(m.body).toContain('sign in with Google as alice@gmail.com');
+    expect(m.body).toContain('Claim it before 19 Nov 2026, 06:20 UTC.');
+    expect(m.body.includes('practice money with no value')).toBe(testnet);
+    // Never plain "USDC" as an amount on testnet: every figure carries the test unit.
+    if (testnet) expect(m.body).not.toMatch(/\d (USDC)/);
+    const mail = new URL(mailtoHref(r, m));
+    expect(mail.searchParams.get('subject')).toBe(subject);
+    expect(mail.searchParams.get('body')).toBe(m.body);
   });
   it('recovery file holds what rebuilding the links needs', async () => {
     const c = campaigns.single;
@@ -417,5 +446,17 @@ describe('readMarker (unresolved send seen from another tab)', () => {
     expect(readMarker(s, 'k', 2_000)).toBeNull();
     expect(s.has()).toBe(false);
     expect(readMarker(store('{'), 'k', 2_000)).toBeNull();
+  });
+});
+
+describe('fundsShort (step 3 blocks Continue below the total)', () => {
+  it('is the missing amount, or 0 when the balance covers it', () => {
+    expect(fundsShort('120000000', 37_500_000n)).toBe(0n);
+    expect(fundsShort('37500000', 37_500_000n)).toBe(0n);
+    expect(fundsShort('10000000', 37_500_000n)).toBe(27_500_000n);
+  });
+  it('never blocks when the balance could not be read', () => {
+    expect(fundsShort(null, 37_500_000n)).toBe(0n);
+    expect(fundsShort('unclaimed', 37_500_000n)).toBe(0n);
   });
 });

@@ -3,7 +3,7 @@
 // re-reads the quote before it signs (verifier/src/intents.ts).
 
 import { keccak_256 } from '@noble/hashes/sha3';
-import { hex } from './claim';
+import { hex, saveReceipt, type BridgeOutcome, type Receipt } from './claim';
 
 export const ONECLICK_API = 'https://1click.chaindefuser.com';
 export const NEAR_USDC_ASSET = 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1';
@@ -169,40 +169,94 @@ export interface SavedPayout {
   recipient: string;
   refundTo: string;
   amountOutFormatted: string;
+  amount: string; // the link's amount, NEAR USDC base units: what the receipt shows until the bridge confirms
 }
 
-const payoutKey = (campaign: string, commitment: string) => `zarf-near:payout:${campaign}/${commitment}`;
+// The contract id is in the key, as in the receipt key: the same host has served more than one contract.
+const payoutKey = (contract: string, campaign: string, commitment: string) => `zarf-near:payout:${contract}/${campaign}/${commitment}`;
 
-export function savePayout(campaign: string, commitment: string, p: SavedPayout, store?: Storage): void {
+export function savePayout(contract: string, campaign: string, commitment: string, p: SavedPayout, store?: Storage): void {
   try {
-    (store ?? sessionStorage).setItem(payoutKey(campaign, commitment), JSON.stringify(p));
+    (store ?? sessionStorage).setItem(payoutKey(contract, campaign, commitment), JSON.stringify(p));
   } catch {
     // best effort: without it a reload only loses the live status, never the claim
   }
 }
 
-export function loadPayout(campaign: string, commitment: string, store?: Storage): SavedPayout | null {
+export function loadPayout(contract: string, campaign: string, commitment: string, store?: Storage): SavedPayout | null {
   try {
-    const p = JSON.parse((store ?? sessionStorage).getItem(payoutKey(campaign, commitment)) ?? 'null') as SavedPayout | null;
-    return p && /^[0-9a-f]{64}$/.test(p.depositAddress) && typeof p.chainName === 'string' && typeof p.refundTo === 'string' ? p : null;
+    const p = JSON.parse((store ?? sessionStorage).getItem(payoutKey(contract, campaign, commitment)) ?? 'null') as SavedPayout | null;
+    return p && /^[0-9a-f]{64}$/.test(p.depositAddress) && typeof p.chainName === 'string' && typeof p.refundTo === 'string' && /^[1-9]\d{0,38}$/.test(p.amount) ? p : null;
   } catch {
     return null;
   }
 }
 
-/** Receipt copy per 1Click status (UI/UX audit, finding 10). */
-export function describeStatus(s: StatusView, chainName: string, refundTo: string): { text: string; done: boolean; ok: boolean } {
+/**
+ * Receipt copy per 1Click status, held to what 1Click's docs say (docs.near-intents.org, 1click-api status table,
+ * read 2026-11-12). `outcome` is what may be remembered: only SUCCESS is 'paid', only REFUNDED is 'refunded'
+ * ("funds returned to refund address"). FAILED is only "Swap encountered an error": no refund is documented,
+ * so nothing here says it goes back. INCOMPLETE_DEPOSIT "is refunded by deadline": 'refunding', polled on until
+ * REFUNDED. `done` ends the live polling: SUCCESS, REFUNDED, FAILED. Statuses we do not know: still processing.
+ * The bridge's refund reason is never in `text`: the receipt shows it under Details.
+ */
+export function describeStatus(s: StatusView, chainName: string, refundTo: string): { text: string; done: boolean; ok: boolean; outcome: BridgeOutcome } {
   switch (s.status) {
     case 'PENDING_DEPOSIT':
     case 'KNOWN_DEPOSIT_TX':
-      return { text: 'Sent from NEAR, waiting for the bridge.', done: false, ok: true };
+      return { text: 'Sent from NEAR, waiting for the bridge.', done: false, ok: true, outcome: 'in-transit' };
     case 'PROCESSING':
-      return { text: `Paying out on ${chainName}.`, done: false, ok: true };
+      return { text: `Paying out on ${chainName}.`, done: false, ok: true, outcome: 'in-transit' };
     case 'SUCCESS':
-      return { text: `Arrived on ${chainName}${s.amountOutFormatted ? `: ${s.amountOutFormatted} USDC` : ''}.`, done: true, ok: true };
+      return { text: `Arrived on ${chainName}.`, done: true, ok: true, outcome: 'paid' };
     case 'REFUNDED':
-      return { text: `Not delivered. The USDC went back to ${refundTo} on NEAR.${s.refundReason ? ` (${s.refundReason})` : ''}`, done: true, ok: false };
-    default: // INCOMPLETE_DEPOSIT, FAILED, anything new
-      return { text: 'Not delivered. Keep this page and contact the sender.', done: true, ok: false };
+      return { text: `Went back to ${refundTo} on NEAR.`, done: true, ok: false, outcome: 'refunded' };
+    case 'FAILED':
+      return { text: `The bridge reported an error and has not paid out on ${chainName}.`, done: true, ok: false, outcome: 'failed' };
+    case 'INCOMPLETE_DEPOSIT':
+      return { text: `The bridge did not accept the deposit. It refunds ${refundTo} on NEAR by its deadline.`, done: false, ok: false, outcome: 'refunding' };
+    default: // anything new: not an outcome, keep asking
+      return { text: 'Still processing on the bridge.', done: false, ok: true, outcome: 'in-transit' };
   }
+}
+
+/**
+ * What happens next after a payout that did not arrive, in the recipient's words. Same on the receipt and the record.
+ * For 'failed' it never says the USDC goes back: 1Click documents no refund for FAILED.
+ */
+export function nextStep(outcome: BridgeOutcome): string {
+  if (outcome === 'failed') return 'Tell the sender. They can ask NEAR Intents support, with the deposit address under Details.';
+  if (outcome === 'refunded' || outcome === 'refunding') return 'The sender can send you a new link.'; // the row above says where it goes
+  return '';
+}
+
+/** The line under Details for a failed payout: what was true at the last check, never a promise. */
+export const notReturnedYet = (refundTo: string, checked: string): string =>
+  `Not returned to ${refundTo} as of the last check (${checked}).`;
+
+/**
+ * A remembered cross-chain record asks the bridge again: the tab that followed the payout may have closed
+ * (round 3 money item 1). Saves what the bridge says and when; `done` once the bridge reports a final status.
+ * A failed read throws and changes nothing; an address the bridge does not know is no answer.
+ */
+export async function recheckReceipt(
+  contract: string, campaign: string, commitment: string, r: Receipt, fetchFn: Fetch = defaultFetch, store?: Storage, now = Date.now(),
+): Promise<{ r: Receipt; done: boolean }> {
+  if (!r.chainName || !r.depositAddress) return { r, done: true };
+  const s = await getStatus(r.depositAddress, fetchFn);
+  if (!s) return { r, done: false };
+  const v = describeStatus(s, r.chainName, r.refundTo ?? 'the sender');
+  const next: Receipt = { ...r, bridge: v.outcome, checkedAt: now, ...(v.outcome === 'paid' && s.amountOutFormatted && /^\d+(\.\d+)?$/.test(s.amountOutFormatted) ? { amountOut: s.amountOutFormatted } : {}) };
+  saveReceipt(contract, campaign, commitment, next, store, now);
+  return { r: next, done: v.done };
+}
+
+/** Records worth asking the bridge about again: cross-chain, with a deposit address, and not yet paid or refunded. */
+export const needsRecheck = (r: Receipt | null): boolean => !!r?.chainName && !!r.depositAddress && (r.bridge === 'in-transit' || r.bridge === 'refunding' || r.bridge === 'failed');
+
+/** A refused quote in plain words; the bridge's raw message is never shown (critic r2 P2-7). */
+export function refusal(message: string, chainName: string): string {
+  if (/too low|too small|minimum/i.test(message)) return `This amount is too low to send to ${chainName}. Claim to a NEAR account instead.`;
+  if (/price moved|pay too little/i.test(message)) return 'The bridge would pay too little: the price moved too far.';
+  return `The bridge cannot pay this out to ${chainName} right now. Claim to a NEAR account instead.`;
 }

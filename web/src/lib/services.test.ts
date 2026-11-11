@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import vectors from '../../../spec/vectors.json';
-import { accountExists, canRetry, ClaimError, describeError, getCampaign, getClaimState, outcomeAfterRelay, requestSignature, settleClaim, submitClaim, type ClaimState } from './services';
+import { accountExists, canRetry, ClaimError, describeCheckError, describeError, errorCode, failureHeading, isUnmapped, getCampaign, getClaimState, outcomeAfterRelay, requestSignature, settleClaim, submitClaim, type ClaimState } from './services';
 
 const reply = (body: unknown, status = 200) => vi.fn(async () => new Response(JSON.stringify(body), { status }));
 afterEach(() => vi.unstubAllGlobals());
@@ -59,7 +59,17 @@ describe('verifier and relayer', () => {
   });
   it('explains missing config and unknown codes', () => {
     expect(describeError(new ClaimError('NOT_CONFIGURED:PUBLIC_VERIFIER_URL'))).toMatch(/PUBLIC_VERIFIER_URL/);
-    expect(describeError(new ClaimError('E999'))).toMatch(/E999/);
+    expect(describeError(new ClaimError('E999'))).toBe('Something went wrong. Open your claim link and try again.');
+    expect(errorCode(new ClaimError('E999'))).toBe('E999');
+    expect(isUnmapped(new ClaimError('E999'))).toBe(true);
+    expect(isUnmapped(new ClaimError('COMMITMENT_MISMATCH'))).toBe(false);
+  });
+  it('never puts a machine code in the sentence (critic P1-7)', () => {
+    for (const c of ['HTTP_503', 'RPC_ERROR', 'E114_CLAIM_EXPIRED', 'RELAYER_NO_TX', 'BAD_AUDIENCE', 'INTENTS_WRONG_RECIPIENT', 'UNKNOWN_KID']) {
+      expect(describeError(new ClaimError(c))).not.toMatch(/[A-Z]{2,}_[A-Z0-9]/);
+    }
+    expect(describeError(new ClaimError('HTTP_503'))).toMatch(/not answering/);
+    expect(describeError(new ClaimError('E114_CLAIM_EXPIRED'))).toMatch(/took too long/);
   });
 });
 
@@ -154,5 +164,34 @@ describe('accountExists (view_account)', () => {
     expect(await code(accountExists('https://rpc.test', 'alice.testnet'))).toBe('RPC_ERROR');
     vi.stubGlobal('fetch', reply({}, 503));
     expect(await code(accountExists('https://rpc.test', 'alice.testnet'))).toBe('HTTP_503');
+  });
+});
+
+describe('describeCheckError (claim page, before any claim)', () => {
+  it('a network or RPC failure says the page could not check, not that a claim failed', () => {
+    for (const e of [new ClaimError('HTTP_503'), new ClaimError('RPC_ERROR'), new TypeError('Failed to fetch')]) {
+      expect(describeCheckError(e)).toBe('NEAR is not answering right now.');
+    }
+  });
+  it('keeps the set-up message for missing config', () => {
+    expect(describeCheckError(new ClaimError('NOT_CONFIGURED:PUBLIC_NEAR_RPC_URL'))).toMatch(/not fully set up/);
+  });
+});
+
+describe('failureHeading (receipt title agrees with its sentence, critic r3 M6)', () => {
+  it('maps already claimed and already being paid; everything else is Not claimed', () => {
+    expect(failureHeading('E105_ALREADY_CLAIMED')).toEqual({ title: 'Already claimed', muted: true });
+    expect(failureHeading('E123_CLAIM_PENDING')).toEqual({ title: 'Already being paid', muted: true });
+    for (const c of ['RPC_ERROR', 'E125_CAMPAIGN_ENDED', 'UNEXPECTED', '']) expect(failureHeading(c)).toEqual({ title: 'Not claimed', muted: false });
+  });
+});
+
+describe('pinned sentences (security review: removal mutants survived)', () => {
+  it('E123, E105 and the INTENTS_ fallback say exactly this', () => {
+    expect(describeError(new ClaimError('E123_CLAIM_PENDING'))).toBe('This claim is already being paid. Check back in a minute.');
+    expect(describeError(new ClaimError('E105_ALREADY_CLAIMED'))).toBe('This link was already claimed.');
+    expect(describeError(new ClaimError('INTENTS_SOMETHING_NEW'))).toBe("The cross-chain quote doesn't match what you chose. Open your claim link to get a new one.");
+    expect(describeError(new ClaimError('INTENTS_NOT_PENDING'))).toBe('This cross-chain quote was already used. Open your claim link to get a new one.');
+    expect(isUnmapped(new ClaimError('INTENTS_SOMETHING_NEW'))).toBe(true);
   });
 });

@@ -1,7 +1,11 @@
+<script lang="ts">
+  import PageHeader from '$lib/zen/components/PageHeader.svelte';
+</script>
+
 <svelte:head><title>Privacy and terms · Zarf</title></svelte:head>
 
-<h1>Privacy and terms</h1>
-<p class="muted">Operated by Trion Labs. Contact: <a href="mailto:operator@example.invalid">operator@example.invalid</a>.</p>
+<article class="prose-zarf w-full max-w-xl mx-auto px-6 py-8 md:py-12">
+<PageHeader title="Privacy and terms" description="Operated by Trion Labs. Contact: operator@example.invalid." />
 
 <h2>Your email</h2>
 <p>
@@ -10,12 +14,12 @@
   Your email never goes on chain.
 </p>
 <p>
-  The judge page (<code>/try</code>) uses the email you type only to create your test claim link. For its daily
-  limits it keeps counters keyed by an irreversible HMAC of the email and of your IP address, never either one
-  in the clear.
+  The <a href="https://zarf-near-faucet-testnet.sparkling-queen-5e77.workers.dev/try" class="underline underline-offset-2 hover:text-zen-fg">test page</a>
+  uses the email you type only to create your test claim link. For its daily limits it keeps counters keyed by a
+  keyed hash of the email and of your IP address, never either one in the clear.
 </p>
 <p>
-  We ask Google only for <code>openid</code> and <code>email</code>. We use no analytics. The judge page loads
+  We ask Google only for <code>openid</code> and <code>email</code>. We use no analytics. The test page loads
   Cloudflare Turnstile, a human check, from challenges.cloudflare.com; the claim and send pages load no third-party
   scripts.
 </p>
@@ -24,7 +28,8 @@
 <p>
   If you choose USDC on another chain, your destination address and the amount go to NEAR Intents 1Click, a third-party
   swap service, which also sees your IP address. 1Click's status for the deposit address of your payout is public, so
-  anyone who knows that address can link the claim to your destination address.
+  anyone who knows that address can link the claim to your destination address. If the bridge does not complete a
+  payout by its deadline, it refunds the sender on NEAR, not your address.
 </p>
 
 <h2>Testnet only</h2>
@@ -38,10 +43,18 @@
 
 <h2>Contact</h2>
 <p><a href="mailto:operator@example.invalid">operator@example.invalid</a></p>
+</article>
 
 <style>
-  h2 {
-    font-size: 1.1rem;
-    margin: 1.5rem 0 0.5rem;
+  .prose-zarf :global(h2) {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 2.5rem 0 0.75rem;
+  }
+  .prose-zarf :global(p) {
+    font-size: 0.9375rem;
+    line-height: 1.7;
+    color: var(--zen-fg-muted);
+    margin: 0 0 1rem;
   }
 </style>

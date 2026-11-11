@@ -1,0 +1,126 @@
+@import 'tailwindcss';
+/* Zen design system, copied from the main repo (web/packages/ui/lib/styles), values unchanged. */
+@import './lib/zen/styles/index.css';
+
+/* As in the main repo's landing (apps/landing/src/app.css): font-sans is Saira. */
+@theme {
+  --font-sans: 'Saira', ui-sans-serif, system-ui, sans-serif;
+  /*
+   * Typeface of every screen but the landing (claim, receipt, send, campaigns, privacy, errors). Saira by
+   * decision; claim.zarf.to and create.zarf.to fall back to the system stack. To match them, this ONE line
+   * becomes: --font-app: ui-sans-serif, system-ui, sans-serif;
+   */
+  --font-app: 'Saira', ui-sans-serif, system-ui, sans-serif;
+}
+
+/*
+ * Chromium on Linux (FreeType) places small hinted Saira glyphs on whole pixels when it draws LCD text on an
+ * opaque fill, which opens gaps such as "Rec laim" / "Disconne ct" in buttons. geometricPrecision turns hinting
+ * off and keeps fractional advances; other desktop platforms already lay text out this way. Unlayered, so it beats
+ * Zen base.css's optimizeLegibility (the one Zen value this overrides).
+ */
+html { text-rendering: geometricPrecision; }
+button, input, select, textarea { text-rendering: inherit; } /* form controls reset it to auto */
+
+/* The claim app's deeper fume ground (main repo apps/claim/src/app.css). */
+[data-theme='glass-porcelain'],
+[data-theme='dark'] {
+  --zen-bg: #0a0a0b;
+  --zen-bg-elevated: #131315;
+  --zen-bg-sunken: #1a1a1d;
+  --color-base-100: #0a0a0b;
+  --color-base-200: #131315;
+  --color-base-300: #1a1a1d;
+  background: #0a0a0b;
+  background-color: #0a0a0b;
+}
+
+/*
+ * RIPPLE BACKGROUND, copied verbatim from the main repo's apps/claim/src/app.css and apps/create/src/app.css
+ * (identical in both): fingerprint-like circles from the bottom-right, white on dark, charcoal on light. Static:
+ * Zarf gives it no motion. Every screen but the landing (owner decision 12 Nov: like today's Zarf apps).
+ */
+.ripple-bg {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.4;
+    background: repeating-radial-gradient(
+        circle at 90% 90%,
+        transparent 0px,
+        transparent 7px,
+        var(--ripple-color) 8px,
+        transparent 9px
+    );
+}
+
+/* Dark mode - white ripples */
+[data-theme='glass-porcelain'] .ripple-bg,
+[data-theme='dark'] .ripple-bg {
+    --ripple-color: oklch(from var(--zen-fg) l c h / 0.03);
+    opacity: 0.5;
+}
+
+/* Light mode - charcoal ripples, subtle */
+[data-theme='paper-porcelain'] .ripple-bg,
+[data-theme='light'] .ripple-bg {
+    --ripple-color: oklch(from var(--zen-fg) l c h / 0.025);
+    opacity: 0.6;
+}
+
+/* Landing grain (main repo apps/landing/src/app.css), used only inside the hero. */
+.landing-grain {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='turbulence' baseFrequency='0.7' numOctaves='5' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='1'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+}
+[data-theme='dark'] .landing-grain,
+[data-theme='glass-porcelain'] .landing-grain {
+  opacity: 0.35;
+  mix-blend-mode: overlay;
+  filter: contrast(130%) brightness(115%) grayscale(100%);
+}
+[data-theme='light'] .landing-grain,
+[data-theme='paper-porcelain'] .landing-grain {
+  opacity: 0.06;
+  mix-blend-mode: multiply;
+  filter: contrast(115%) brightness(95%) grayscale(100%);
+}
+
+/* Base layer: Tailwind utilities and Zen components win over it. */
+@layer base {
+  :focus-visible { outline: 2px solid var(--zen-fg); outline-offset: 2px; }
+  code { word-break: break-all; font-family: ui-monospace, monospace; font-size: 0.9em; }
+  summary::-webkit-details-marker { display: none; }
+  /* Zen's base gives every <p> 1rem muted text; here a paragraph takes its container's size and colour. */
+  p { font-size: inherit; color: inherit; }
+  /* No orphans: titles balance their lines, sentences avoid a lone last word (critic r2 P1-9). */
+  h1, h2, h3 { text-wrap: balance; }
+  p, li, dd { text-wrap: pretty; }
+}
+
+/*
+ * Form controls: the Zen border (12% fg) is about 1.5:1 on the ground. Controls here keep a 3:1
+ * boundary (WCAG 1.4.11): 45% fg on both themes. Focus thickens the border itself in fg (ZenInput sets
+ * focus:outline-none), so there is one frame, never a ring outside it.
+ */
+:root {
+  --zarf-control-border: oklch(from var(--zen-fg) l c h / 0.45);
+}
+.control-border {
+  border: 1px solid var(--zarf-control-border) !important;
+}
+.control-border:focus-visible {
+  outline: none !important;
+  border-color: var(--zen-fg) !important;
+  box-shadow: inset 0 0 0 1px var(--zen-fg);
+}
+.control-border[aria-invalid='true'] {
+  border-color: var(--zen-error-content) !important;
+}
+
+/* The native date picker's glyph is black; on the dark ground it would vanish. */
+[data-theme='dark'] input[type='datetime-local']::-webkit-calendar-picker-indicator,
+[data-theme='glass-porcelain'] input[type='datetime-local']::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+}

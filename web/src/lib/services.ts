@@ -89,11 +89,11 @@ export async function submitClaim(relayerUrl: string | undefined, args: ClaimArg
 }
 
 const MESSAGES: Record<string, string> = {
-  COMMITMENT_MISMATCH: 'This link belongs to a different Google account. Sign in with the address the sender used.',
-  E125_CAMPAIGN_ENDED: 'This campaign has ended. Unclaimed funds go back to the sender.',
+  COMMITMENT_MISMATCH: 'This link was sent to a different Google account. Sign in with the account it was sent to.',
+  E125_CAMPAIGN_ENDED: 'This campaign has ended. The sender can take back what was not claimed.',
   E110_UNKNOWN_CAMPAIGN: 'This campaign does not exist.',
   E102_INVALID_MERKLE_PROOF: 'This claim is not in the campaign list.',
-  E105_ALREADY_CLAIMED: 'This allocation has already been claimed.',
+  E105_ALREADY_CLAIMED: 'This link was already claimed.',
   E123_CLAIM_PENDING: 'This claim is already being paid. Check back in a minute.',
   EXPIRED: 'Your Google sign-in expired. Open your claim link and sign in again.',
   BAD_NONCE: 'This sign-in was for a different destination. Open your claim link and start again.',
@@ -103,20 +103,49 @@ const MESSAGES: Record<string, string> = {
   E129_INSUFFICIENT_BALANCE: 'This campaign is underfunded; contact the sender.',
   BAD_DESTINATION: 'That is not a valid NEAR account. Open your claim link and start again.',
   RATE_LIMITED: 'Too many attempts. Wait a minute and try again.',
-  LINK_MISMATCH: 'This claim link does not match the campaign on chain. Ask the sender for your link again.',
+  LINK_MISMATCH: 'It does not match its campaign on NEAR. Ask the sender for your link again.',
   E115_TOKEN_TRANSFER_FAILED: 'The transfer failed and your claim is open again. Open your claim link to try again.',
   INTENTS_QUOTE_EXPIRES_FIRST: 'Your cross-chain quote expired. Open your claim link to get a new one and sign in again.',
   INTENTS_NOT_PENDING: 'This cross-chain quote was already used. Open your claim link to get a new one.',
   QUOTE_EXPIRED: 'Your cross-chain quote expired. Open your claim link to get a new one and sign in again.',
+  E114_CLAIM_EXPIRED: 'That took too long. Open your claim link and sign in again.',
+  E108_INVALID_INPUT: 'This claim link is damaged. Ask the sender for your link again.',
+  E109_INVALID_AMOUNT: 'This claim link is damaged. Ask the sender for your link again.',
+  NO_EMAIL: 'Google did not share an email for this account. Sign in with the account the link was sent to.',
+  RPC_ERROR: 'NEAR is not answering right now. Try again in a minute.',
 };
 
+
+/** The stable code behind a failure, for a small details line; the sentence never carries it. */
+export const errorCode = (e: unknown): string => (e instanceof ClaimError ? e.code : 'UNEXPECTED');
+
 export function describeError(e: unknown): string {
-  const code = e instanceof ClaimError ? e.code : 'UNEXPECTED';
+  const code = errorCode(e);
   if (code.startsWith('NOT_CONFIGURED:')) return `This site is not fully set up yet (${code.slice(15)}).`;
   if (!MESSAGES[code] && code.startsWith('INTENTS_')) {
-    return "The cross-chain quote doesn't match what you chose. Nothing was sent. Open your claim link to get a new one.";
+    return "The cross-chain quote doesn't match what you chose. Open your claim link to get a new one.";
   }
-  return MESSAGES[code] ?? `The claim did not go through (${code}).`;
+  if (!MESSAGES[code] && /^HTTP_5\d\d$/.test(code)) return MESSAGES.RPC_ERROR.replace('NEAR is', 'Our service is');
+  return MESSAGES[code] ?? 'Something went wrong. Open your claim link and try again.';
+}
+
+/**
+ * The receipt's failure title, so it never contradicts the sentence under it (critic r3 M6): a link already
+ * claimed is not "Not claimed", and a claim another tab is paying is not a failure. `muted`: no red.
+ */
+export function failureHeading(code: string): { title: string; muted: boolean } {
+  if (code === 'E105_ALREADY_CLAIMED') return { title: 'Already claimed', muted: true };
+  if (code === 'E123_CLAIM_PENDING') return { title: 'Already being paid', muted: true };
+  return { title: 'Not claimed', muted: false };
+}
+
+/** True when describeError fell back to a generic sentence, so the code is worth showing as a detail. */
+export const isUnmapped = (e: unknown): boolean => !MESSAGES[errorCode(e)];
+
+/** Why the claim page could not read the chain before any claim: never 'the claim did not go through'. */
+export function describeCheckError(e: unknown): string {
+  if (e instanceof ClaimError && e.code.startsWith('NOT_CONFIGURED:')) return describeError(e);
+  return 'NEAR is not answering right now.';
 }
 
 export type ClaimState = 'unclaimed' | 'pending' | 'claimed';

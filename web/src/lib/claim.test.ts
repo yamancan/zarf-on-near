@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import vectors from '../../../spec/vectors.json';
 import {
   classifyDestination, claimState, deadlineText, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isImplicitAccount, isValidAccountId, loadAttempt, newAttemptId,
-  decodeProof, encodeProof, parseCallback, parseLinkFragment, saveAttempt, clearAttempt,
+  decodeProof, encodeProof, parseCallback, parseLinkFragment, saveAttempt, clearAttempt, saveReceipt, loadReceipt, settleReceipt, claimedAt, middle, twoDecimals, shownAmount, confirmRemembered, RECEIPT_TTL_MS,
 } from './claim';
 
 const main = vectors.campaigns.main;
@@ -151,5 +151,120 @@ describe('deadlineText', () => {
     expect(deadlineText(at, at - 3_600_000, 'UTC')).toMatch(/1 hour left$/);
     expect(deadlineText(at, at - 60_000, 'UTC')).toMatch(/less than an hour left$/);
     expect(deadlineText(at, at + 1, 'UTC')).toBe('17 Nov 2026, 21:55 UTC');
+  });
+});
+
+describe('receipt record (reload or reopened link after a paid claim)', () => {
+  const mem = (): Storage => {
+    const m = new Map<string, string>();
+    return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => void m.set(k, v), removeItem: (k) => void m.delete(k) } as Storage;
+  };
+  const K = 'zarf-near-1112.testnet';
+  const r = { amount: '10000000', destination: 'alice.testnet', txHash: '6zgh2u9DqHHiXzdy9ouTP7oGky2T4nugqzqt9wJZwNFm' };
+  it('is kept per contract and claim, and survives garbage', () => {
+    const s = mem();
+    expect(loadReceipt(K, '7', 'c', s)).toBeNull();
+    saveReceipt(K, '7', 'c', r, s);
+    expect(loadReceipt(K, '7', 'c', s)).toMatchObject(r);
+    expect(loadReceipt(K, '7', 'd', s)).toBeNull();
+    s.setItem(`zarf-near:receipt:${K}/7/c`, '{');
+    expect(loadReceipt(K, '7', 'c', s)).toBeNull();
+  });
+  it('is never read back on another contract served from the same host (security review m1)', () => {
+    const s = mem();
+    saveReceipt('old-contract.testnet', '7', 'c', r, s);
+    expect(loadReceipt(K, '7', 'c', s)).toBeNull();
+    s.setItem('zarf-near:receipt:7/c', JSON.stringify(r)); // the round-1 key had no contract id
+    expect(loadReceipt(K, '7', 'c', s)).toBeNull();
+  });
+  it('refuses a record whose tx hash or amount is malformed (it feeds the explorer link)', () => {
+    const s = mem();
+    saveReceipt(K, '7', 'c', { ...r, txHash: 'javascript:alert(1)' }, s);
+    expect(loadReceipt(K, '7', 'c', s)).toBeNull();
+    saveReceipt(K, '7', 'c', { ...r, amount: '-1' }, s);
+    expect(loadReceipt(K, '7', 'c', s)).toBeNull();
+  });
+  it('never throws when storage is blocked', () => {
+    const blocked = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); } } as unknown as Storage;
+    expect(() => saveReceipt(K, '7', 'c', r, blocked)).not.toThrow();
+    expect(loadReceipt(K, '7', 'c', blocked)).toBeNull();
+  });
+  it('remembers a cross-chain claim as in transit until the bridge reports, and only success as paid', () => {
+    const s = mem();
+    const chain = { ...r, destination: '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed', chainName: 'Base' };
+    saveReceipt(K, '7', 'c', chain, s); // no outcome recorded: in transit, never "paid out"
+    expect(loadReceipt(K, '7', 'c', s)!.bridge).toBe('in-transit');
+    saveReceipt(K, '7', 'c', { ...chain, bridge: 'bogus' as never }, s);
+    expect(loadReceipt(K, '7', 'c', s)!.bridge).toBe('in-transit');
+    settleReceipt(K, '7', 'c', 'failed', undefined, s);
+    expect(loadReceipt(K, '7', 'c', s)!.bridge).toBe('failed');
+    settleReceipt(K, '7', 'c', 'paid', '9.99558', s);
+    expect(loadReceipt(K, '7', 'c', s)).toMatchObject({ bridge: 'paid', amountOut: '9.99558' });
+    settleReceipt(K, '7', 'c', 'refunded', '1', s);
+    expect(loadReceipt(K, '7', 'c', s)).toMatchObject({ bridge: 'refunded' });
+  });
+  it('settling needs an existing cross-chain record; a NEAR record never gets a bridge state', () => {
+    const s = mem();
+    settleReceipt(K, '7', 'c', 'paid', '1', s);
+    expect(loadReceipt(K, '7', 'c', s)).toBeNull();
+    saveReceipt(K, '7', 'c', r, s);
+    settleReceipt(K, '7', 'c', 'failed', undefined, s);
+    expect(loadReceipt(K, '7', 'c', s)!.bridge).toBeUndefined();
+  });
+  it('drops a malformed display amount instead of showing it', () => {
+    const s = mem();
+    saveReceipt(K, '7', 'c', { ...r, chainName: 'Base', bridge: 'paid', amountOut: '<b>9</b>' }, s);
+    expect(loadReceipt(K, '7', 'c', s)!.amountOut).toBeUndefined();
+  });
+  it('expires 30 days after it was saved, and is cleared when read after that (security nit)', () => {
+    const s = mem(), t = Date.UTC(2026, 10, 12);
+    saveReceipt(K, '7', 'c', r, s, t);
+    saveReceipt(K, '7', 'c', loadReceipt(K, '7', 'c', s, t)!, s, t + RECEIPT_TTL_MS - 2); // a later save keeps the first date
+    expect(loadReceipt(K, '7', 'c', s, t + RECEIPT_TTL_MS - 1)).toMatchObject({ ...r, savedAt: t });
+    expect(loadReceipt(K, '7', 'c', s, t + RECEIPT_TTL_MS)).toBeNull();
+    expect(s.getItem(`zarf-near:receipt:${K}/7/c`)).toBeNull();
+    s.setItem(`zarf-near:receipt:${K}/7/c`, JSON.stringify(r)); // undated (round 2 records): cleared too
+    expect(loadReceipt(K, '7', 'c', s)).toBeNull();
+    expect(s.getItem(`zarf-near:receipt:${K}/7/c`)).toBeNull();
+  });
+  it('keeps a valid deposit address and drops a malformed one', () => {
+    const s = mem();
+    saveReceipt(K, '7', 'c', { ...r, chainName: 'Base', depositAddress: 'd'.repeat(64), refundTo: 'sender.near' }, s);
+    expect(loadReceipt(K, '7', 'c', s)).toMatchObject({ depositAddress: 'd'.repeat(64), refundTo: 'sender.near' });
+    saveReceipt(K, '7', 'c', { ...r, chainName: 'Base', depositAddress: 'javascript:x' }, s);
+    expect(loadReceipt(K, '7', 'c', s)!.depositAddress).toBeUndefined();
+  });
+  it('shows one amount: the bridge payout once paid, otherwise the link amount (round 3 A4)', () => {
+    expect(shownAmount({ chainName: 'Base', bridge: 'paid', amountOut: '9.99558' }, '10', 'USDC')).toEqual({ value: '9.99', unit: 'USDC' });
+    for (const bridge of ['in-transit', 'failed', 'refunded'] as const) expect(shownAmount({ chainName: 'Base', bridge, amountOut: '9.99558' }, '10', 'USDC')).toEqual({ value: '10', unit: 'USDC' });
+    expect(shownAmount({ chainName: 'Base', bridge: 'paid' }, '10', 'USDC')).toEqual({ value: '10', unit: 'USDC' });
+    expect(shownAmount({}, '10', 'test USDC')).toEqual({ value: '10', unit: 'test USDC' });
+  });
+  it('confirmRemembered shows a record only when the chain says claimed; a failed read throws (receipt page verifyRemembered)', async () => {
+    const rec = { ...r, savedAt: 1 };
+    expect(await confirmRemembered(rec, async () => 'claimed')).toBe(rec);
+    expect(await confirmRemembered(rec, async () => 'unclaimed')).toBeNull();
+    expect(await confirmRemembered(rec, async () => 'pending')).toBeNull();
+    let read = false;
+    expect(await confirmRemembered(null, async () => { read = true; return 'claimed'; })).toBeNull();
+    expect(read).toBe(false);
+    await expect(confirmRemembered(rec, async () => { throw new Error('rpc'); })).rejects.toThrow('rpc');
+  });
+  it('dates a remembered claim in en-GB', () => {
+    expect(claimedAt(Date.UTC(2026, 10, 12, 14, 2), 'UTC')).toBe('12 Nov 2026, 14:02');
+  });
+});
+
+describe('display helpers', () => {
+  it('middle-truncates long addresses only', () => {
+    expect(middle('0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed')).toBe('0x5aAe…1BeAed');
+    expect(middle('alice.testnet')).toBe('alice.testnet');
+  });
+  it('cuts to two decimals without rounding up', () => {
+    expect(twoDecimals('9.99558')).toBe('9.99');
+    expect(twoDecimals('10')).toBe('10');
+    expect(twoDecimals('2.5')).toBe('2.5');
+    expect(twoDecimals('9.009')).toBe('9');
+    expect(twoDecimals('7.001')).toBe('7');
   });
 });
