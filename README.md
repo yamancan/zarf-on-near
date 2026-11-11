@@ -14,8 +14,8 @@ never an email. Built for the NEAR Hackathon
 - Escrow contract: [`zarf-near-1112.testnet`](https://testnet.nearblocks.io/address/zarf-near-1112.testnet)
   (accounts, keys and versions: `docs/deploy/testnet.md`)
 
-> Status: live on NEAR testnet. Google sign-in on the hosted app and the cross-chain payout have
-> not run end to end yet; the evidence table below says what has.
+> Status: live on NEAR testnet. A real Google claim has run end to end on the hosted app; the
+> cross-chain payout has not run yet. The evidence table below says what has.
 
 ## Trust model
 
@@ -165,6 +165,7 @@ includes it and rejects its tokens (`verifier/test/demo.test.ts`).
 | A draft can be funded at most once: (sender, merkle_root) is an idempotency key (E132), and after a lost wallet response the app checks `campaign_by_root` before any resend | `web/src/lib/create/create.test.ts` (`fundCampaign`, `resolveByRoot`, `mayCreate`); `contract/src/tests.rs` (`duplicate_root_is_e132_and_changes_nothing`) |
 | A claim whose callback fails stays pending until the owner's `resolve_pending` (after 1 h); `reclaim` never touches in-flight funds | `contract/src/tests.rs` (`callback_failure_restores_claim_but_not_storage_debit`, `reclaim_excludes_in_flight_and_reverts_on_failed_transfer`, `resolve_pending_is_owner_only_and_waits_an_hour`); `contract/integration/tests/escrow.rs` (`failed_callback_strands_claim_until_owner_resolves_it`) |
 | The contract pays a claim on testnet and refuses a repeat (contract-level evidence on 0.1.2, not a Google claim) | claim `Cmi5X9XyiQjSfhJDahWz6TvZKSjkVX5MKjFqAYS7m7Zt`; repeat `FLmmkbCQckFQWK9CEKxmxrtMrf2XLB28qR2guPnk6RFL` → `E105` |
+| A real claim end to end on testnet: a link from the judges' page, Google sign-in on the hosted app, the verifier's signature, the relayer's transaction | tx `AY7GFZSLZa5R26YTAUyUWA6uTBMJ9MAcmBaZkjnFMa2F` (`zarf-near-relayer-1111.testnet` → `zarf-near-1112.testnet` `claim`, campaign 2, 0.5 test USDC to `zarf-near-dest3-1112.testnet`, events `claim_started` and `claim_paid`). Check: `curl -s https://test.rpc.fastnear.com -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tx","params":{"tx_hash":"AY7GFZSLZa5R26YTAUyUWA6uTBMJ9MAcmBaZkjnFMa2F","sender_account_id":"zarf-near-relayer-1111.testnet"}}'` |
 | A cross-chain claim through NEAR Intents lands on Base | not run yet |
 
 ## Prior work, baseline and libraries
