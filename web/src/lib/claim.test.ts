@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import vectors from '../../../spec/vectors.json';
 import {
-  classifyDestination, claimState, deadlineText, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isImplicitAccount, isValidAccountId, loadAttempt, newAttemptId,
+  classifyDestination, claimState, deadlineText, timeLeft, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isImplicitAccount, isValidAccountId, loadAttempt, newAttemptId,
   decodeProof, encodeProof, parseCallback, parseLinkFragment, saveAttempt, clearAttempt, saveReceipt, loadReceipt, settleReceipt, claimedAt, middle, twoDecimals, shownAmount, confirmRemembered, RECEIPT_TTL_MS,
 } from './claim';
 
@@ -148,6 +148,14 @@ describe('deadlineText', () => {
   it('absolute in the given zone, with the time left', () => {
     expect(deadlineText(at, at - 6.5 * 86_400_000, 'UTC')).toBe('17 Nov 2026, 21:55 UTC, 6 days left');
     expect(deadlineText(at, at - 5 * 3_600_000, 'UTC')).toBe('17 Nov 2026, 21:55 UTC, 5 hours left');
+  });
+  it('a deadline picked as one week reads 7 days left a moment later, and never overstates by more than an hour', () => {
+    const now = Date.UTC(2026, 10, 12);
+    expect(timeLeft(now + 7 * 86_400_000 - 5_000, now)).toBe('7 days left');
+    expect(timeLeft(now + 30 * 86_400_000 - 60_000, now)).toBe('30 days left');
+    expect(timeLeft(now + 7 * 86_400_000 - 3_600_000, now)).toBe('7 days left');
+    expect(timeLeft(now + 7 * 86_400_000 - 3_600_001, now)).toBe('6 days left');
+    expect(timeLeft(now + 6.5 * 86_400_000, now)).toBe('6 days left');
     expect(deadlineText(at, at - 3_600_000, 'UTC')).toMatch(/1 hour left$/);
     expect(deadlineText(at, at - 60_000, 'UTC')).toMatch(/less than an hour left$/);
     expect(deadlineText(at, at + 1, 'UTC')).toBe('17 Nov 2026, 21:55 UTC');

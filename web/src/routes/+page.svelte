@@ -5,13 +5,13 @@
   import Hero from '$lib/Hero.svelte';
   import Medallion from '$lib/Medallion.svelte';
   import { themeStore } from '$lib/zen/stores/themeStore.svelte';
-  import { UNIT, USDC_LINES } from '$lib/network';
+  import { TESTNET, UNIT, USDC_LINES } from '$lib/network';
 
   const TRY_URL = 'https://zarf-near-faucet-testnet.sparkling-queen-5e77.workers.dev/try';
   const STEPS = [
     { title: 'Add emails and amounts', line: 'You pay once in USDC, a digital dollar, from a NEAR wallet.' },
     { title: 'They claim with Google', line: 'Pick a NEAR account, then sign in with Google.' },
-    { title: 'USDC arrives', line: 'On NEAR. On mainnet, also on another chain.' },
+    { title: TESTNET ? 'Test USDC arrives' : 'USDC arrives', line: 'On NEAR. On mainnet, also on another chain.' },
   ];
   let usdcOpen = $state(false);
 </script>
@@ -29,12 +29,12 @@
       <li class="flex flex-col gap-5">
         <div class="relative aspect-[16/10] md:aspect-[4/3] rounded-2xl bg-zen-bg-elevated border-[0.5px] border-zen-border-subtle overflow-hidden flex items-center justify-center p-6" aria-hidden="true">
           {#if i === 0}
-            <div class="w-full max-w-[220px] flex flex-col gap-2">
+            <div class="w-full max-w-[240px] flex flex-col gap-2">
               {#each [['alice@gmail.com', '10'], ['bob@gmail.com', '2.5'], ['chen@gmail.com', '25']] as [e, a] (e)}
                 <div class="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-zen-fg/[0.03] border-[0.5px] border-zen-border-subtle">
                   <Mail class="w-3.5 h-3.5 text-zen-fg-muted shrink-0" />
                   <span class="flex-1 text-xs text-zen-fg/80 truncate">{e}</span>
-                  <span class="text-xs font-semibold tabular-nums">{a}</span>
+                  <span class="text-xs font-semibold tabular-nums whitespace-nowrap">{a} <span class="text-[9px] font-medium uppercase tracking-widest text-zen-fg-muted">{UNIT}</span></span>
                 </div>
               {/each}
             </div>

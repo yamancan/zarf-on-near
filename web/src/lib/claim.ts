@@ -151,12 +151,16 @@ export function deadlineText(deadlineMs: number, nowMs: number, timeZone?: strin
   return rest ? `${when}, ${rest}` : when;
 }
 
-/** "6 days left", "3 hours left", "less than an hour left"; '' once it has passed. */
+/**
+ * "7 days left", "3 hours left", "less than an hour left"; '' once it has passed. Whole days count from
+ * 48 h and allow one hour, so a deadline picked as "1 week" reads "7 days left" a moment later, never 6;
+ * it never overstates by more than that hour.
+ */
 export function timeLeft(deadlineMs: number, nowMs: number): string {
   const left = deadlineMs - nowMs;
   if (left <= 0) return '';
   const h = Math.floor(left / 3_600_000);
-  return h >= 48 ? `${Math.floor(h / 24)} days left` : h >= 1 ? `${h} hour${h === 1 ? '' : 's'} left` : 'less than an hour left';
+  return h >= 48 ? `${Math.floor((left + 3_600_000) / 86_400_000)} days left` : h >= 1 ? `${h} hour${h === 1 ? '' : 's'} left` : 'less than an hour left';
 }
 
 /**

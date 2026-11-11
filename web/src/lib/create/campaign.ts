@@ -52,19 +52,22 @@ export const LONG_LINKS_ABOVE = 500;
 
 /**
  * The ready-made message a sender passes on with one link. `unit` is the network's ("test USDC" on testnet):
- * a testnet message must never read as real money, so it also says the test token has no value.
+ * a testnet message must never read as real money, so it also says the test token has no value. `from` is
+ * the sender's name (optional; without it the message stays neutral) and `home` where to read what Zarf is,
+ * so the recipient can check before clicking.
  */
 export function messageText(
   r: Pick<Recipient, 'email' | 'amount'>,
   link: string,
-  o: { unit: string; testnet: boolean; deadlineMs: number; timeZone?: string },
+  o: { unit: string; testnet: boolean; deadlineMs: number; timeZone?: string; from?: string; home?: string },
 ): { subject: string; body: string } {
   const amount = `${formatAmount(BigInt(r.amount))} ${o.unit}`;
   const until = new Intl.DateTimeFormat('en-GB', {
     day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short', timeZone: o.timeZone,
   }).format(o.deadlineMs);
+  const from = o.from?.trim();
   const lines = [
-    `Hi, I sent you ${amount} with Zarf.`,
+    from ? `Hi, it's ${from}. I sent you ${amount} with Zarf.` : `Hi, I sent you ${amount} with Zarf.`,
     `Open this link and sign in with Google as ${r.email}. You choose the ${o.testnet ? 'NEAR ' : ''}account it goes to; the page helps if you don't have one.`,
     '',
     link,
@@ -72,7 +75,9 @@ export function messageText(
     `Claim it before ${until}. Keep this link to yourself.`,
   ];
   if (o.testnet) lines.push('Test USDC is practice money with no value.');
-  return { subject: `${amount} for you`, body: lines.join('\n') };
+  if (o.home) lines.push(`What is Zarf? ${o.home}`);
+  if (from) lines.push('', from);
+  return { subject: from ? `${amount} for you, from ${from}` : `${amount} for you`, body: lines.join('\n') };
 }
 
 /** An email to one recipient with their message. Percent-encoded so the link's `&` and `#` survive. */
