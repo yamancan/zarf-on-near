@@ -5,7 +5,7 @@
 <svelte:head><title>Privacy and terms · Zarf</title></svelte:head>
 
 <article class="prose-zarf w-full max-w-xl mx-auto px-6 py-8 md:py-12">
-<PageHeader title="Privacy and terms" description="Operated by Trion Labs. Contact: operator@example.invalid." />
+<PageHeader title="Privacy and terms" description="Operated by Trion Labs. Contact: privacy@trionlabs.dev." />
 
 <h2>Your email</h2>
 <p>
@@ -42,7 +42,7 @@
 </p>
 
 <h2>Contact</h2>
-<p><a href="mailto:operator@example.invalid">operator@example.invalid</a></p>
+<p><a href="mailto:privacy@trionlabs.dev">privacy@trionlabs.dev</a></p>
 </article>
 
 <style>
