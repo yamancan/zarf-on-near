@@ -521,7 +521,7 @@
       </ZenButton>
     </div>
     <!-- Why the button is grey, or what it does next (Zarf's launchBlocker spot) -->
-    {#if reason}<p class="text-xs text-zen-fg-muted text-right">{reason}</p>{/if}
+    {#if reason}<p class="text-xs text-zen-fg-muted text-right ml-auto max-w-sm">{reason}</p>{/if}
   </div>
 {/snippet}
 
@@ -546,6 +546,7 @@
 {/snippet}
 
 {#snippet pipeline()}
+  {@const idle = !busy && txState === 'checking'}
   <!-- Zarf's DeploymentPipeline: numbered rows, the current one marked; hairline connector, no boxes -->
   <ol class="flex flex-col" aria-label="Sending">
     {#each ['Approve in MyNearWallet', 'Confirming on NEAR', 'Links ready'] as label, i (label)}
@@ -554,14 +555,14 @@
         {#if i < 2}<span class="absolute left-4 top-9 bottom-1 w-px bg-zen-border" aria-hidden="true"></span>{/if}
         <span class="w-8 h-8 shrink-0 rounded-full border-[0.5px] flex items-center justify-center text-xs font-medium
           {st === 'done' ? 'bg-zen-fg text-zen-bg border-zen-fg' : st === 'active' ? 'border-zen-border text-zen-fg' : 'border-zen-border-subtle text-zen-fg-muted'}">
-          {#if st === 'done'}<Check class="w-4 h-4" aria-hidden="true" />{:else if st === 'active'}<Loader2 class="w-4 h-4 animate-spin" aria-hidden="true" />{:else}{i + 1}{/if}
+          {#if st === 'done'}<Check class="w-4 h-4" aria-hidden="true" />{:else if st === 'active' && idle}<Clock class="w-4 h-4" aria-hidden="true" />{:else if st === 'active'}<Loader2 class="w-4 h-4 animate-spin" aria-hidden="true" />{:else}{i + 1}{/if}
         </span>
         <div class="flex flex-col min-w-0 pt-1.5">
           <span class="text-sm font-medium {st === 'active' ? 'text-zen-fg' : 'text-zen-fg-muted'}">{label}</span>
           {#if st === 'active' && i === 0}
             <span class="text-sm text-zen-fg-muted" role="status">Waiting for you in the wallet window.</span>
           {:else if st === 'active' && i === 1}
-            <span class="text-sm text-zen-fg-muted" role="status">{sentTx ? 'Sent. Checking it went through.' : 'Checking whether it went through.'}</span>
+            <span class="text-sm text-zen-fg-muted" role="status">{idle ? 'Not confirmed yet.' : sentTx ? 'Sent. Checking it went through.' : 'Checking whether it went through.'}</span>
             {#if sentTx}<span class="text-zen-fg-muted">{@render explorerLink(sentTx)}</span>{/if}
           {/if}
         </div>
@@ -625,7 +626,7 @@
                 <span class="flex-1 min-w-0 flex flex-col py-1.5 text-sm">
                   <span class="truncate" title={r.email}>{r.email}</span>
                   <span class="flex flex-wrap items-center gap-x-1.5 text-xs text-zen-fg-muted tabular-nums">
-                    <span class="whitespace-nowrap">{formatAmount(BigInt(r.amount))} {UNIT}</span>
+                    <span class="whitespace-nowrap">{formatAmount(BigInt(r.amount))} <span class="text-[10px] uppercase tracking-widest">{UNIT}</span></span>
                     {#if c === 'claimed'}
                       <span class="inline-flex items-center gap-1 whitespace-nowrap text-zen-success-content">· <Check class="w-3 h-3" aria-hidden="true" />Claimed</span>
                     {:else if c === 'pending'}
@@ -679,7 +680,7 @@
 
       {#if shown}
         <aside class="w-full lg:flex-1 lg:sticky lg:top-24 min-w-0" aria-label="The message for {shown.r.email}">
-          <p class="mb-4 ml-1 text-[11px] font-medium uppercase tracking-[0.15em] text-zen-fg-muted truncate">The message for {shown.r.email}</p>
+          <p class="mb-4 ml-1 text-[11px] font-medium uppercase tracking-[0.15em] text-zen-fg-muted truncate">The message for <span class="normal-case tracking-normal text-xs">{shown.r.email}</span></p>
           {@render messageCard(shown.r.email, message(shown.r, `${claimHost}/claim/${result.campaignId}/${shown.r.commitment.slice(0, 8)}…`), '"Copy message" copies it with the full link.')}
         </aside>
       {/if}
@@ -821,7 +822,7 @@
             <ul class="flex flex-col text-sm border-y-[0.5px] border-zen-border-subtle max-h-64 overflow-auto">
               {#each d.recipients as r (r.commitment)}
                 <li class="flex items-center justify-between gap-3 min-h-10 border-b-[0.5px] border-zen-border-subtle last:border-b-0">
-                  <span class="truncate min-w-0">{r.email}</span><span class="shrink-0 whitespace-nowrap tabular-nums text-zen-fg-muted">{formatAmount(BigInt(r.amount))} {UNIT}</span>
+                  <span class="truncate min-w-0">{r.email}</span><span class="shrink-0 whitespace-nowrap tabular-nums text-zen-fg-muted">{formatAmount(BigInt(r.amount))} <span class="text-[10px] uppercase tracking-widest">{UNIT}</span></span>
                 </li>
               {/each}
             </ul>
@@ -830,17 +831,17 @@
 
           <!-- 2. Leaves your wallet: one line per item -->
           <section class="flex flex-col gap-2" aria-labelledby="leaves-h">
-            <h2 id="leaves-h" class="text-[11px] font-medium uppercase tracking-[0.15em] text-zen-fg-muted">Leaves your wallet</h2>
+            <h2 id="leaves-h" class="text-[11px] font-medium uppercase tracking-[0.15em] text-zen-fg-muted">Leaves your wallet{#if account}<span class="normal-case tracking-normal font-mono">&nbsp;·&nbsp;{account}</span>{/if}</h2>
             <dl class="flex flex-col text-sm border-y-[0.5px] border-zen-border-subtle">
               <div class="flex flex-col sm:flex-row sm:items-baseline gap-x-4 py-2.5 border-b-[0.5px] border-zen-border-subtle">
-                <dt class="sm:w-36 shrink-0 font-semibold tabular-nums whitespace-nowrap">{formatAmount(BigInt(d.total))} {UNIT}</dt>
+                <dt class="sm:w-36 shrink-0 font-semibold tabular-nums whitespace-nowrap">{formatAmount(BigInt(d.total))} <span class="text-[10px] uppercase tracking-widest">{UNIT}</span></dt>
                 <dd class="text-zen-fg-muted">held by the Zarf contract until each person claims</dd>
               </div>
               <div class="flex flex-col sm:flex-row sm:items-baseline gap-x-4 py-2.5 border-b-[0.5px] border-zen-border-subtle">
                 {#if storageShort === null}
                   <dt class="sm:w-36 shrink-0 font-semibold">Storage deposit</dt><dd class="text-zen-fg-muted">checking…</dd>
                 {:else if storageShort > 0n}
-                  <dt class="sm:w-36 shrink-0 font-semibold tabular-nums whitespace-nowrap">{formatNear(storageShort.toString()) === '0' ? 'under 0.00001' : formatNear(storageShort.toString())} NEAR</dt>
+                  <dt class="sm:w-36 shrink-0 font-semibold tabular-nums whitespace-nowrap">{formatNear(storageShort.toString()) === '0' ? 'under 0.00001' : formatNear(storageShort.toString())} <span class="text-[10px] uppercase tracking-widest">NEAR</span></dt>
                   <dd class="text-zen-fg-muted">storage deposit, so NEAR can keep each claim on record</dd>
                 {:else}
                   <dt class="sm:w-36 shrink-0 font-semibold">Storage deposit</dt><dd class="text-zen-fg-muted">already covered by NEAR you deposited before</dd>
@@ -871,7 +872,11 @@
             {#if recoverySaved}<ZenCheckbox bind:checked={recoveryAck} disabled={phase > 0} label="I saved it somewhere private" />{/if}
           </section>
 
-          {@render accountRow()}
+          {#if wrongAccount}
+            <ZenAlert variant="warning">This send belongs to <span class="font-mono">{sentFrom}</span>. Reconnect {sentFrom} to continue.</ZenAlert>
+          {:else if pinned}
+            <p class="text-xs text-zen-fg-muted">Finish this send before using another account.</p>
+          {/if}
 
           <!-- 5. Send. Every sub-state in Zarf's alert, each answering "where is my money?": warning while it must not be sent again, error when it failed. -->
           {#if txState === 'mismatch'}
@@ -905,7 +910,7 @@
                 <ZenButton variant="primary" class="rounded-full min-h-11" disabled={!!sendBlocker || phase > 0} onclick={create}>Send {formatAmount(BigInt(d.total))} {UNIT}</ZenButton>
               </div>
               {#if phase === 0}
-                <p class="text-xs text-zen-fg-muted text-right">
+                <p class="text-xs text-zen-fg-muted text-right ml-auto max-w-sm">
                   {sendBlocker ||
                     `MyNearWallet opens for your approval.${txCount === 2 ? ` This send is 2 transactions: the storage deposit, then the ${UNIT}.` : txCount === 1 ? ` This send is 1 transaction: the ${UNIT}.` : ''}`}
                 </p>
@@ -919,7 +924,6 @@
               </ZenAlert>
               <div class="flex flex-wrap items-center gap-4">
                 <ZenButton variant="secondary" class="rounded-full min-h-11" onclick={recheck}>Check again</ZenButton>
-                {@render explorerLink(sentTx ?? '')}
               </div>
             {:else if txState === 'settling'}
               <ZenAlert variant="warning">
@@ -947,7 +951,7 @@
       {#if step < 3}
         <!-- What the first recipient will see: the claim card in miniature. Beside the form on desktop, below it on phones -->
         <aside class="w-full lg:flex-1 lg:sticky lg:top-24 min-w-0" aria-label="Preview of a claim">
-          <p class="mb-4 ml-1 text-[11px] font-medium uppercase tracking-[0.15em] text-zen-fg-muted truncate">{previewEmail ? `What ${previewEmail} sees` : 'What they see'}</p>
+          <p class="mb-4 ml-1 text-[11px] font-medium uppercase tracking-[0.15em] text-zen-fg-muted truncate">{#if previewEmail}What <span class="normal-case tracking-normal text-xs">{previewEmail}</span> sees{:else}What they see{/if}</p>
           <ZenCard variant="elevated" padding="lg">
             <div class="flex flex-col items-center text-center gap-4 {parsed.rows.length ? '' : 'opacity-50'}" aria-hidden="true">
               <Medallion icon={Mail} />
@@ -961,7 +965,7 @@
       {:else}
         <aside class="w-full lg:flex-1 lg:sticky lg:top-24 min-w-0" aria-label="Preview of the message">
           {#if previewEmail && draft}
-            <p class="mb-4 ml-1 text-[11px] font-medium uppercase tracking-[0.15em] text-zen-fg-muted truncate">What {previewEmail} gets</p>
+            <p class="mb-4 ml-1 text-[11px] font-medium uppercase tracking-[0.15em] text-zen-fg-muted truncate">What <span class="normal-case tracking-normal text-xs">{previewEmail}</span> gets</p>
             {@render messageCard(previewEmail, message(draft.recipients[0], `${claimHost}/claim/…`), 'Each person gets their own link after you send.')}
           {/if}
         </aside>

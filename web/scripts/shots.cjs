@@ -305,7 +305,7 @@ const S = {
     await rpc(p); await p.goto(base + '/create'); await p.waitForTimeout(4500); return {};
   },
   // Send UX round (r5): every new or changed sender state.
-  'landing-usdc': async (p) => { await rpc(p); await p.goto(base + '/'); await p.waitForSelector('h1'); await heroShown(p); await p.getByRole('button', { name: 'USDC', exact: true }).click(); await p.waitForTimeout(300); await p.getByRole('button', { name: 'USDC', exact: true }).scrollIntoViewIfNeeded(); return {}; },
+  'landing-usdc': async (p) => { await rpc(p); await p.goto(base + '/'); await p.waitForSelector('h1'); await heroShown(p); await p.getByRole('button', { name: 'USDC', exact: true }).click(); await p.waitForTimeout(300); return { full: true }; },
   'create-1-usdc': async (p) => { await rpc(p); await p.goto(base + '/create'); await p.waitForSelector('#recipients'); await p.waitForTimeout(1500); await p.getByRole('button', { name: /What is test USDC/ }).click(); await p.waitForTimeout(300); return { full: true }; },
   'create-1-ok': async (p) => { await rpc(p); await p.goto(base + '/create'); await p.waitForSelector('#recipients'); await p.waitForTimeout(1500); await p.fill('#recipients', CSV); await p.waitForTimeout(400); return { full: true }; },
   'create-1-dup': async (p) => { await rpc(p); await p.goto(base + '/create'); await p.waitForSelector('#recipients'); await p.waitForTimeout(1500); await p.fill('#recipients', CSV + '\nAlice@gmail.com,5'); await p.waitForTimeout(400); return { full: true }; },
