@@ -296,7 +296,8 @@ const JS = `(() => {
         await navigator.clipboard.writeText(url);
         btn.replaceChildren(icon('copied'), el('span', {}, 'Copied'));
       } catch {
-        btn.replaceChildren(icon('error'), el('span', {}, 'Copy failed. Long-press Open it and claim.'));
+        btn.replaceChildren(icon('error'), el('span', {}, 'Copy failed'));
+        if (!btn.dataset.told) { btn.dataset.told = '1'; btn.parentNode.after(note('error', 'Long-press Open it and claim to copy the link.')); }
       }
     });
     return btn;
