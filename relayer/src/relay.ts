@@ -43,6 +43,8 @@ export async function handleRelay(input: unknown, ip: string, d: RelayDeps): Pro
   const isU64 = (v: unknown): v is string => typeof v === 'string' && U64.test(v) && !(BigInt(v) >> 64n);
   const isHex32 = (v: unknown): v is string => typeof v === 'string' && HEX32.test(v);
   if (typeof destination !== 'string' || !isValidAccountId(destination)) return refuse(400, 'BAD_DESTINATION');
+  // Paying the escrow itself would lock the USDC in it for good (second audit S1); a token is checked in submit().
+  if (destination === d.contractId) return refuse(400, 'DESTINATION_IS_CONTRACT');
   if (!isU64(campaign_id) || !isU64(expires_at_ns) || !isHex32(commitment) || !isHex32(signer)) return refuse(400, 'E108_INVALID_INPUT');
   if (typeof signature !== 'string' || !/^[0-9a-f]{128}$/.test(signature)) return refuse(400, 'E108_INVALID_INPUT');
   if (!Array.isArray(proof) || proof.length > 20 || !proof.every(isHex32)) return refuse(400, 'E108_INVALID_INPUT');
@@ -61,9 +63,10 @@ export async function handleRelay(input: unknown, ip: string, d: RelayDeps): Pro
 
   const args = new TextEncoder().encode(JSON.stringify({ campaign_id, commitment, amount, proof, destination, expires_at_ns, signer, signature }));
   try {
-    return await submit(args, d, true);
+    return await submit(args, d, true, destination);
   } catch (e) {
     // Logs are fixed tags only: never the request, the error text or the tx.
+    if (e instanceof DestinationIsToken) return refuse(400, 'DESTINATION_IS_TOKEN');
     if (e instanceof RelayerMisconfigured) {
       console.log('misconfigured');
       return refuse(500, 'RELAYER_MISCONFIGURED');
@@ -77,6 +80,7 @@ export async function handleRelay(input: unknown, ip: string, d: RelayDeps): Pro
 }
 
 class RelayerMisconfigured extends Error {}
+class DestinationIsToken extends Error {}
 
 interface TxOutcome {
   status?: { SuccessValue?: string; Failure?: unknown };
@@ -111,11 +115,14 @@ export function claimEvent(o: TxOutcome, contractId: string, commitment: string)
 
 const submitted = (hash: string): RelayResult => ({ status: 202, body: { tx_hash: hash, status: 'submitted' } });
 
-async function submit(args: Uint8Array, d: RelayDeps, retryNonce: boolean): Promise<RelayResult> {
-  const [gas, ak] = await Promise.all([
+async function submit(args: Uint8Array, d: RelayDeps, retryNonce: boolean, destination: string): Promise<RelayResult> {
+  const [gas, ak, config] = await Promise.all([
     viewFunction<string>(d.rpc, d.contractId, 'required_claim_gas', {}),
     viewAccessKey(d.rpc, d.relayerAccountId, d.key.publicKeyStr),
+    viewFunction<{ token_ids?: unknown }>(d.rpc, d.contractId, 'get_config', {}),
   ]);
+  // A claim paid to a token contract is lost to the recipient (second audit S1).
+  if (Array.isArray(config?.token_ids) && config.token_ids.includes(destination)) throw new DestinationIsToken();
   // Never sign with a key that can do more than call `claim` on our contract.
   const fc = ak.permission === 'FullAccess' ? null : ak.permission.FunctionCall;
   if (!fc || fc.receiver_id !== d.contractId || fc.method_names.length !== 1 || fc.method_names[0] !== 'claim') {
@@ -141,7 +148,7 @@ async function submit(args: Uint8Array, d: RelayDeps, retryNonce: boolean): Prom
       const ak = /"ak_nonce":\s*(\d+)/.exec(detail);
       if (ak && BigInt(ak[1]) > lastNonce) lastNonce = BigInt(ak[1]);
       console.log('nonce_retry');
-      return submit(args, d, false);
+      return submit(args, d, false, destination);
     }
     if (detail.includes('TIMEOUT_ERROR')) return submitted(hash); // sent; the app follows claim_state
     throw e;

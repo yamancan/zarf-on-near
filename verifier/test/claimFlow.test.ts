@@ -17,7 +17,7 @@ const alice = campaigns.main.recipients.find((r) => r.commitment === named.call_
 type ChainOver = Partial<{
   network: string; root: string; deadline: string; missing: boolean; balance: string;
   policy: 'owner' | 'attested'; snapshot: string[]; state: 'unclaimed' | 'pending' | 'claimed';
-  agent: { valid_until_ns: string } | null;
+  agent: { valid_until_ns: string } | null; token: string;
 }>;
 const chain = (over: ChainOver = {}): ChainReader => ({
   getNetwork: async () => over.network ?? context.network,
@@ -26,6 +26,7 @@ const chain = (over: ChainOver = {}): ChainReader => ({
       ? null
       : {
           sender: 'sender.testnet',
+          token: over.token ?? 'usdc.testnet',
           merkle_root: over.root ?? campaigns.main.merkle_root,
           deadline_ns: over.deadline ?? context.deadline_ns,
           balance: over.balance ?? '1000000000',
@@ -220,5 +221,19 @@ describe('handleClaim with a 1Click payout (intents)', () => {
     expect(await run({ intentsStatus }, { destination: named_, id_token: await token({}, named_) })).toEqual({ status: 400, body: { error: 'E108_INVALID_INPUT' } });
     expect(await run({ intentsStatus }, { intents: { destination_asset: asset } })).toEqual({ status: 400, body: { error: 'E108_INVALID_INPUT' } });
     expect(intentsStatus).not.toHaveBeenCalled();
+  });
+});
+
+describe('a destination that would lose the funds (second audit S1)', () => {
+  it('refuses the escrow contract itself before any token or chain work', async () => {
+    const getCampaign = vi.fn();
+    const res = await handleClaim(await request({ destination: context.contract_id, id_token: 'x' }), { ...deps, chain: { ...chain(), getCampaign } });
+    expect(res).toEqual({ status: 400, body: { error: 'DESTINATION_IS_CONTRACT' } });
+    expect(getCampaign).not.toHaveBeenCalled();
+  });
+  it("refuses the campaign's token contract", async () => {
+    const tok = 'usdc.testnet';
+    const res = await handleClaim(await request({ destination: tok, id_token: await token({}, tok) }), { ...deps, chain: chain({ token: tok }) });
+    expect(res).toEqual({ status: 400, body: { error: 'DESTINATION_IS_TOKEN' } });
   });
 });

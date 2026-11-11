@@ -1,6 +1,7 @@
 /** What the verifier reads from the escrow contract (spec/claim.md "Views"). Never from the request. */
 export interface Campaign {
   sender: string; // the funder: a failed cross-chain payout is refunded to it
+  token?: string; // the campaign's NEP-141 token
   merkle_root: string; // hex32
   deadline_ns: string; // u64, decimal
   balance: string; // u128, decimal; excludes in-flight

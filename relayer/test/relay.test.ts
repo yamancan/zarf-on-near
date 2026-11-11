@@ -32,6 +32,9 @@ function stubRpc(o: { permission?: unknown; nonce?: number; gas?: unknown; send?
         return { nonce: o.nonce ?? 5, block_hash: BLOCK, permission: o.permission ?? fcKey } as T;
       }
       if (method === 'query' && params.request_type === 'view_account') return { amount: '4200000000000000000000000' } as T;
+      if (method === 'query' && params.method_name === 'get_config') {
+        return { result: [...new TextEncoder().encode(JSON.stringify({ token_ids: ['usdc.testnet'] }))] } as T;
+      }
       if (method === 'query' && params.method_name === 'required_claim_gas') {
         return { result: [...new TextEncoder().encode(JSON.stringify('gas' in o ? o.gas : GAS))] } as T;
       }
@@ -101,6 +104,7 @@ describe('handleRelay', () => {
     ['a missing field', (({ signature: _, ...r }) => r)(valid), 400, 'E108_INVALID_INPUT'],
     ['an array body', [valid], 400, 'E108_INVALID_INPUT'],
     ['a bad destination', { ...valid, destination: 'Alice.testnet' }, 400, 'BAD_DESTINATION'],
+    ['the escrow contract itself as destination', { ...valid, destination: context.contract_id }, 400, 'DESTINATION_IS_CONTRACT'],
     ['amount 0', { ...valid, amount: '0' }, 400, 'E109_INVALID_AMOUNT'],
     ['a short signature', { ...valid, signature: 'ab' }, 400, 'E108_INVALID_INPUT'],
     ['proof over 20', { ...valid, proof: Array(21).fill('00'.repeat(32)) }, 400, 'E108_INVALID_INPUT'],
@@ -234,5 +238,17 @@ describe('handleHealth', () => {
   });
   it('is rate-limited per IP', async () => {
     expect((await handleHealth({ rpc: stubRpc().rpc, relayerAccountId: 'r', key, perIp: deny, contractId: 'c' }, 'ip')).status).toBe(429);
+  });
+});
+
+describe('a claim paid to a token contract (second audit S1)', () => {
+  it('is refused with DESTINATION_IS_TOKEN after the signature check and before anything is sent', async () => {
+    const s = stubRpc();
+    const rpc: Rpc = { call: (m: string, p: any) => (m === 'query' && p.method_name === 'get_config'
+      ? Promise.resolve({ result: [...new TextEncoder().encode(JSON.stringify({ token_ids: [valid.destination] }))] } as never)
+      : s.rpc.call(m, p)) };
+    const res = await handleRelay({ ...valid }, 'ip', deps({ rpc }));
+    expect(res).toEqual({ status: 400, body: { error: 'DESTINATION_IS_TOKEN' } });
+    expect(s.sent.length).toBe(0);
   });
 });

@@ -226,3 +226,11 @@ describe('relayAndSettle (receipt: the relayer was called)', () => {
     expect(await relayAndSettle(async () => ({ txHash: 'H', paid: false }), states('pending', 'claimed'), o())).toEqual({ state: 'claimed', txHash: 'H' });
   });
 });
+
+describe('copy for the second audit S1 codes', () => {
+  it.each([
+    ['E128_INSUFFICIENT_STORAGE', /storage reserve.*top it up.*fund_campaign_storage/],
+    ['DESTINATION_IS_CONTRACT', /Zarf contract itself/],
+    ['DESTINATION_IS_TOKEN', /USDC token contract/],
+  ])('%s has its own sentence', (code, re) => expect(describeError(new ClaimError(code))).toMatch(re));
+});

@@ -37,6 +37,8 @@ export async function handleClaim(input: unknown, d: ClaimDeps): Promise<ClaimRe
   if (typeof id_token !== 'string' || typeof destination !== 'string') return refuse(400, 'E108_INVALID_INPUT');
   // Destination first: the nonce is only ever computed over a valid AccountId.
   if (!isValidAccountId(destination)) return refuse(400, 'BAD_DESTINATION');
+  // Paying the escrow itself would lock the USDC in it for good (second audit S1).
+  if (destination === d.contractId) return refuse(400, 'DESTINATION_IS_CONTRACT');
   if (typeof campaign_id !== 'string' || !U64.test(campaign_id) || BigInt(campaign_id) >> 64n) return refuse(400, 'E108_INVALID_INPUT');
   if (typeof c !== 'string' || !HEX32.test(c) || typeof salt !== 'string' || !HEX32.test(salt)) return refuse(400, 'E108_INVALID_INPUT');
   if (!Array.isArray(proof) || proof.length > 20 || !proof.every((p) => typeof p === 'string' && HEX32.test(p))) return refuse(400, 'E108_INVALID_INPUT');
@@ -67,6 +69,7 @@ export async function handleClaim(input: unknown, d: ClaimDeps): Promise<ClaimRe
     throw new UpstreamError('chain');
   });
   if (!campaign) return refuse(404, 'E110_UNKNOWN_CAMPAIGN');
+  if (campaign.token && destination === campaign.token) return refuse(400, 'DESTINATION_IS_TOKEN'); // lost to the recipient
   if (intents && network !== 'mainnet') return refuse(400, 'E108_INVALID_INPUT'); // 1Click routes mainnet USDC only
   const nowNs = BigInt(Math.floor(nowMs)) * 1_000_000n;
   if (nowNs > BigInt(campaign.deadline_ns)) return refuse(409, 'E125_CAMPAIGN_ENDED');
