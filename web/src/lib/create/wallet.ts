@@ -1,7 +1,12 @@
-// Sender wallet: MyNearWallet through @near-wallet-selector (popup + postMessage, no page redirect).
-// Loaded only by /create, so the claim page never ships wallet code.
+// Sender wallet through NEAR Connect (@hot-labs/near-connect), NEAR's replacement for the deprecated wallet
+// selector: it shows a wallet picker and runs each wallet's code in a sandboxed iframe. MyNearWallet stopped
+// accepting app connections in Nov 2026, so it is excluded. Loaded only by /create and /campaigns.
 
 import type { Tx } from './funding';
+// Pinned copy of NEAR Connect's manifest (hot-dao/near-selector repository/manifest.json, v1.1.0, 12 Nov 2026),
+// cut to the wallets we offer: no runtime manifest fetch, and no wallet appears that we have not looked at.
+import manifest from './wallets.json';
+
 
 export interface SenderWallet {
   accountId(): string | null;
@@ -11,34 +16,49 @@ export interface SenderWallet {
   send(txs: Tx[]): Promise<string[]>;
 }
 
-export async function myNearWallet(networkId: string, rpcUrl: string): Promise<SenderWallet> {
-  // MyNearWallet builds its popup URL with Node's Buffer; browsers have none. Only /create loads this.
-  (globalThis as { Buffer?: unknown }).Buffer ??= (await import('buffer')).Buffer;
-  const [{ setupWalletSelector }, { setupMyNearWallet }, { actionCreators }] = await Promise.all([
-    import('@near-wallet-selector/core'),
-    import('@near-wallet-selector/my-near-wallet'),
-    import('@near-js/transactions'),
-  ]);
-  const selector = await setupWalletSelector({
-    network: { networkId, nodeUrl: rpcUrl, helperUrl: '', explorerUrl: '', indexerUrl: '' },
-    modules: [setupMyNearWallet()],
+/** What the wallet is handed: exactly fundingTxs' transactions, the signer named once (NEAR Connect's shape). */
+export const walletRequest = (txs: Tx[]) => ({
+  signerId: txs[0]?.signerId,
+  transactions: txs.map((t) => {
+    if (t.signerId !== txs[0].signerId) throw new Error('one signer per request');
+    return { receiverId: t.receiverId, actions: t.actions };
+  }),
+});
+
+export async function nearConnectWallet(networkId: string, rpcUrl: string): Promise<SenderWallet> {
+  const { NearConnector } = await import('@hot-labs/near-connect');
+  const network = networkId === 'mainnet' ? 'mainnet' : 'testnet';
+  const connector = new NearConnector({
+    network,
+    providers: { [network]: [rpcUrl] },
+    features: { signAndSendTransactions: true },
+    manifest: manifest as never,
+    excludedWallets: ['mynearwallet'], // retired: it refuses new app connections
+    autoConnect: true,
+    // The wallet code runs in srcdoc iframes, which inherit this page's CSP: its inline scripts need our nonce.
+    cspNonce: (document.querySelector('script[nonce]') as HTMLScriptElement | null)?.nonce || undefined,
   });
-  const wallet = await selector.wallet('my-near-wallet');
+  let account: string | null = null;
+  try {
+    account = (await connector.getConnectedWallet()).accounts[0]?.accountId ?? null;
+  } catch {
+    // not connected yet
+  }
   return {
-    accountId: () => selector.store.getState().accounts[0]?.accountId ?? null,
+    accountId: () => account,
     async signIn() {
-      const [account] = await wallet.signIn({ accounts: [] });
-      return account.accountId;
+      const wallet = await connector.connect();
+      const [a] = await wallet.getAccounts();
+      if (!a) throw new Error('NO_ACCOUNT');
+      return (account = a.accountId);
     },
-    signOut: () => wallet.signOut(),
+    async signOut() {
+      await connector.disconnect();
+      account = null;
+    },
     async send(txs) {
-      // wallet-selector v10 takes @near-js actions; our Tx stays a plain, testable shape until here.
-      const transactions = txs.map((t) => ({
-        signerId: t.signerId,
-        receiverId: t.receiverId,
-        actions: t.actions.map(({ params: p }) => actionCreators.functionCall(p.methodName, p.args, BigInt(p.gas), BigInt(p.deposit))),
-      }));
-      const outcomes = await wallet.signAndSendTransactions({ transactions });
+      const wallet = await connector.wallet();
+      const outcomes = await wallet.signAndSendTransactions(walletRequest(txs));
       return (outcomes ?? []).map((o) => o.transaction.hash);
     },
   };

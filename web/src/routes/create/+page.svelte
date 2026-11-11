@@ -9,7 +9,7 @@
   } from '$lib/create/funding';
   import { saveFile } from '$lib/create/publish';
   import { formatAmount, parseRecipients } from '$lib/create/recipients';
-  import { myNearWallet, type SenderWallet } from '$lib/create/wallet';
+  import { nearConnectWallet, type SenderWallet } from '$lib/create/wallet';
   import { deadlineText, timeLeft } from '$lib/claim';
   import { formatNear } from '$lib/create/campaigns';
   import { getClaimState, nearView, type ClaimState } from '$lib/services';
@@ -192,7 +192,7 @@
       config = await getConfig(rpc, contract);
       if (!config.token_ids.includes(token)) setupError = `${token} is not accepted by this contract.`;
       choose(picks[0] ?? 'date');
-      wallet = await myNearWallet(config.network, rpc);
+      wallet = await nearConnectWallet(config.network, rpc);
       walletReady = true;
       account = wallet.accountId();
       // A funding tx from before a reload: resume checking it instead of offering Create again.
@@ -575,7 +575,7 @@
     This send was started from <span class="font-mono">{sentFrom}</span>. Reconnect {sentFrom} to finish it.
     {#snippet actions()}
       {#if account}<ZenButton variant="secondary" size="sm" class="rounded-full min-h-11" onclick={disconnect} disabled={!!busy}>Disconnect</ZenButton>
-      {:else}<ZenButton variant="secondary" size="sm" class="rounded-full min-h-11" onclick={connect} disabled={!walletReady}>Connect MyNearWallet</ZenButton>{/if}
+      {:else}<ZenButton variant="secondary" size="sm" class="rounded-full min-h-11" onclick={connect} disabled={!walletReady}>Connect a NEAR wallet</ZenButton>{/if}
     {/snippet}
   </ZenAlert>
 {/snippet}
@@ -674,7 +674,7 @@
   {@const idle = !busy && txState === 'checking'}
   <!-- Zarf's DeploymentPipeline: numbered rows, the current one marked; hairline connector, no boxes -->
   <ol class="flex flex-col" aria-label="Sending">
-    {#each ['Approve in MyNearWallet', 'Confirming on NEAR', 'Links ready'] as label, i (label)}
+    {#each ['Approve in your wallet', 'Confirming on NEAR', 'Links ready'] as label, i (label)}
       {@const st = i + 1 < phase ? 'done' : i + 1 === phase ? 'active' : 'pending'}
       <li class="relative flex gap-4 pb-5 last:pb-0 {st === 'pending' ? 'opacity-40' : ''}" aria-current={st === 'active' ? 'step' : undefined}>
         {#if i < 2}<span class="absolute left-4 top-9 bottom-1 w-px bg-zen-border" aria-hidden="true"></span>{/if}
@@ -863,7 +863,7 @@
         {#if step === 0}
           <label for="recipients" class="flex flex-col gap-1">
             <span class="text-sm font-medium">Their Google email and amount</span>
-            <span class="text-xs text-zen-fg-muted">One per line, like alice@gmail.com, 10</span>
+            <span class="text-xs text-zen-fg-muted">One per line, like alice@gmail.com, 10. Use exactly the address they sign in to Google with: Gmail dots and +aliases count as a different address here.</span>
           </label>
           <textarea id="recipients" bind:value={csv} rows="8" class="control-border w-full rounded-2xl bg-transparent p-4 !font-mono text-sm" placeholder={'alice@gmail.com,10\nbob@gmail.com,2.5'} disabled={!!draft}></textarea>
           {#if parsed.rows.length}
@@ -875,7 +875,7 @@
               {#each parsed.rejected as r (r.line)}<span class="block font-normal">Line {r.line}: {r.reason}</span>{/each}
             </Note>
           {/if}
-          <Term q="Which email?">The exact address they sign in to Google with. A Gmail +alias can't sign in.</Term>
+          <Term q="Which email?">Exactly the address they sign in to Google with. a.lice@gmail.com and alice+pay@gmail.com reach the same inbox but count as different addresses here, and a +alias can't sign in at all.</Term>
           <label class="self-start text-xs text-zen-fg-muted underline underline-offset-2 hover:text-zen-fg cursor-pointer min-h-11 flex items-center">
             Open a backup file
             <input class="sr-only" type="file" accept="application/json,.json" disabled={!config || !!busy} onchange={(e) => openBackup(e.currentTarget.files?.[0])} />
@@ -920,7 +920,7 @@
                   <span class="font-mono text-[11px] text-zen-fg-muted pt-0.5">01</span>
                   <span class="flex flex-col gap-0.5">
                     <span class="font-medium">A NEAR testnet account</span>
-                    <a href="https://testnet.mynearwallet.com" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 self-start text-zen-fg-muted underline underline-offset-2 hover:text-zen-fg">Create one in MyNearWallet<ArrowUpRight class="w-3.5 h-3.5" aria-hidden="true" /></a>
+                    <a href="https://docs.near.org/getting-started/create-account" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 self-start text-zen-fg-muted underline underline-offset-2 hover:text-zen-fg">Create one in a NEAR wallet<ArrowUpRight class="w-3.5 h-3.5" aria-hidden="true" /></a>
                   </span>
                 </li>
                 <li class="flex gap-3 py-3 border-b-[0.5px] border-zen-border-subtle">
@@ -940,8 +940,8 @@
                 </li>
               </ol>
             {/if}
-            <Term q="What is a NEAR wallet?">NEAR is the network this runs on. MyNearWallet is a free web wallet for it. It holds your {UNIT} and the NEAR that pays for storage and fees.</Term>
-            {@render actions(true, 'Connect MyNearWallet', walletReady, connect, 'This shares your account name. Nothing moves until you send.')}
+            <Term q="What is a NEAR wallet?">NEAR is the network this runs on. A NEAR wallet such as Meteor, Intear or Nightly connects here. It holds your {UNIT} and the NEAR that pays for storage and fees.</Term>
+            {@render actions(true, 'Connect a NEAR wallet', walletReady, connect, 'This shares your account name. Nothing moves until you send.')}
           {:else}
             {@render accountRow()}
             <!-- Have versus need (Zarf's DeployStep3Connect), for the test USDC and for the NEAR; then one verdict -->
@@ -1105,7 +1105,7 @@
                 <p class="text-xs text-zen-fg-muted text-right ml-auto max-w-60">{sendBlocker}</p>
               {:else if phase === 0}
                 <p class="text-xs text-zen-fg-muted text-right ml-auto max-w-sm">
-                  MyNearWallet opens for your approval.{txCount === 2 ? ` This send is 2 transactions: NEAR for storage, then the ${UNIT}.` : txCount === 1 ? ` This send is 1 transaction: the ${UNIT}.` : ''}
+                  Your wallet opens for your approval.{txCount === 2 ? ` This send is 2 transactions: NEAR for storage, then the ${UNIT}.` : txCount === 1 ? ` This send is 1 transaction: the ${UNIT}.` : ''}
                 </p>
               {/if}
             </div>

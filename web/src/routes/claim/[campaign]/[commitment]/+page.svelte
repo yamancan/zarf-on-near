@@ -55,7 +55,9 @@
     ['chain', 'Another chain'], // shown on testnet too, its chains marked "mainnet only" (canonical choice 9)
     ...(implicitEnabled ? [['new', 'New account']] : []),
   ] as [typeof mode, string][]);
-  const walletSite = $derived(network === 'mainnet' ? 'https://app.mynearwallet.com' : 'https://testnet.mynearwallet.com');
+  // MyNearWallet stopped creating accounts (Nov 2026). NEAR's own guide lists the current wallets; on testnet it says
+  // how to get a .testnet account. Mainnet: NEAR's wallet directory.
+  const walletSite = $derived(network === 'mainnet' ? 'https://wallet.near.org' : 'https://docs.near.org/getting-started/create-account');
 
   const dest = $derived(classifyDestination(typed));
   const destination = $derived(mode === 'existing' ? (dest.kind === 'named' || dest.kind === 'implicit' ? dest.id : '') : (implicit?.accountId ?? ''));
@@ -299,13 +301,13 @@
                     No NEAR account? <ChevronDown class="w-3.5 h-3.5 transition-transform group-open:rotate-180" aria-hidden="true" />
                   </summary>
                   <ol class="flex flex-col gap-1.5 text-sm text-zen-fg list-decimal pl-5 marker:text-zen-fg-muted">
-                    <li>Create a free account at MyNearWallet.</li>
+                    <li>Create a free account in a NEAR wallet, such as Meteor{network === 'mainnet' ? '' : ' (choose testnet)'}.</li>
                     <li>Copy its name, like <span class="font-mono">{network === 'mainnet' ? 'alice.near' : 'alice.testnet'}</span>.</li>
                     <li>Come back to this tab and type it above.</li>
                   </ol>
                   <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1">
                     <ZenButton href={walletSite} target="_blank" rel="noopener noreferrer" variant="secondary" class="rounded-full min-h-11">
-                      Open MyNearWallet
+                      {network === 'mainnet' ? 'Choose a NEAR wallet' : 'How to get a testnet account'}
                       {#snippet iconRight()}<ArrowUpRight class="w-3.5 h-3.5" />{/snippet}
                     </ZenButton>
                     <span>It opens in a new tab. This tab keeps your claim.</span>

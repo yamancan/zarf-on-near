@@ -2,6 +2,7 @@
   import '../app.css';
   import { onMount } from 'svelte';
   import { page } from '$app/state';
+  import { beforeNavigate } from '$app/navigation';
   import { TESTNET } from '$lib/network';
   import ZarfMark from '$lib/ZarfMark.svelte';
   import ThemeToggle from '$lib/zen/components/ThemeToggle.svelte';
@@ -17,6 +18,17 @@
   const recipient = $derived(/^\/(claim|auth)\//.test(page.url.pathname));
 
   onMount(() => themeStore.restore());
+
+  // The CSP comes with the document. The sender pages' CSP lets wallet code connect out (hooks.server.ts); every
+  // other page's does not. Crossing between the two loads a fresh document, so each page runs under its own CSP.
+  const sender = (path: string) => /^\/(create|campaigns)(\/|$)/.test(path);
+  beforeNavigate((nav) => {
+    if (!nav.to || nav.willUnload || nav.to.url.origin !== location.origin) return;
+    if (sender(nav.to.url.pathname) !== sender(location.pathname)) {
+      nav.cancel();
+      location.href = nav.to.url.href;
+    }
+  });
 </script>
 
 {#snippet lockup(small: boolean)}

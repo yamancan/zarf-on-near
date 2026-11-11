@@ -4,7 +4,7 @@
   import { getConfig, getPrepayBalance, txOutcome, type ContractConfig } from '$lib/create/chain';
   import { claimedAmount, formatNear, listCampaigns, reclaimable, reclaimOutcome, reclaimTx, withdrawTx, type CampaignView } from '$lib/create/campaigns';
   import { formatAmount } from '$lib/create/recipients';
-  import { myNearWallet, type SenderWallet } from '$lib/create/wallet';
+  import { nearConnectWallet, type SenderWallet } from '$lib/create/wallet';
   import { nearView } from '$lib/services';
   import { deadlineText, timeLeft } from '$lib/claim';
   import { UNIT } from '$lib/network';
@@ -44,7 +44,7 @@
     }
     try {
       config = await getConfig(rpc, contract);
-      wallet = await myNearWallet(config.network, rpc);
+      wallet = await nearConnectWallet(config.network, rpc);
       walletReady = true;
       account = wallet.accountId();
       if (account) await load();
@@ -138,7 +138,7 @@
         <Medallion icon={Wallet} />
         <h2 class="text-xl font-semibold tracking-tight">Connect the wallet you sent from</h2>
         <p class="text-sm text-zen-fg-muted max-w-xs">Your campaigns, what was claimed, and what you can take back.</p>
-        <ZenButton variant="primary" class="rounded-full min-h-11 mt-2" onclick={connect} disabled={!walletReady}>Connect MyNearWallet</ZenButton>
+        <ZenButton variant="primary" class="rounded-full min-h-11 mt-2" onclick={connect} disabled={!walletReady}>Connect a NEAR wallet</ZenButton>
         {#if walletError}<Note tone="error">{walletError}</Note>{/if}
       </div>
     </ZenCard>
