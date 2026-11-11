@@ -15,11 +15,11 @@
     "NEAR_RPC_URL": "https://test.rpc.fastnear.com", // rpc.testnet.near.org is deprecated and rate-limits per IP (Workers share egress)
     "FAUCET_SENDER_ID": "zarf-near-faucet-1112.testnet",
     "CREATOR": "testnet", // "stub" only answers on localhost/127.0.0.1 (local dev)
-    "AMOUNT": "1000000", // 1 test USDC (6 decimals)
+    "AMOUNT": "500000", // 0.5 test USDC (6 decimals): the float lasts twice as many runs
     "LIFETIME_S": "604800", // claim window: 7 days
     "PER_IP_PER_DAY": "3",
     "PER_EMAIL_PER_DAY": "1",
-    "DAILY_CAP": "10", // the float: 10 test USDC, 1 per link
+    "DAILY_CAP": "10", // links per UTC day (0.5 test USDC each)
     "TURNSTILE_SITE_KEY": "0x4AAAAAAF9RhGrCD61mJkz3" // widget zarf-near-faucet-testnet, domain = this worker's workers.dev host
   },
   // Secrets (wrangler secret put from ~/.config/zarf-near/*, or .dev.vars locally):

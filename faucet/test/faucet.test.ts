@@ -185,7 +185,7 @@ describe('worker', () => {
     FAUCET_SENDER_KEY: KEY, LIMIT_KEY: 'k', TURNSTILE_SECRET: 'secret', FAUCET_KV: memKv(),
   });
   // Routes outbound fetches: NEAR `status`, and Turnstile siteverify.
-  const net = (o: { chainId?: string; turnstile?: 'ok' | 'failed' | 'down'; tsHost?: string } = {}) => {
+  const net = (o: { chainId?: string; turnstile?: 'ok' | 'failed' | 'down'; tsHost?: string; float?: string; viewsDown?: boolean } = {}) => {
     const seen: string[] = [];
     vi.stubGlobal('fetch', async (u: string | URL | Request, init?: RequestInit) => {
       const url = String(u);
@@ -195,7 +195,13 @@ describe('worker', () => {
         return Response.json({ success: (o.turnstile ?? 'ok') === 'ok', hostname: o.tsHost ?? 'f.example' });
       }
       const body = JSON.parse(String(init?.body));
+      if (body.method === 'status') seen.push(`${url}#status`);
       if (body.method === 'status') return Response.json({ jsonrpc: '2.0', id: 1, result: { chain_id: o.chainId ?? 'testnet' } });
+      if (body.method === 'query' && body.params.request_type === 'call_function') {
+        if (o.viewsDown) throw new Error('rpc down');
+        const value = body.params.method_name === 'ft_balance_of' ? (o.float ?? '9000000') : '499100000000000000000000';
+        return Response.json({ jsonrpc: '2.0', id: 1, result: { result: [...new TextEncoder().encode(JSON.stringify(value))] } });
+      }
       throw new Error(`unexpected ${body.method}`);
     });
     return seen;
@@ -242,7 +248,7 @@ describe('worker', () => {
     const env = fullEnv();
     await post(env);
     await post(env);
-    expect(seen.filter((u) => u === env.NEAR_RPC_URL)).toHaveLength(1);
+    expect(seen.filter((u) => u === `${env.NEAR_RPC_URL}#status`)).toHaveLength(1);
   });
 
   it('503s when the RPC status call fails, and retries next time', async () => {
@@ -286,6 +292,35 @@ describe('worker', () => {
   it('refuses a token issued for another hostname', async () => {
     net({ tsHost: 'evil.example' });
     expect(await post(fullEnv(), { email: 'a@x.io', turnstile: 't' })).toEqual({ status: 403, body: { error: 'TURNSTILE_FAILED' } });
+  });
+
+  it('refuses with FAUCET_EMPTY below one link, before Turnstile and the quota', async () => {
+    const seen = net({ float: '999999' }); // amount is 1000000 in this env
+    const env = fullEnv();
+    expect(await post(env, { email: 'a@x.io', turnstile: 't' })).toEqual({ status: 503, body: { error: 'FAUCET_EMPTY' } });
+    expect(seen.some((u) => u.startsWith('https://challenges.cloudflare.com/'))).toBe(false);
+    expect((env.FAUCET_KV as ReturnType<typeof memKv>).m.size).toBe(0);
+    net({ float: '1000000' });
+    expect((await post(fullEnv())).body).toEqual({ error: 'BAD_EMAIL' }); // exactly one link left is enough
+  });
+
+  it('503s when the float cannot be read', async () => {
+    net({ viewsDown: true });
+    expect(await post(fullEnv())).toEqual({ status: 503, body: { error: 'UPSTREAM_UNAVAILABLE' } });
+  });
+
+  it('/health shows the float and links left, and nothing secret', async () => {
+    net({ float: '9000000' });
+    const { default: worker } = await import('../src/index');
+    const env: Record<string, unknown> = { ...fullEnv(), AMOUNT: '500000', LIMIT_KEY: 'limit-key-must-not-leak' };
+    const res = await worker.fetch(new Request('https://f.example/health'), env as never);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(res.status).toBe(200);
+    expect(body).toMatchObject({ ok: true, float: '9000000', links_left: '18', amount_per_link: '500000', sender_id: 'faucet.testnet', prepay_yocto: '499100000000000000000000' });
+    const dump = JSON.stringify(body);
+    for (const s of [env.FAUCET_SENDER_KEY, env.LIMIT_KEY, env.TURNSTILE_SECRET] as string[]) expect(dump).not.toContain(s);
+    net({ viewsDown: true });
+    expect((await worker.fetch(new Request('https://f.example/health'), env as never)).status).toBe(503);
   });
 
   it('a missing token never reaches siteverify', async () => {

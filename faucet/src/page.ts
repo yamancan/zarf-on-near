@@ -37,7 +37,7 @@ const html = (siteKey: string, claimHost: string) => `<!doctype html>
 <body>
 <main>
   <h1>Pay any email: try it</h1>
-  <p>Type your Gmail address. We create a NEAR <strong>testnet</strong> campaign that holds 1 test USDC for it, and give you the claim link.
+  <p>Type your Gmail address. We create a NEAR <strong>testnet</strong> campaign that holds test USDC for it, and give you the claim link.
      Open it, sign in with that Google account, and the USDC goes to the NEAR account you choose.</p>
   <p>Type the address exactly as your Google account shows it.</p>
   <p>To receive it you need a NEAR testnet account.
@@ -61,6 +61,7 @@ const html = (siteKey: string, claimHost: string) => `<!doctype html>
 </html>`;
 
 const JS = `(() => {
+  const EMPTY = 'The faucet is empty for today. Try again tomorrow, or contact the team (see Privacy and terms below).';
   const MESSAGES = {
     BAD_EMAIL: 'That does not look like an email address. Use plain ASCII, exactly as Google shows it.',
     RATE_LIMITED_EMAIL: 'This email already got a link today. Use the link you have, or try again tomorrow.',
@@ -69,6 +70,7 @@ const JS = `(() => {
     TURNSTILE_FAILED: 'The human check did not pass. Complete it and try again.',
     TURNSTILE_UNAVAILABLE: 'The human check is unavailable right now. Try again in a minute.',
     FAUCET_NOT_PREPAID: 'The faucet is out of storage funds right now. Please try again later.',
+    FAUCET_EMPTY: EMPTY,
   };
   const f = document.getElementById('f'), go = document.getElementById('go'), out = document.getElementById('out');
   const show = (nodes) => out.replaceChildren(...nodes);
@@ -85,6 +87,13 @@ const JS = `(() => {
     });
     return btn;
   };
+  // Say so before anyone types: an empty faucet cannot give out a link.
+  fetch('/health').then((r) => r.json()).then((h) => {
+    if (h && h.ok && h.links_left === '0') {
+      go.disabled = true;
+      show([el('p', { className: 'error' }, EMPTY)]);
+    }
+  }).catch(() => {});
   f.addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const turnstile = window.turnstile && window.turnstile.getResponse();

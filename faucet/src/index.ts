@@ -1,4 +1,4 @@
-import { httpRpc, stubCreator, testnetCreator, type CampaignCreator } from './creator';
+import { httpRpc, stubCreator, testnetCreator, viewCall, type CampaignCreator } from './creator';
 import { handleFaucet } from './faucet';
 import type { KvLike } from './limits';
 import { parseNearKey } from './near';
@@ -60,6 +60,17 @@ function makeCreator(env: Env, host: string): Promise<CampaignCreator> | null {
   return creator.c;
 }
 
+/** The faucet's float on chain: its USDC balance and its free storage pre-pay on the escrow. Public data. */
+async function readFloat(env: Env): Promise<{ float: string; prepay: string }> {
+  const rpc = httpRpc(env.NEAR_RPC_URL);
+  const [float, prepay] = await Promise.all([
+    viewCall<string>(rpc, env.TOKEN_ID, 'ft_balance_of', { account_id: env.FAUCET_SENDER_ID }),
+    viewCall<string>(rpc, env.CONTRACT_ID, 'prepay_balance_of', { account_id: env.FAUCET_SENDER_ID }),
+  ]);
+  if (!/^\d+$/.test(String(float)) || !/^\d+$/.test(String(prepay))) throw new Error('bad view');
+  return { float: String(float), prepay: String(prepay) };
+}
+
 const json = (body: unknown, status: number) => Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } });
 
 export default {
@@ -67,6 +78,20 @@ export default {
     const url = new URL(req.url), path = url.pathname;
     if (req.method === 'GET' && (path === '/' || path === '/try')) return tryPage(env.TURNSTILE_SITE_KEY ?? '', env.CLAIM_HOST ?? '');
     if (req.method === 'GET' && path === '/try.js') return tryScript();
+    if (req.method === 'GET' && path === '/health') {
+      // Public: chain ids and balances only, never a secret. 503 when the chain read fails.
+      if (env.CREATOR !== 'testnet') return json({ ok: true, stub: true }, 200);
+      try {
+        const { float, prepay } = await readFloat(env);
+        const per = /^[1-9]\d{0,38}$/.test(env.AMOUNT ?? '') ? BigInt(env.AMOUNT) : 0n;
+        return json({
+          ok: true, network: env.NETWORK, contract_id: env.CONTRACT_ID, sender_id: env.FAUCET_SENDER_ID, token_id: env.TOKEN_ID,
+          amount_per_link: env.AMOUNT, float, links_left: per ? (BigInt(float) / per).toString() : '0', prepay_yocto: prepay,
+        }, 200);
+      } catch {
+        return json({ ok: false, error: 'UPSTREAM_UNAVAILABLE' }, 503);
+      }
+    }
     if (req.method !== 'POST' || path !== '/faucet') return json({ error: 'NOT_FOUND' }, 404);
 
     const amount = /^[1-9]\d{0,38}$/.test(env.AMOUNT ?? '') ? env.AMOUNT : null;
@@ -87,6 +112,12 @@ export default {
     }
     // A JSON content type forces a CORS preflight, so a cross-site form cannot post here.
     if (!/^application\/json\b/i.test(req.headers.get('Content-Type') ?? '')) return json({ error: 'UNSUPPORTED_MEDIA_TYPE' }, 415);
+    if (env.CREATOR === 'testnet') {
+      // Before the human check and the quota: an empty faucet spends nobody's token or allowance.
+      const f = await readFloat(env).catch(() => null);
+      if (!f) return json({ error: 'UPSTREAM_UNAVAILABLE' }, 503);
+      if (BigInt(f.float) < BigInt(amount)) return json({ error: 'FAUCET_EMPTY' }, 503);
+    }
     const input = (await req.json().catch(() => null)) as { turnstile?: unknown } | null;
     const ip = req.headers.get('CF-Connecting-IP') ?? 'unknown';
     // Before the quota: a bot without a valid token spends nobody's daily allowance.

@@ -43,6 +43,14 @@ export const httpRpc = (url: string, fetchFn: typeof fetch = (u, i) => fetch(u, 
   },
 });
 
+/** A JSON view call; returns the decoded result. */
+export async function viewCall<T>(rpc: Rpc, contractId: string, method: string, args: object): Promise<T> {
+  const r = await rpc.call<{ result: number[] }>('query', {
+    request_type: 'call_function', finality: 'final', account_id: contractId, method_name: method, args_base64: btoa(JSON.stringify(args)),
+  });
+  return JSON.parse(new TextDecoder().decode(Uint8Array.from(r.result)));
+}
+
 interface Outcome {
   status?: { Failure?: unknown };
   receipts_outcome?: { outcome?: { logs?: string[]; executor_id?: string; status?: { Failure?: unknown } } }[];
