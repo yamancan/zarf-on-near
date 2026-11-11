@@ -34,6 +34,10 @@ export async function leaf(commitmentHex: string, amount: string): Promise<strin
   return hex(await crypto.subtle.digest('SHA-256', buf));
 }
 
-/** `https://<claim-host>/claim/<campaign_id>/<commitment>#s=<salt_hex>`; the fragment never reaches a server. */
-export const claimLink = (host: string, campaignId: string, commitmentHex: string, saltHex: string): string =>
-  `${host.replace(/\/+$/, '')}/claim/${campaignId}/${commitmentHex}#s=${saltHex}`;
+/**
+ * spec: `https://<claim-host>/claim/<campaign_id>/<commitment>#s=<salt_hex>&a=<amount>&p=<proof>`.
+ * The faucet builds only one-leaf trees, so `p` (base64url of the concatenated siblings) is empty.
+ * The fragment never reaches a server.
+ */
+export const claimLink = (host: string, campaignId: string, commitmentHex: string, saltHex: string, amount: string): string =>
+  `${host.replace(/\/+$/, '')}/claim/${campaignId}/${commitmentHex}#s=${saltHex}&a=${amount}&p=`;

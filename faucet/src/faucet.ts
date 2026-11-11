@@ -48,14 +48,11 @@ export async function handleFaucet(input: unknown, ip: string, d: FaucetDeps): P
     return { status: 503, body: { error: 'CREATE_FAILED' } };
   }
 
-  // The claim app reads this from PUBLIC_LEAVES_URL/<id>.json (fetchLeaves); no email in it.
-  const leaves = { campaign_id: created.campaignId, merkle_root: root, leaves: [{ commitment: c, amount: d.amount }] };
-  await d.kv.put(`leaves:${created.campaignId}`, JSON.stringify(leaves));
-
   return {
     status: 200,
     body: {
-      claim_url: claimLink(d.claimHost, created.campaignId, c, hex(salt)),
+      // Amount and the (empty) proof travel in the link; no leaf list is published (spec).
+      claim_url: claimLink(d.claimHost, created.campaignId, c, hex(salt), d.amount),
       campaign_id: created.campaignId,
       commitment: c,
       amount: d.amount,

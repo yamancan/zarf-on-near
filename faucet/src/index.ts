@@ -2,6 +2,7 @@ import { httpRpc, stubCreator, testnetCreator, type CampaignCreator } from './cr
 import { handleFaucet } from './faucet';
 import type { KvLike } from './limits';
 import { parseNearKey } from './near';
+import { tryPage, tryScript } from './page';
 
 export interface Env {
   NETWORK: string;
@@ -46,13 +47,8 @@ const json = (body: unknown, status: number) => Response.json(body, { status, he
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const path = new URL(req.url).pathname;
-    const leaves = /^\/leaves\/(\d{1,20})\.json$/.exec(path);
-    if (req.method === 'GET' && leaves) {
-      const body = await env.FAUCET_KV.get(`leaves:${leaves[1]}`);
-      return body
-        ? new Response(body, { headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
-        : json({ error: 'NOT_FOUND' }, 404);
-    }
+    if (req.method === 'GET' && (path === '/' || path === '/try')) return tryPage();
+    if (req.method === 'GET' && path === '/try.js') return tryScript();
     if (req.method !== 'POST' || path !== '/faucet') return json({ error: 'NOT_FOUND' }, 404);
 
     const amount = /^[1-9]\d{0,38}$/.test(env.AMOUNT ?? '') ? env.AMOUNT : null;

@@ -19,5 +19,6 @@
     "DAILY_CAP": "50"
   },
   // Secrets (wrangler secret put, or .dev.vars locally): FAUCET_SENDER_KEY, LIMIT_KEY.
-  "kv_namespaces": [{ "binding": "FAUCET_KV", "id": "" }]
+  // No id: local dev simulates it; the owner creates the namespace and adds its id before deploy.
+  "kv_namespaces": [{ "binding": "FAUCET_KV" }]
 }

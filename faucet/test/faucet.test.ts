@@ -27,8 +27,9 @@ describe('spec/vectors.json', () => {
 });
 
 it('claim link format', () => {
-  expect(claimLink('https://c.example/', '8', 'ab'.repeat(32), '90'.repeat(32))).toBe(
-    `https://c.example/claim/8/${'ab'.repeat(32)}#s=${'90'.repeat(32)}`,
+  const r = vectors.campaigns.single.recipients[0];
+  expect(claimLink('https://c.example/', vectors.campaigns.single.campaign_id, r.commitment, r.salt, r.amount)).toBe(
+    `https://c.example${vectors.links.single[0]}`,
   );
 });
 
@@ -70,17 +71,20 @@ describe('handleFaucet', () => {
     randomSalt: () => unhex(solo.salt, 32), ...over,
   });
 
-  it('returns the spec link for the vector recipient and publishes the leaf list', async () => {
-    const d = deps();
-    const r = await handleFaucet({ email: '  Solo@Example.com ' }, 'ip', d);
+  it('returns the spec link for the vector recipient', async () => {
+    const r = await handleFaucet({ email: '  Solo@Example.com ' }, 'ip', deps());
     expect(r.status).toBe(200);
     expect(r.body).toMatchObject({
-      claim_url: `https://claim.example/claim/8/${solo.commitment}#s=${solo.salt}`,
+      claim_url: `https://claim.example${vectors.links.single[0]}`,
       campaign_id: '8', commitment: solo.commitment, amount: solo.amount, deadline_ns: '1794488400000000000', stub: true,
     });
-    expect(JSON.parse((await d.kv.get('leaves:8'))!)).toEqual({
-      campaign_id: '8', merkle_root: vectors.campaigns.single.merkle_root, leaves: [{ commitment: solo.commitment, amount: solo.amount }],
-    });
+  });
+
+  it('sends the one-leaf root to the creator', async () => {
+    const seen: string[] = [];
+    const creator: CampaignCreator = { live: false, create: async (q) => (seen.push(q.merkleRoot), { campaignId: '8', txHash: null }) };
+    await handleFaucet({ email: 'solo@example.com' }, 'ip', deps({ creator }));
+    expect(seen).toEqual([vectors.campaigns.single.merkle_root]);
   });
 
   it('uses a fresh salt per request', async () => {
@@ -165,5 +169,32 @@ describe('testnet creator (stubbed RPC; nothing is sent)', () => {
   it('encodes the deposit as u128 LE at the end of the FunctionCall', () => {
     const tx = encodeTx({ signerId: 'a', publicKey: new Uint8Array(32), nonce: 1n, receiverId: 'b', blockHash: new Uint8Array(32), methodName: 'm', args: new Uint8Array(), gas: 1n, deposit: 258n });
     expect(Array.from(tx.subarray(tx.length - 16))).toEqual([2, 1, ...new Array(14).fill(0)]);
+  });
+});
+
+describe('worker routes', () => {
+  it('serves /try with a strict CSP and its script from /try.js', async () => {
+    const { default: worker } = await import('../src/index');
+    const env = {} as never;
+    const page = await worker.fetch(new Request('https://f.example/try'), env);
+    expect(page.headers.get('Content-Security-Policy')).toContain("script-src 'self'");
+    const html = await page.text();
+    expect(html).toContain('<script src="/try.js"></script>');
+    expect(html).not.toMatch(/<script>(?!<)/); // no inline script
+    const js = await worker.fetch(new Request('https://f.example/try.js'), env);
+    expect(js.headers.get('Content-Type')).toContain('javascript');
+    const src = await js.text();
+    expect(() => new Function(src)).not.toThrow();
+  });
+  it('fails closed when unconfigured', async () => {
+    const { default: worker } = await import('../src/index');
+    const res = await worker.fetch(new Request('https://f.example/faucet', { method: 'POST', body: '{"email":"a@x.io"}' }), { NETWORK: 'testnet', CREATOR: 'stub' } as never);
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: 'FAUCET_MISCONFIGURED' });
+  });
+  it('refuses mainnet', async () => {
+    const { default: worker } = await import('../src/index');
+    const env = { NETWORK: 'mainnet', CREATOR: 'stub', CLAIM_HOST: 'https://c.example', AMOUNT: '1', LIFETIME_S: '1', PER_IP_PER_DAY: '1', PER_EMAIL_PER_DAY: '1', DAILY_CAP: '1', LIMIT_KEY: 'k' };
+    expect((await worker.fetch(new Request('https://f.example/faucet', { method: 'POST', body: '{}' }), env as never)).status).toBe(500);
   });
 });
