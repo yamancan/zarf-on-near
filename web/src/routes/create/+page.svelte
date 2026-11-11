@@ -960,7 +960,7 @@
               <img src={themeStore.isDark ? '/google/signin-dark.svg' : '/google/signin-light.svg'} alt="" width="175" height="40" />
             </div>
           </ZenCard>
-          <p class="mt-3 ml-1 text-xs text-zen-fg-muted">They need only their Google email to start.</p>
+          <p class="mt-3 ml-1 text-xs text-zen-fg-muted">{TESTNET ? 'They choose a NEAR account, then sign in with Google.' : "They choose a NEAR account or another chain's address, then sign in with Google."}</p>
         </aside>
       {:else}
         <aside class="w-full lg:flex-1 lg:sticky lg:top-24 min-w-0" aria-label="Preview of the message">
