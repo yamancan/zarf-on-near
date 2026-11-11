@@ -24,6 +24,22 @@ export const getCampaignByRoot = (rpcUrl: string, contractId: string, sender: st
 export const getCampaignView = (rpcUrl: string, contractId: string, campaignId: string) =>
   nearView<{ merkle_root: string; amount: string; sender: string } | null>(rpcUrl, contractId, 'get_campaign', { campaign_id: campaignId });
 
+/** view_account: the account's NEAR balance and the bytes it stores (it must keep storage_usage × byte cost). */
+export async function getAccount(rpcUrl: string, accountId: string): Promise<{ amount: string; storage_usage: number }> {
+  const res = await postJson<{ result?: { amount: string; storage_usage: number } }>(rpcUrl, {
+    jsonrpc: '2.0', id: 'zarf', method: 'query', params: { request_type: 'view_account', finality: 'optimistic', account_id: accountId },
+  });
+  if (!res.result) throw new Error('view_account failed');
+  return res.result;
+}
+
+/** The network's current gas price, yoctoNEAR per gas. */
+export async function getGasPrice(rpcUrl: string): Promise<bigint> {
+  const res = await postJson<{ result?: { gas_price: string } }>(rpcUrl, { jsonrpc: '2.0', id: 'zarf', method: 'gas_price', params: [null] });
+  if (!res.result) throw new Error('gas_price failed');
+  return BigInt(res.result.gas_price);
+}
+
 /** The executed tx with all receipts (the wallet only returns the hash). */
 export async function txOutcome(rpcUrl: string, hash: string, sender: string): Promise<Outcome> {
   const res = await postJson<{ result?: Outcome; error?: unknown }>(rpcUrl, {

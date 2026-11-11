@@ -105,6 +105,21 @@ export function campaignIdFrom(outcome: Outcome, contractId: string, expect: { m
   return null;
 }
 
+/** All the gas this send attaches (fundingTxs): the network fee can't exceed this × the gas price. */
+export const attachedGas = (shortfall: bigint): bigint => (shortfall > 0n ? 230n : 200n) * TGAS;
+
+/**
+ * NEAR this send needs in the wallet: the storage pre-pay plus the attached gas at the current gas price
+ * (the most the network fee can be at that price). Advisory: the wallet and the contract decide.
+ */
+export const nearNeeded = (shortfall: bigint, gasPrice: bigint): bigint => shortfall + attachedGas(shortfall) * gasPrice;
+
+/** NEAR an account can spend: its balance less what it must keep for its own storage (view_account). */
+export const spendableNear = (a: { amount: string; storage_usage: number }, storageByteCost: string): bigint => {
+  const s = BigInt(a.amount) - BigInt(a.storage_usage) * BigInt(storageByteCost);
+  return s > 0n ? s : 0n;
+};
+
 /** Earliest allowed deadline, from get_config's min_lifetime_ns (E119 otherwise). */
 export const minDeadlineMs = (nowMs: number, minLifetimeNs: string) => nowMs + Number(BigInt(minLifetimeNs) / 1_000_000n);
 
@@ -292,7 +307,7 @@ export async function settleAfterUncertain(
  */
 export function mayCreate(o: { pinned: boolean; sentFrom: string | null; account: string | null }): { ok: true } | { ok: false; reason: string } {
   if (!o.account) return { ok: false, reason: 'Connect a wallet first.' };
-  if (o.pinned && o.sentFrom && o.account !== o.sentFrom) return { ok: false, reason: `This draft belongs to ${o.sentFrom}: reconnect ${o.sentFrom} to continue.` };
+  if (o.pinned && o.sentFrom && o.account !== o.sentFrom) return { ok: false, reason: `Reconnect ${o.sentFrom} to continue.` };
   return { ok: true };
 }
 

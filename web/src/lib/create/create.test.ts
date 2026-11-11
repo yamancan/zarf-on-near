@@ -5,7 +5,7 @@ import { buildDraft, claimLink, commitment, mailtoHref, messageText, newSalt, re
 import {
   fundsShort,
   campaignIdFrom, checkCreation, failedWith, fundCampaign, fundingTxs, LookupPending, minDeadlineMs, NotCreated, OutcomeUnclear, ownerKeySlack,
-  NotSent, prepayShortfall, resolveByRoot, SendUncertain, settleAfterUncertain, mayCreate, readMarker, MARKER_TTL_MS, type FundDeps, type Outcome,
+  NotSent, attachedGas, nearNeeded, spendableNear, prepayShortfall, resolveByRoot, SendUncertain, settleAfterUncertain, mayCreate, readMarker, MARKER_TTL_MS, type FundDeps, type Outcome,
 } from './funding';
 import { formatAmount, parseAmount, parseRecipients } from './recipients';
 
@@ -194,9 +194,20 @@ describe('outputs', () => {
     expect(m.body.includes('practice money with no value')).toBe(testnet);
     // Never plain "USDC" as an amount on testnet: every figure carries the test unit.
     if (testnet) expect(m.body).not.toMatch(/\d (USDC)/);
+    expect(m.body).not.toContain('What is Zarf?');
     const mail = new URL(mailtoHref(r, m));
     expect(mail.searchParams.get('subject')).toBe(subject);
     expect(mail.searchParams.get('body')).toBe(m.body);
+  });
+  it("with the sender's name it opens and signs with it, and points to what Zarf is; blank names stay neutral", () => {
+    const r = { email: 'alice@gmail.com', amount: '10000000' };
+    const o = { unit: 'test USDC', testnet: true, deadlineMs: 0, home: 'https://claim.example' };
+    const m = messageText(r, 'https://claim.example/claim/1/ab', { ...o, from: '  Alex ' });
+    expect(m.subject).toBe('10 test USDC for you, from Alex');
+    expect(m.body.startsWith("Hi, it's Alex. I sent you 10 test USDC with Zarf.")).toBe(true);
+    expect(m.body).toContain('What is Zarf? https://claim.example');
+    expect(m.body.endsWith('\n\nAlex')).toBe(true);
+    expect(messageText(r, 'x', { ...o, from: '   ' })).toEqual(messageText(r, 'x', o));
   });
   it('recovery file holds what rebuilding the links needs', async () => {
     const c = campaigns.single;
@@ -415,7 +426,7 @@ describe('fundCampaign', () => {
 describe('mayCreate (a pinned draft belongs to its sender)', () => {
   it('refuses another account while pinned', () => {
     const r = mayCreate({ pinned: true, sentFrom: 'x.testnet', account: 'y.testnet' });
-    expect(r).toEqual({ ok: false, reason: 'This draft belongs to x.testnet: reconnect x.testnet to continue.' });
+    expect(r).toEqual({ ok: false, reason: 'Reconnect x.testnet to continue.' });
   });
   it('allows the sender, and any account before anything was sent', () => {
     expect(mayCreate({ pinned: true, sentFrom: 'x.testnet', account: 'x.testnet' })).toEqual({ ok: true });
@@ -446,6 +457,26 @@ describe('readMarker (unresolved send seen from another tab)', () => {
     expect(readMarker(s, 'k', 2_000)).toBeNull();
     expect(s.has()).toBe(false);
     expect(readMarker(store('{'), 'k', 2_000)).toBeNull();
+  });
+});
+
+describe('NEAR this send needs (step 3 advisory check)', () => {
+  // Live testnet values read 12 Nov 2026: storage_costs on zarf-near-1112.testnet, gas_price 1e8, storage_byte_cost 1e19.
+  const costs = { ft_storage_deposit: '1250000000000000000000', claim_entry_cost: '1060000000000000000000', per_claim_storage: '2310000000000000000000', campaign_bytes_cost: '7090000000000000000000' };
+  it('is the storage pre-pay plus all attached gas at the gas price (2 txs when a pre-pay is due)', () => {
+    const short = prepayShortfall(costs, 3, '0', ownerKeySlack('10000000000000000000'));
+    expect(short).toBe(14_340_000_000_000_000_000_000n); // 0.00709 + 3 × 0.00231 + 0.00032
+    expect(attachedGas(short)).toBe(230_000_000_000_000n);
+    expect(nearNeeded(short, 100_000_000n)).toBe(short + 23_000_000_000_000_000_000_000n); // + 0.023
+    // gas matches what fundingTxs attaches
+    const txs = fundingTxs({ sender: 's', contractId: 'c', tokenId: 't', merkleRoot: 'r', deadlineNs: '1', leafCount: 3, total: '1', shortfall: short });
+    expect(txs.reduce((g, t) => g + BigInt(t.actions[0].params.gas), 0n)).toBe(attachedGas(short));
+    const one = fundingTxs({ sender: 's', contractId: 'c', tokenId: 't', merkleRoot: 'r', deadlineNs: '1', leafCount: 3, total: '1', shortfall: 0n });
+    expect(BigInt(one[0].actions[0].params.gas)).toBe(attachedGas(0n));
+  });
+  it('spendable NEAR keeps what the account needs for its own storage, never below 0', () => {
+    expect(spendableNear({ amount: '5000000000000000000000000', storage_usage: 182 }, '10000000000000000000')).toBe(5_000_000_000_000_000_000_000_000n - 1_820_000_000_000_000_000_000n);
+    expect(spendableNear({ amount: '1', storage_usage: 182 }, '10000000000000000000')).toBe(0n);
   });
 });
 
