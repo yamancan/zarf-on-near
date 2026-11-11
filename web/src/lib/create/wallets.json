@@ -8,7 +8,7 @@
    "description": "Secure Multichain wallet. Manage assets, refuel gas, and mine $HOT on any device with HOT Wallet",
    "website": "https://hot-labs.org/wallet",
    "version": "1.0.4",
-   "executor": "https://raw.githubusercontent.com/hot-dao/near-selector/refs/heads/main/repository/hotwallet.js",
+   "executor": "https://raw.githubusercontent.com/hot-dao/near-selector/e71894f7e69d9ea66a4d185b1297ac1d34f16b2a/repository/hotwallet.js",
    "type": "sandbox",
    "platform": {
     "android": "https://play.google.com/store/apps/details?id=app.herewallet.hot&hl=en",
@@ -52,7 +52,7 @@
    "description": "The most simple and secure wallet to manage your crypto, access DeFi, and explore Web3",
    "website": "https://meteorwallet.app/",
    "version": "1.1.1",
-   "executor": "https://raw.githubusercontent.com/Meteor-Wallet/meteor_wallet_sdk/data-storage/storage/meteor-near-connect-latest.js",
+   "executor": "https://raw.githubusercontent.com/Meteor-Wallet/meteor_wallet_sdk/6369ad789d2f3aaf8e6ccb065021723111027174/storage/meteor-near-connect-latest.js",
    "type": "sandbox",
    "features": {
     "signMessage": true,
@@ -131,7 +131,7 @@
    "description": "Surf through the multichain Metaverse with Nightly",
    "website": "https://nightly.app",
    "version": "1.0.0",
-   "executor": "https://raw.githubusercontent.com/hot-dao/near-selector/refs/heads/main/repository/nightly.js",
+   "executor": "https://raw.githubusercontent.com/hot-dao/near-selector/e71894f7e69d9ea66a4d185b1297ac1d34f16b2a/repository/nightly.js",
    "type": "sandbox",
    "platform": {
     "chrome": "https://chromewebstore.google.com/detail/nightly/fiikommddbeccaoicoejoniammnalkfa"

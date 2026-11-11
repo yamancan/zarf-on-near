@@ -68,6 +68,11 @@ Read this before using it with real money.
   NEAR. A payout that ends in the bridge's FAILED state is not documented as refunded: the page
   tells the recipient to contact the sender, who can ask NEAR Intents support with the deposit
   address.
+- **The sender's wallet code comes from the wallets.** The send pages connect through NEAR Connect with a
+  pinned list of wallets (Meteor, Intear, Nightly; HOT on mainnet). Each wallet's code runs in a sandboxed
+  iframe that cannot read the page. The code from GitHub is pinned to a commit; Intear's is served by Intear
+  and not pinned. A changed wallet script could ask the wallet to sign a different transaction, so the
+  wallet's own approval screen, which shows the receiver and amount, is the last check before signing.
 - **Unclaimed funds go back to the sender** with `reclaim` after the campaign deadline.
 - **Storage is pre-paid by the sender** in NEAR (`prepay_deposit`): the campaign entry plus storage
   for each claim. The unused reservation returns to the sender's free pre-pay on `reclaim`, and
