@@ -1,4 +1,4 @@
-// The judge's "try it with your Gmail" page (T10). Static, same origin as POST /faucet, no third-party anything.
+// The judge's "try it with your Gmail" page. Static, same origin as POST /faucet, no third-party anything.
 
 // Turnstile loads its script and its challenge iframe from challenges.cloudflare.com; nothing else is third-party.
 const TS = 'https://challenges.cloudflare.com';
