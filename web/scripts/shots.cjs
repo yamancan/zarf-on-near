@@ -25,18 +25,27 @@ function rpc(p, o = {}) {
     const body = JSON.parse(r.request().postData());
     const q = body.params;
     let res;
-    if (q.request_type === 'view_account') {
+    if (body.method === 'block') res = { result: { header: { hash: TX, height: 1 } } };
+    else if (body.method === 'tx' || body.method === 'EXPERIMENTAL_tx_status') {
+      if (!o.tx) return r.fulfill({ status: 503, body: 'down' }); // lookup never succeeds: "checking"
+      res = { result: { status: { SuccessValue: '' }, transaction: { hash: TX }, transaction_outcome: { id: TX, outcome: { status: { SuccessValue: '' } } }, ...o.tx } };
+    } else if (q.request_type === 'view_account') {
       if (o.accountDown) return r.fulfill({ status: 503, body: 'down' });
       if (o.accountSlow) return; // never answers: the field stays on "Checking…"
       res = q.account_id === 'alice.testnet' || q.account_id === 'sender.testnet' ? { result: { amount: '1' } } : { error: { cause: { name: 'UNKNOWN_ACCOUNT' } } };
     }
     else {
       const m = q.method_name, args = q.args_base64 ? JSON.parse(Buffer.from(q.args_base64, 'base64')) : {};
+      if (o.hang && o.hang === m) return;
+      if (o.fail && o.fail === m) return r.fulfill({ status: 503, body: 'down' });
       const val = m === 'get_network' ? (o.network ?? 'testnet')
+        : m === 'ft_balance_of' ? (o.balance ?? '120000000')
+        : m === 'storage_costs' ? { ft_storage_deposit: '1250000000000000000000', claim_entry_cost: '1000000000000000000000', per_claim_storage: '1000000000000000000000', campaign_bytes_cost: '9000000000000000000000' }
+        : m === 'campaign_by_root' ? (o.byRoot ?? null)
         : m === 'get_campaign' ? (o.campaigns ? o.campaigns[args.campaign_id] ?? null : 'campaign' in o ? o.campaign : camp(o.camp))
         : m === 'get_claim_state' || m === 'claim_state' ? (st.claimed ? 'claimed' : o.claimState ?? 'unclaimed')
         : m === 'get_config' ? { network: o.network ?? 'testnet', min_lifetime_ns: '3600000000000', agent_ttl_ns: '1', token_ids: ['3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af'], storage_byte_cost: '10000000000000000000' }
-        : m === 'prepay_balance_of' ? '50000000000000000000000'
+        : m === 'prepay_balance_of' ? (o.prepay ?? '50000000000000000000000')
         : m === 'campaigns_of' ? (o.campaigns ? Object.keys(o.campaigns) : [])
         : 'unclaimed';
       res = { result: { result: enc(val) } };
@@ -121,7 +130,24 @@ const chainClaim = async (p, o = {}) => {
 const fastTimers = (ctx) => ctx.addInitScript(() => { if (!location.pathname.endsWith('/receipt')) return; const st = window.setTimeout; window.setTimeout = (f, ms, ...a) => st(f, (ms || 0) / 1000, ...a); });
 const lateClock = (ctx) => ctx.addInitScript(() => { if (!location.pathname.endsWith('/receipt')) return; const n = Date.now.bind(Date); Date.now = () => n() + 3_600_000; });
 
+// MyNearWallet's popup: 'ok' posts the tx hash back, 'fail' posts a failure, 'hang' never answers.
+const walletPopup = (ctx, mode) => ctx.route('https://testnet.mynearwallet.com/**', (r) => r.fulfill({ contentType: 'text/html', body:
+  mode === 'hang' ? '<title>MyNearWallet</title>' : `<script>opener.postMessage(${JSON.stringify(mode === 'ok' ? { status: 'success', transactionHashes: TX } : { status: 'failure', errorMessage: 'User rejected the request' })}, '*')</script>` }));
+const ROOT = 'ab'.repeat(32);
+const DRAFT = { merkleRoot: ROOT, total: '37500000', recipients: [['alice@gmail.com', '10000000'], ['bob@gmail.com', '2500000'], ['chen@gmail.com', '25000000']].map(([email, amount], i) => ({ email, amount, salt: String(i).repeat(44), commitment: String(i).repeat(64), proof: [] })) };
+const funding = (ctx, f) => ctx.addInitScript((f) => sessionStorage.setItem('zarf-near:create-funding', JSON.stringify(f)), { sender: 'sender.testnet', deadline: '2026-12-01T12:00', draft: DRAFT, ...f });
+const ev = (event, data) => `EVENT_JSON:${JSON.stringify({ standard: 'zarf-near', version: '1.0.0', event, data: [data] })}`;
+const CONTRACT = 'zarf-near-1112.testnet', TOKEN = '3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af';
+const receipts = (...rs) => ({ receipts_outcome: rs.map(([executor_id, extra]) => ({ id: TX, outcome: { executor_id, logs: [], status: { SuccessValue: '' }, ...extra } })) });
+const toStep4 = async (p) => {
+  await p.goto(base + '/create'); await p.waitForSelector('#recipients'); await p.waitForTimeout(1500); await p.fill('#recipients', CSV);
+  await p.getByRole('button', { name: 'Continue' }).click(); await p.getByRole('button', { name: 'Continue' }).click(); await p.waitForTimeout(600);
+  await p.getByRole('button', { name: 'Continue' }).click(); await p.waitForTimeout(800);
+};
+const ackBackup = async (p) => { await p.getByRole('button', { name: 'Download a backup of the links' }).click(); await p.getByText('I stored the backup somewhere private').click(); };
+
 const wallet = (ctx, id = 'sender.testnet') => ctx.addInitScript((a) => {
+  localStorage.setItem('signedAccountId', a);
   localStorage.setItem('near-wallet-selector:selectedWalletId', JSON.stringify('my-near-wallet'));
   localStorage.setItem('near_app_wallet_auth_key', JSON.stringify({ accountId: a, allKeys: [] }));
   localStorage.setItem('near-wallet-selector:recentlySignedInWallets', JSON.stringify(['my-near-wallet']));
@@ -206,15 +232,63 @@ const S = {
   'create-2': async (p) => { await rpc(p); await p.goto(base + '/create'); await p.waitForSelector('#recipients'); await p.fill('#recipients', CSV); await p.getByRole('button', { name: 'Continue' }).click(); await p.waitForTimeout(500); return { full: true }; },
   'create-3': async (p) => { await rpc(p); await p.goto(base + '/create'); await p.waitForSelector('#recipients'); await p.fill('#recipients', CSV); await p.getByRole('button', { name: 'Continue' }).click(); await p.getByRole('button', { name: 'Continue' }).click(); await p.waitForTimeout(800); return { full: true }; },
   'create-3-wallet': async (p, ctx) => { await wallet(ctx); await rpc(p); await p.goto(base + '/create'); await p.waitForSelector('#recipients'); await p.waitForTimeout(1500); await p.fill('#recipients', CSV); await p.getByRole('button', { name: 'Continue' }).click(); await p.getByRole('button', { name: 'Continue' }).click(); await p.waitForTimeout(800); return { full: true }; },
-  'create-4': async (p, ctx) => { await wallet(ctx); await rpc(p); await p.goto(base + '/create'); await p.waitForSelector('#recipients'); await p.waitForTimeout(1500); await p.fill('#recipients', CSV); await p.getByRole('button', { name: 'Continue' }).click(); await p.getByRole('button', { name: 'Continue' }).click(); await p.getByRole('button', { name: 'Generate claim links' }).click(); await p.waitForTimeout(800); return { full: true }; },
-  'create-done': async (p, ctx) => {
-    await ctx.addInitScript(() => sessionStorage.setItem('zarf-near:create-funding', JSON.stringify({ txHash: 'H', sender: 'sender.testnet', deadline: '2026-12-01T12:00', campaignId: '12',
-      draft: { merkleRoot: 'ab'.repeat(32), total: '37500000', recipients: [['alice@gmail.com', '10000000'], ['bob@gmail.com', '2500000'], ['chen@gmail.com', '25000000']].map(([email, amount], i) => ({ email, amount, salt: String(i).repeat(44), commitment: String(i).repeat(64), proof: [] })) } })));
-    await rpc(p); await p.goto(base + '/create'); await p.waitForTimeout(2000); return { full: true };
+  'create-4': async (p, ctx) => { await wallet(ctx); await rpc(p); await p.goto(base + '/create'); await p.waitForSelector('#recipients'); await p.waitForTimeout(1500); await p.fill('#recipients', CSV); await p.getByRole('button', { name: 'Continue' }).click(); await p.getByRole('button', { name: 'Continue' }).click(); await p.getByRole('button', { name: 'Continue' }).click(); await p.waitForTimeout(800); return { full: true }; },
+  'create-done': async (p, ctx) => { await funding(ctx, { txHash: 'H', campaignId: '12' }); await rpc(p); await p.goto(base + '/create'); await p.waitForTimeout(2000); return { full: true }; },
+  'create-done-detail': async (p, ctx) => { await funding(ctx, { txHash: 'H', campaignId: '12' }); await rpc(p); await p.goto(base + '/create'); await p.waitForTimeout(1500); await p.getByText('Keep each link private').click(); await p.waitForTimeout(300); return { full: true }; },
+  'create-done-copied': async (p, ctx) => { await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: base }); await funding(ctx, { txHash: 'H', campaignId: '12' }); await rpc(p); await p.goto(base + '/create'); await p.waitForTimeout(1500); await p.getByRole('button', { name: 'Copy', exact: true }).first().click(); await p.waitForTimeout(300); return { full: true }; },
+  'create-done-long': async (p, ctx) => {
+    await ctx.addInitScript((d) => sessionStorage.setItem('zarf-near:create-funding', JSON.stringify({ txHash: 'H', sender: 'sender.testnet', deadline: '2026-12-01T12:00', campaignId: '12', draft: d })),
+      { merkleRoot: ROOT, total: String(501 * 1000000), recipients: Array.from({ length: 501 }, (_, i) => ({ email: `person${i}@gmail.com`, amount: '1000000', salt: 'ab'.repeat(32), commitment: i.toString(16).padStart(64, '0'), proof: Array(9).fill('cd'.repeat(32)) })) });
+    await rpc(p); await p.goto(base + '/create'); await p.waitForTimeout(2500); return {};
   },
-  'campaigns-connect': async (p) => { await rpc(p); await p.goto(base + '/campaigns'); await p.waitForTimeout(1500); return { full: true }; },
-  'campaigns-list': async (p, ctx) => { await wallet(ctx); await rpc(p, { campaigns: { 12: cview({ deadline_ns: PAST }), 13: cview({ amount: '5000000', balance: '5000000' }) } }); await p.goto(base + '/campaigns'); await p.waitForTimeout(2000); return { full: true }; },
+  'create-setup-error': async (p) => { await rpc(p, { rpcDown: true }); await p.goto(base + '/create'); await p.waitForTimeout(1500); return {}; },
+  'create-deadline-early': async (p) => { await rpc(p); await p.goto(base + '/create'); await p.waitForSelector('#recipients'); await p.fill('#recipients', CSV); await p.getByRole('button', { name: 'Continue' }).click(); await p.fill('#deadline', '2026-11-12T00:00'); await p.waitForTimeout(400); return { full: true }; },
+  'create-3-short': async (p, ctx) => { await wallet(ctx); await rpc(p, { balance: '10000000' }); await p.goto(base + '/create'); await p.waitForSelector('#recipients'); await p.waitForTimeout(1500); await p.fill('#recipients', CSV); await p.getByRole('button', { name: 'Continue' }).click(); await p.getByRole('button', { name: 'Continue' }).click(); await p.waitForTimeout(1000); return { full: true }; },
+  'create-wallet-error': async (p, ctx) => { await walletPopup(ctx, 'fail'); await rpc(p); await p.goto(base + '/create'); await p.waitForSelector('#recipients'); await p.waitForTimeout(1500); await p.fill('#recipients', CSV); await p.getByRole('button', { name: 'Continue' }).click(); await p.getByRole('button', { name: 'Continue' }).click(); await p.getByRole('button', { name: 'Connect MyNearWallet' }).click(); await p.waitForTimeout(2500); return { full: true }; },
+  'create-4-ready': async (p, ctx) => { await wallet(ctx); await rpc(p, { prepay: '0' }); await toStep4(p); await ackBackup(p); await p.waitForTimeout(400); return { full: true }; },
+  'create-send-waiting': async (p, ctx) => { await wallet(ctx); await walletPopup(ctx, 'hang'); await rpc(p, { prepay: '0' }); await toStep4(p); await ackBackup(p); await p.getByRole('button', { name: 'Create campaign' }).click(); await p.waitForTimeout(2000); return { full: true }; },
+  'create-send-notsent': async (p, ctx) => {
+    await wallet(ctx); await walletPopup(ctx, 'hang');
+    await ctx.addInitScript(() => { const set = Storage.prototype.setItem; Storage.prototype.setItem = function (k, v) { if (k === 'zarf-near:create-funding') throw new Error('denied'); return set.call(this, k, v); }; });
+    await rpc(p, { prepay: '0' }); await toStep4(p); await ackBackup(p); await p.getByRole('button', { name: 'Create campaign' }).click(); await p.waitForTimeout(1500); return { full: true };
+  },
+  'create-send-checking': async (p, ctx) => { await wallet(ctx); await funding(ctx, { txHash: TX }); await rpc(p); await p.goto(base + '/create'); await p.waitForTimeout(5000); return { full: true }; },
+  'create-send-unclear': async (p, ctx) => { await wallet(ctx); await funding(ctx, { txHash: TX }); await rpc(p, { tx: receipts([TOKEN]) }); await p.goto(base + '/create'); await p.waitForTimeout(5000); return { full: true }; },
+  'create-send-refunded': async (p, ctx) => { await wallet(ctx); await funding(ctx, { txHash: TX }); await rpc(p, { tx: receipts([TOKEN], [CONTRACT, { status: { Failure: { ActionError: { kind: { FunctionCallError: { ExecutionError: 'Smart contract panicked: E119_INVALID_DEADLINE' } } } } } }]) }); await p.goto(base + '/create'); await p.waitForTimeout(5000); return { full: true }; },
+  'create-send-settling': async (p, ctx) => { await wallet(ctx); await funding(ctx, { txHash: TX, uncertain: true }); await rpc(p, { tx: receipts([TOKEN], [CONTRACT, { status: { Failure: { ActionError: { kind: { FunctionCallError: { ExecutionError: 'Smart contract panicked: E128_INSUFFICIENT_STORAGE' } } } } } }]) }); await p.goto(base + '/create'); await p.waitForTimeout(5000); return { full: true }; },
+  'create-send-mismatch': async (p, ctx) => { await wallet(ctx); await funding(ctx, { txHash: null }); await rpc(p, { byRoot: '5', campaigns: { 5: cview({ merkle_root: 'ef'.repeat(32) }) } }); await p.goto(base + '/create'); await p.waitForTimeout(5000); return { full: true }; },
+  'create-send-notlanded': async (p, ctx) => { await wallet(ctx); await funding(ctx, { txHash: null }); await rpc(p); await p.goto(base + '/create'); await p.waitForTimeout(5000); return { full: true }; },
+  'create-send-wrong-account': async (p, ctx) => { await wallet(ctx); await funding(ctx, { txHash: null, sender: 'other.testnet' }); await rpc(p); await p.goto(base + '/create'); await p.waitForTimeout(5000); return { full: true }; },
+  'create-send-created': async (p, ctx) => { await wallet(ctx); await funding(ctx, { txHash: TX }); await rpc(p, { tx: receipts([TOKEN], [CONTRACT, { logs: [ev('campaign_created', { campaign_id: 14, merkle_root: ROOT, amount: '37500000' })] }]) }); await p.goto(base + '/create'); await p.waitForTimeout(5000); return { full: true }; },
+  'create-other-tab': async (p, ctx) => { await ctx.addInitScript((m) => localStorage.setItem('zarf-near:unresolved', JSON.stringify({ ...m, at: Date.now() })), { root: ROOT, sender: 'sender.testnet', total: '37500000' }); await rpc(p); await p.goto(base + '/create'); await p.waitForTimeout(1500); return { full: true }; },
+  'campaigns-connect': async (p) => { await rpc(p); await p.goto(base + '/campaigns'); await p.waitForTimeout(4000); return { full: true }; },
+  'campaigns-list': async (p, ctx) => { await wallet(ctx); await rpc(p, { campaigns: { 12: cview({ deadline_ns: PAST }), 13: cview({ amount: '5000000', balance: '5000000' }) } }); await p.goto(base + '/campaigns'); await p.waitForTimeout(4000); return { full: true }; },
+  'campaigns-detail': async (p, ctx) => { await wallet(ctx); await rpc(p, { campaigns: { 12: cview({ deadline_ns: PAST }), 13: cview({ amount: '5000000', balance: '5000000' }) } }); await p.goto(base + '/campaigns'); await p.waitForTimeout(4000); await p.getByText('Details', { exact: true }).first().click(); await p.waitForTimeout(300); return { full: true }; },
+  'campaigns-setup-error': async (p) => { await rpc(p, { rpcDown: true }); await p.goto(base + '/campaigns'); await p.waitForTimeout(4000); return {}; },
+  'campaigns-loading': async (p, ctx) => { await wallet(ctx); await rpc(p, { hang: 'campaigns_of' }); await p.goto(base + '/campaigns'); await p.waitForTimeout(4000); return {}; },
+  'campaigns-load-error': async (p, ctx) => { await wallet(ctx); await rpc(p, { fail: 'campaigns_of' }); await p.goto(base + '/campaigns'); await p.waitForTimeout(4000); return {}; },
+  'campaigns-empty': async (p, ctx) => { await wallet(ctx); await rpc(p, { campaigns: {} }); await p.goto(base + '/campaigns'); await p.waitForTimeout(4000); return {}; },
+  'campaigns-wallet-error': async (p, ctx) => { await walletPopup(ctx, 'fail'); await rpc(p); await p.goto(base + '/campaigns'); await p.waitForTimeout(4000); await p.getByRole('button', { name: 'Connect MyNearWallet' }).click(); await p.waitForTimeout(2500); return {}; },
+  ...Object.fromEntries([
+    ['busy', 'hang', null],
+    ['reclaimed', 'ok', receipts([CONTRACT, { logs: [ev('reclaimed', { campaign_id: 12, amount: '27500000' })] }])],
+    ['reverted', 'ok', receipts([CONTRACT, { logs: [ev('reclaim_reverted', { campaign_id: 12 })] }])],
+    ['failed', 'ok', receipts([CONTRACT, { status: { Failure: { ActionError: { kind: { FunctionCallError: { ExecutionError: 'Smart contract panicked: E118_NOTHING_TO_RECLAIM' } } } } } }])],
+    ['released', 'ok', receipts([CONTRACT])],
+    ['send-failed', 'fail', null],
+  ].map(([k, mode, tx]) => [`campaigns-reclaim-${k}`, async (p, ctx) => {
+    await wallet(ctx); await walletPopup(ctx, mode); await rpc(p, { campaigns: { 12: cview({ deadline_ns: PAST }), 13: cview({ amount: '5000000', balance: '5000000' }) }, tx }); await p.goto(base + '/campaigns'); await p.waitForTimeout(4000);
+    await p.getByRole('button', { name: 'Reclaim' }).first().click(); await p.waitForTimeout(2500); return { full: true };
+  }])),
+  ...Object.fromEntries([['done', receipts([CONTRACT])], ['failed', receipts([CONTRACT, { status: { Failure: { ActionError: { kind: { FunctionCallError: { ExecutionError: 'Smart contract panicked: E107_UNAUTHORIZED' } } } } } }])]].map(([k, tx]) => [`campaigns-withdraw-${k}`, async (p, ctx) => {
+    await wallet(ctx); await walletPopup(ctx, 'ok'); await rpc(p, { campaigns: { 12: cview({ deadline_ns: PAST }), 13: cview({ amount: '5000000', balance: '5000000' }) }, tx }); await p.goto(base + '/campaigns'); await p.waitForTimeout(4000);
+    await p.getByRole('button', { name: 'Withdraw' }).click(); await p.waitForTimeout(2500); return { full: true };
+  }])),
   privacy: async (p) => { await p.goto(base + '/privacy'); await p.waitForSelector('h1'); return { full: true }; },
+  error500: async (p) => { await p.route(/routes\/privacy\/\+page\.svelte/, (r) => r.abort()); await p.goto(base + '/privacy'); await p.waitForTimeout(2500); return {}; },
+  // These two need a server started with PUBLIC_IMPLICIT_ACCOUNTS=on (PORT=… for a second one).
+  'implicit-start': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText('New account', { exact: true }).click(); await p.waitForTimeout(400); return { full: true }; },
+  'implicit-key': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText('New account', { exact: true }).click(); await p.getByRole('button', { name: 'Create my NEAR account' }).click(); await p.waitForTimeout(600); await p.getByRole('button', { name: 'Download key' }).click(); await p.waitForTimeout(400); return { full: true }; },
   notfound: async (p) => { await p.goto(base + '/nope'); await p.waitForSelector('h1'); return {}; },
 };
 
@@ -222,6 +296,7 @@ const S = {
   const b = await chromium.launch(process.env.CHROME ? { executablePath: process.env.CHROME } : {});
   for (const [name, fn] of Object.entries(S)) {
     if (filter && !new RegExp(filter).test(name)) continue;
+    if (!filter && name.startsWith('implicit-')) continue; // needs the flagged server
     for (const theme of (process.env.THEMES || 'dark,light').split(',')) for (const [w, h] of [[390, 844], [1280, 800]].filter(([w]) => (process.env.WIDTHS || '390,1280').split(',').includes(String(w)))) {
       const ctx = await b.newContext({ viewport: { width: w, height: h }, javaScriptEnabled: name !== 'boot', colorScheme: theme });
       await ctx.addInitScript((t) => localStorage.setItem('zarf_theme', t), theme);

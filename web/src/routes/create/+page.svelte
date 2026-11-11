@@ -4,15 +4,23 @@
   import { buildDraft, claimLink, LONG_LINKS_ABOVE, mailtoHref, recoveryFile, type Draft } from '$lib/create/campaign';
   import { getCampaignByRoot, getCampaignView, getConfig, getPrepayBalance, getStorageCosts, txOutcome, type ContractConfig } from '$lib/create/chain';
   import {
-    checkCreation, fundCampaign, LookupPending, mayCreate, minDeadlineMs, NotCreated, NotSent, OutcomeUnclear, readMarker, resolveByRoot,
-    settleAfterUncertain, type UnresolvedMarker,
+    checkCreation, fundCampaign, fundsShort, LookupPending, mayCreate, minDeadlineMs, NotCreated, NotSent, OutcomeUnclear, ownerKeySlack, prepayShortfall,
+    readMarker, resolveByRoot, settleAfterUncertain, type UnresolvedMarker,
   } from '$lib/create/funding';
   import { saveFile } from '$lib/create/publish';
   import { formatAmount, parseRecipients } from '$lib/create/recipients';
   import { myNearWallet, type SenderWallet } from '$lib/create/wallet';
-  import { ArrowRight, Check, ChevronDown, Mail } from 'lucide-svelte';
+  import { deadlineText, timeLeft } from '$lib/claim';
+  import { formatNear } from '$lib/create/campaigns';
+  import { nearView } from '$lib/services';
+  import { ArrowRight, ArrowUpRight, Check, ChevronDown, Mail } from 'lucide-svelte';
+  import Amount from '$lib/Amount.svelte';
+  import Medallion from '$lib/Medallion.svelte';
+  import Note from '$lib/Note.svelte';
+  import ZenAlert from '$lib/zen/components/ZenAlert.svelte';
   import ZenButton from '$lib/zen/components/ZenButton.svelte';
   import ZenCard from '$lib/zen/components/ZenCard.svelte';
+  import ZenCheckbox from '$lib/zen/components/ZenCheckbox.svelte';
 
   const rpc = env.PUBLIC_NEAR_RPC_URL;
   const contract = env.PUBLIC_CONTRACT_ID;
@@ -102,6 +110,23 @@
   );
   const links = $derived(linkRows.map(({ r, link }) => `${r.email},${formatAmount(BigInt(r.amount))},${link}`));
   let copiedRow = $state(-1);
+  // Display only: the sender's USDC and the storage the wallet will ask for (Create still goes through fundCampaign).
+  let balance = $state<string | null>(null);
+  let storageNear = $state<string | null>(null);
+  const short = $derived(fundsShort(balance, parsed.total));
+  $effect(() => {
+    const a = account;
+    balance = null;
+    if (!a || !rpc || !token) return;
+    nearView<string>(rpc, token, 'ft_balance_of', { account_id: a }, 'optimistic').then((b) => { if (account === a) balance = b; }, () => {});
+  });
+  $effect(() => {
+    const d = draft, a = account, c = config;
+    storageNear = null;
+    if (!d || !a || !c || !rpc || !contract || !token) return;
+    Promise.all([getStorageCosts(rpc, contract, token), getPrepayBalance(rpc, contract, a)])
+      .then(([costs, free]) => { if (draft === d) storageNear = formatNear(prepayShortfall(costs, d.recipients.length, free, ownerKeySlack(c.storage_byte_cost)).toString()); }, () => {});
+  });
 
   onMount(async () => {
     if (!rpc || !contract || !token) {
@@ -145,7 +170,7 @@
     try {
       account = await wallet!.signIn();
     } catch (e) {
-      error = `Wallet: ${(e as Error).message}`;
+      error = 'The wallet did not connect. Try again.';
     }
   }
 
@@ -202,9 +227,7 @@
       } else {
         // Not landed (yet). Keep the draft pinned: only the same root may be sent again.
         sentTx = txState = null;
-        error =
-          'Your wallet did not confirm, and no campaign exists for these links yet. You can send the same campaign ' +
-          'again: if the earlier transaction still lands, the contract refunds the duplicate. These links stay as they are.';
+        error = 'Your wallet did not confirm. Send again: a duplicate is refunded.';
       }
     } catch (e) {
       // A campaign under our (sender, root) that does not match is terminal; an unreadable contract is not.
@@ -364,44 +387,52 @@
     lastStep = s;
   });
   const previewAmount = $derived(parsed.rows[0] ? formatAmount(BigInt(parsed.rows[0].amount)) : '10');
-  const previewDeadline = $derived(
-    Number.isFinite(deadlineMs) ? new Date(deadlineMs).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '',
-  );
+  const previewLeft = $derived(Number.isFinite(deadlineMs) ? timeLeft(deadlineMs, Date.now()) : '');
+
+  let copyTimer: ReturnType<typeof setTimeout>;
+  const settleCopied = () => {
+    clearTimeout(copyTimer);
+    copyTimer = setTimeout(() => ((copied = false), (copiedRow = -1)), 2000);
+  };
 
   async function copyAll() {
     await navigator.clipboard.writeText(links.join('\n'));
     copied = true;
+    copiedRow = -1;
+    settleCopied();
   }
 
   async function copyOne(i: number) {
     await navigator.clipboard.writeText(linkRows[i].link);
     copiedRow = i;
+    copied = false;
+    settleCopied();
   }
 </script>
 
 <svelte:head><title>Send USDC · Zarf</title></svelte:head>
 
 {#snippet walletBlock()}
-  {#if pinned && !wrongAccount}
-    <p class="text-sm text-zen-fg-muted">Sending from <span class="font-mono text-zen-fg">{account}</span>. This campaign is tied to this account until it resolves.</p>
-  {:else}
-    {#if wrongAccount}
-      <p class="text-sm text-zen-error" role="alert">This draft belongs to <code>{sentFrom}</code>: reconnect {sentFrom} to continue.</p>
-    {/if}
-    {#if account}
-      <div class="flex items-center justify-between gap-3 min-h-11 px-4 rounded-2xl bg-zen-fg/[0.03] border-[0.5px] border-zen-border-subtle">
-        <span class="text-sm truncate"><span class="text-zen-fg-muted">Sending from</span> <span class="font-mono">{account}</span></span>
-        <ZenButton variant="ghost" size="sm" class="rounded-full min-h-11" onclick={disconnect} disabled={!!busy}>Disconnect</ZenButton>
-      </div>
-    {:else}
-      <ZenButton variant="secondary" class="rounded-full self-start" onclick={connect} disabled={!walletReady}>Connect MyNearWallet</ZenButton>
+  {#if wrongAccount}
+    <Note tone="error">This draft belongs to <span class="font-mono">{sentFrom}</span>: reconnect {sentFrom} to continue.</Note>
+  {/if}
+  {#if account}
+    <div class="flex items-center justify-between gap-3 min-h-11 border-y-[0.5px] border-zen-border-subtle">
+      <span class="text-sm min-w-0 truncate">
+        <span class="text-zen-fg-muted">From</span> <span class="font-mono">{account}</span>{#if balance !== null}<span class="text-zen-fg-muted">{' · '}{formatAmount(BigInt(balance))} USDC</span>{/if}
+      </span>
+      {#if !pinned}<ZenButton variant="ghost" size="sm" class="rounded-full min-h-11 !text-zen-fg" onclick={disconnect} disabled={!!busy}>Disconnect</ZenButton>{/if}
+    </div>
+    {#if pinned && !wrongAccount}<p class="text-xs text-zen-fg-muted">This campaign is tied to {account} until its send resolves.</p>{/if}
+    {#if short > 0n && !draft}
+      <Note tone="error">You have {formatAmount(BigInt(balance!))} USDC; this campaign needs {formatAmount(parsed.total)}.</Note>
     {/if}
   {/if}
 {/snippet}
 
 {#snippet actions(back: boolean, label: string, enabled: boolean, go: () => void)}
   <div class="mt-4 pt-6 border-t-[0.5px] border-zen-border-subtle flex items-center {back ? 'justify-between' : 'justify-end'} gap-3">
-    {#if back}<ZenButton variant="ghost" class="rounded-full min-h-11" onclick={() => (uiStep -= 1)}>Back</ZenButton>{/if}
+    {#if back}<ZenButton variant="ghost" class="rounded-full min-h-11 !text-zen-fg" onclick={() => (uiStep -= 1)}>Back</ZenButton>{/if}
     <ZenButton variant="primary" class="rounded-full min-h-11" disabled={!enabled} onclick={go}>
       {label}
       {#snippet iconRight()}<ArrowRight class="w-4 h-4" />{/snippet}
@@ -409,163 +440,185 @@
   </div>
 {/snippet}
 
+{#snippet explorerLink(hash: string)}
+  {#if env.PUBLIC_EXPLORER_TX_URL && hash}
+    <a href="{env.PUBLIC_EXPLORER_TX_URL}{hash}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 min-h-11 text-sm underline underline-offset-2 hover:text-zen-fg">View the transaction<ArrowUpRight class="w-3.5 h-3.5" aria-hidden="true" /></a>
+  {/if}
+{/snippet}
+
 {#if step < 4}
   <!-- WizardSteps (main repo create app): one thin bar and the step name -->
-  <div class="w-full border-b-[0.5px] border-zen-border-subtle">
-    <div class="max-w-5xl mx-auto px-4 sm:px-6 py-2 flex items-center gap-4">
+  <div class="w-full border-b border-zen-border-subtle bg-zen-bg">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2 flex items-center gap-4">
       <div class="flex-1 h-1 bg-zen-fg/10 rounded-full overflow-hidden" role="progressbar" aria-valuemin={1} aria-valuemax={STEPS.length} aria-valuenow={step + 1} aria-valuetext="Step {step + 1} of {STEPS.length}: {STEPS[step]}">
         <div class="h-full bg-zen-fg rounded-full transition-all duration-500 ease-out" style="width: {((step + 1) / STEPS.length) * 100}%"></div>
       </div>
-      <div class="text-xs font-mono text-zen-fg-muted whitespace-nowrap">
-        Step {step + 1} of {STEPS.length} · <span class="text-zen-fg font-medium uppercase tracking-wider">{STEPS[step]}</span>
-      </div>
+      <div class="text-xs text-zen-fg-muted whitespace-nowrap">Step {step + 1} of {STEPS.length} · <span class="text-zen-fg font-medium">{STEPS[step]}</span></div>
     </div>
   </div>
 {/if}
 
-<div class="w-full max-w-5xl mx-auto px-4 sm:px-6 py-8 md:py-12">
-  <!-- PageHeader (main repo) -->
-  <header class="mb-8 flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
-    <div class="space-y-2">
-      <h1 class="text-2xl md:text-3xl font-light tracking-tight">Send USDC to emails</h1>
-      <p class="text-sm md:text-base text-zen-fg-muted font-light">Each recipient claims with their Google account.</p>
-    </div>
-    <a href="/campaigns" class="inline-flex items-center min-h-11 text-xs font-medium no-underline text-zen-fg-muted hover:text-zen-fg">Your campaigns</a>
-  </header>
-
+<div class="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-12">
   {#if otherTab && !draft}
-    <div class="mb-6 flex flex-col gap-3 rounded-2xl border-[0.5px] border-zen-error/20 bg-zen-error-muted p-4 text-sm" role="alert">
-      <p>Another tab has a campaign from <code>{otherTab.sender}</code> whose send has not resolved yet. Finish it there before creating a new one here, or the same tokens could be sent twice.</p>
-      <ZenButton variant="secondary" size="sm" class="rounded-full self-start min-h-11" onclick={checkOtherTab} disabled={!config}>Check it</ZenButton>
-    </div>
+    <ZenAlert variant="warning" class="mb-6">
+      Another tab has a campaign from <span class="font-mono">{otherTab.sender}</span> whose send has not resolved yet. Finish it there first, or the same tokens could be sent twice.
+      {#snippet actions()}<ZenButton variant="secondary" size="sm" class="rounded-full min-h-11" onclick={checkOtherTab} disabled={!config}>Check it</ZenButton>{/snippet}
+    </ZenAlert>
   {/if}
   {#if otherTabNote}<p class="mb-6 text-sm text-zen-fg-muted" role="status">{otherTabNote}</p>{/if}
 
   {#if setupError}
-    <p class="text-sm text-zen-error" role="alert">{setupError}</p>
+    <ZenAlert variant="error">{setupError}</ZenAlert>
   {:else if result && draft}
     <!-- Done: the links are the product of this page -->
     <section class="max-w-2xl flex flex-col gap-6" aria-labelledby="done-h">
       <div class="flex items-center gap-4">
-        <div class="w-12 h-12 rounded-full bg-zen-success/10 text-zen-success border border-zen-success/10 flex items-center justify-center shrink-0" aria-hidden="true"><Check class="w-5 h-5" /></div>
-        <div>
-          <h2 id="done-h" bind:this={stepHeading} tabindex="-1" class="text-xl font-semibold tracking-tight outline-hidden">Campaign {result.campaignId} is live</h2>
-          <p class="text-sm text-zen-fg-muted">{formatAmount(BigInt(draft.total))} USDC to {draft.recipients.length} recipients
-            {#if env.PUBLIC_EXPLORER_TX_URL && result.txHash}· <a href="{env.PUBLIC_EXPLORER_TX_URL}{result.txHash}" target="_blank" rel="noopener noreferrer">View the transaction</a>{/if}
-          </p>
+        <div class="shrink-0"><Medallion icon={Check} tone="success" /></div>
+        <div class="space-y-1">
+          <h1 id="done-h" bind:this={stepHeading} tabindex="-1" class="text-2xl md:text-3xl font-light tracking-tight outline-hidden">{formatAmount(BigInt(draft.total))} USDC ready for {draft.recipients.length} {draft.recipients.length === 1 ? 'person' : 'people'}</h1>
+          <p class="text-sm text-zen-fg-muted">Campaign {result.campaignId}{#if env.PUBLIC_EXPLORER_TX_URL && result.txHash}{' · '}<a href="{env.PUBLIC_EXPLORER_TX_URL}{result.txHash}" target="_blank" rel="noopener noreferrer" class="underline underline-offset-2 hover:text-zen-fg">View the transaction</a>{/if}</p>
         </div>
       </div>
 
-      <div class="flex flex-col gap-2">
-        <h3 class="text-sm font-medium">Claim links</h3>
-        <details class="group text-sm">
-          <summary class="flex items-center gap-2 min-h-11 cursor-pointer list-none text-zen-warning-content">
-            Send each link only to its recipient: it is the only copy.
-            <ChevronDown class="w-4 h-4 shrink-0 transition-transform group-open:rotate-180" aria-hidden="true" />
-          </summary>
-          <p class="mt-1 text-zen-fg-muted">
-            These links are the only copy of each recipient's salt. Keep them private: anyone holding a link can test
-            whether it matches an email they guess. Without the links (or your recovery file) nobody can claim, and you
-            can only reclaim after the deadline.
-          </p>
-        </details>
-        {#if linkRows.length > LONG_LINKS_ABOVE}
-          <p class="text-sm text-zen-error" role="alert">Long links: some apps may cut them; send by email or copy carefully.</p>
-        {/if}
+      <div class="flex flex-col gap-1">
+        <h2 class="text-base font-semibold tracking-tight">Send each person their link</h2>
+        <p class="text-sm text-zen-fg-muted">Zarf doesn't email anyone. You send the links.</p>
       </div>
+      {#if linkRows.length > LONG_LINKS_ABOVE}
+        <ZenAlert variant="warning">These links are long; some apps cut them. Send them by email, or copy them carefully.</ZenAlert>
+      {/if}
 
-      <ul class="links flex flex-col">
+      <ul class="links flex flex-col border-y-[0.5px] border-zen-border-subtle">
         {#each linkRows as { r, link }, i (r.commitment)}
-          <li class="flex items-center gap-2 min-h-12 border-b-[0.5px] border-zen-border-subtle last:border-b-0">
+          <li class="flex items-center gap-1 min-h-12 border-b-[0.5px] border-zen-border-subtle last:border-b-0">
             <span class="flex-1 min-w-0 text-sm"><span class="break-all">{r.email}</span> <span class="text-zen-fg-muted tabular-nums">· {formatAmount(BigInt(r.amount))} USDC</span></span>
-            <ZenButton variant="ghost" size="sm" class="rounded-full min-h-11" onclick={() => copyOne(i)}>{copiedRow === i ? 'Copied' : 'Copy'}</ZenButton>
-            <a href={mailtoHref(r, link)} class="inline-flex items-center min-h-11 px-3 text-xs font-medium">Email</a>
+            <ZenButton variant="ghost" size="sm" class="rounded-full min-h-11 !text-zen-fg" onclick={() => copyOne(i)}>{copiedRow === i ? 'Copied' : 'Copy'}</ZenButton>
+            <ZenButton href={mailtoHref(r, link)} variant="ghost" size="sm" class="rounded-full min-h-11 !text-zen-fg">Open in mail</ZenButton>
           </li>
         {/each}
       </ul>
-      <textarea readonly rows="5" aria-label="Claim links" class="control-border w-full rounded-2xl bg-transparent p-3 font-mono text-xs text-zen-fg-muted">{links.join('\n')}</textarea>
       <div class="flex flex-wrap gap-3">
         <ZenButton variant="primary" class="rounded-full min-h-11" onclick={copyAll}>{copied ? 'Copied' : 'Copy all'}</ZenButton>
         <ZenButton variant="secondary" class="rounded-full min-h-11" onclick={() => saveFile(`zarf-links-${result!.campaignId}.csv`, `email,amount,link\n${links.join('\n')}\n`, 'text/csv')}>Download as CSV</ZenButton>
-        <ZenButton variant="ghost" class="rounded-full min-h-11" onclick={startOver}>Start a new campaign</ZenButton>
+        <ZenButton variant="ghost" class="rounded-full min-h-11 !text-zen-fg" onclick={startOver}>Start a new campaign</ZenButton>
       </div>
+      <details class="group text-sm text-zen-fg-muted">
+        <summary class="inline-flex items-center gap-2 min-h-11 cursor-pointer list-none hover:text-zen-fg">
+          Keep each link private
+          <ChevronDown class="w-4 h-4 shrink-0 transition-transform group-open:rotate-180" aria-hidden="true" />
+        </summary>
+        <p class="mt-1">
+          Each link is the only copy of what its recipient needs to claim. Anyone holding a link can test whether it matches
+          an email they guess, so send it only to its recipient. Lost them? Your backup file rebuilds them; after the deadline
+          you can reclaim what is left.
+        </p>
+      </details>
     </section>
   {:else}
     <div class="flex flex-col lg:flex-row lg:items-start gap-10 lg:gap-12">
-      <!-- Form -->
+      <!-- Form: the step question is the page title -->
       <section class="w-full lg:max-w-xl lg:shrink-0 flex flex-col gap-4" aria-labelledby="step-h">
-        <h2 id="step-h" bind:this={stepHeading} tabindex="-1" class="text-lg font-semibold tracking-tight outline-hidden">{QUESTIONS[step]}</h2>
+        <h1 id="step-h" bind:this={stepHeading} tabindex="-1" class="text-2xl md:text-3xl font-light tracking-tight outline-hidden mb-2">{QUESTIONS[step]}</h1>
 
         {#if step === 0}
-          <label for="recipients" class="text-sm text-zen-fg-muted">One per line: <code>email,amount</code> in USDC, with the address they sign in to Google with.</label>
-          <textarea id="recipients" bind:value={csv} rows="8" class="control-border w-full rounded-2xl bg-transparent p-4 font-mono text-sm" placeholder={'alice@gmail.com,10\nbob@gmail.com,2.5'} disabled={!!draft}></textarea>
+          <label for="recipients" class="flex flex-col gap-1">
+            <span class="text-sm font-medium">Recipients</span>
+            <span class="text-xs text-zen-fg-muted">One per line: email, amount in USDC. Use the address they sign in to Google with.</span>
+          </label>
+          <textarea id="recipients" bind:value={csv} rows="8" class="control-border w-full rounded-2xl bg-transparent p-4 !font-mono text-sm" placeholder={'alice@gmail.com,10\nbob@gmail.com,2.5'} disabled={!!draft}></textarea>
           {#if parsed.rows.length}
-            <p class="text-sm"><span class="font-semibold tabular-nums">{formatAmount(parsed.total)} USDC</span> <span class="text-zen-fg-muted">to {parsed.rows.length} recipients</span></p>
+            <p class="text-sm"><span class="font-semibold tabular-nums">{formatAmount(parsed.total)} USDC</span> <span class="text-zen-fg-muted">to {parsed.rows.length} {parsed.rows.length === 1 ? 'person' : 'people'}</span></p>
           {/if}
           {#if parsed.rejected.length}
-            <div class="text-sm text-zen-error" role="alert">
-              <p>Fix these lines first:</p>
-              <ul class="list-disc pl-5">
-                {#each parsed.rejected as r (r.line)}<li>Line {r.line}: {r.reason}</li>{/each}
-              </ul>
-            </div>
+            <Note tone="error">
+              Fix these lines first:
+              {#each parsed.rejected as r (r.line)}<span class="block font-normal">Line {r.line}: {r.reason}</span>{/each}
+            </Note>
           {/if}
           {@render actions(false, 'Continue', recipientsOk, () => (uiStep = 1))}
         {:else if step === 1}
-          <label for="deadline" class="text-sm text-zen-fg-muted">Recipients can claim until then. After it, you can reclaim what is left.</label>
-          <input id="deadline" type="datetime-local" bind:value={deadline} disabled={!!draft} class="control-border w-full sm:w-auto min-h-11 rounded-[var(--zen-radius-input)] bg-transparent px-4 py-3 text-sm" />
-          {#if minMs !== null && deadline && !deadlineOk}
-            <p class="text-sm text-zen-error" role="alert">The deadline must be after {new Date(minMs).toLocaleString()}.</p>
-          {/if}
+          <label for="deadline" class="flex flex-col gap-1">
+            <span class="text-sm font-medium">Claim deadline</span>
+            <span class="text-xs text-zen-fg-muted">After it, you can reclaim what is left.</span>
+          </label>
+          <input id="deadline" type="datetime-local" bind:value={deadline} disabled={!!draft} aria-describedby="deadline-note" class="control-border w-full sm:w-auto min-h-11 rounded-[var(--zen-radius-input)] bg-transparent px-4 py-3 text-sm" />
+          <div id="deadline-note">
+            {#if minMs !== null && deadline && !deadlineOk}
+              <Note tone="error">Pick a time after {deadlineText(minMs, Date.now())}.</Note>
+            {:else if Number.isFinite(deadlineMs)}
+              <p class="text-xs text-zen-fg-muted">Your time: {deadlineText(deadlineMs, Date.now())}</p>
+            {/if}
+          </div>
           {@render actions(true, 'Continue', deadlineOk, () => (uiStep = 2))}
         {:else if step === 2}
-          {#if config?.network !== 'mainnet'}
+          {#if config?.network !== 'mainnet' && !account}
             <p class="text-sm text-zen-fg-muted">
               You need a NEAR testnet account and test USDC:
-              <a href="https://docs.near.org/getting-started/faucet" target="_blank" rel="noopener noreferrer">NEAR faucet</a> ·
-              <a href="https://faucet.circle.com" target="_blank" rel="noopener noreferrer">Circle USDC faucet</a> (NEAR Testnet).
+              <a href="https://docs.near.org/getting-started/faucet" target="_blank" rel="noopener noreferrer" class="underline underline-offset-2 hover:text-zen-fg">NEAR faucet</a> ·
+              <a href="https://faucet.circle.com" target="_blank" rel="noopener noreferrer" class="underline underline-offset-2 hover:text-zen-fg">Circle USDC faucet</a> (NEAR Testnet).
             </p>
           {/if}
           {@render walletBlock()}
-          {@render actions(true, 'Generate claim links', ready, prepare)}
+          {#if account}
+            {@render actions(true, 'Continue', ready && short === 0n, prepare)}
+          {:else}
+            {@render actions(true, 'Connect MyNearWallet', walletReady, connect)}
+          {/if}
         {:else}
-          <p class="text-sm">
-            You send <span class="font-semibold tabular-nums">{formatAmount(BigInt(draft!.total))} USDC</span> to {draft!.recipients.length} recipients,
-            <span class="text-zen-fg-muted">plus a small NEAR storage pre-pay your wallet shows before you sign.</span>
-          </p>
-          {@render walletBlock()}
-          <div class="flex flex-col gap-3 rounded-2xl bg-zen-fg/[0.03] border-[0.5px] border-zen-border-subtle p-4">
-            <p class="text-sm">Save the recovery file first. <span class="text-zen-fg-muted">It holds every salt, so you can rebuild the links if this page is lost.</span></p>
-            <ZenButton variant="secondary" size="sm" class="rounded-full self-start min-h-11" onclick={saveRecovery}>Download recovery file</ZenButton>
-            <label class="flex items-center gap-2 min-h-11 text-sm {recoverySaved ? '' : 'opacity-50'}">
-              <input type="checkbox" bind:checked={recoveryAck} disabled={!recoverySaved} class="w-4 h-4" /> I stored the recovery file somewhere private
-            </label>
+          <div class="flex flex-col gap-2">
+            <p class="text-sm">
+              <span class="font-semibold tabular-nums">{formatAmount(BigInt(draft!.total))} USDC</span> to {draft!.recipients.length} {draft!.recipients.length === 1 ? 'person' : 'people'}{#if storageNear !== null}<span class="text-zen-fg-muted">{storageNear === '0' ? ' · storage already pre-paid' : ` + ${storageNear} NEAR storage`}</span>{/if}
+            </p>
+            <ul class="flex flex-col text-sm border-y-[0.5px] border-zen-border-subtle max-h-64 overflow-auto">
+              {#each draft!.recipients as r (r.commitment)}
+                <li class="flex items-center justify-between gap-3 min-h-10 border-b-[0.5px] border-zen-border-subtle last:border-b-0">
+                  <span class="truncate">{r.email}</span><span class="tabular-nums text-zen-fg-muted">{formatAmount(BigInt(r.amount))} USDC</span>
+                </li>
+              {/each}
+            </ul>
           </div>
+          {@render walletBlock()}
+          <div class="flex flex-col gap-1">
+            <ZenButton variant="secondary" size="sm" class="rounded-full self-start min-h-11" onclick={saveRecovery}>Download a backup of the links</ZenButton>
+            <ZenCheckbox bind:checked={recoveryAck} disabled={!recoverySaved} label="I stored the backup somewhere private" />
+          </div>
+
           {#if txState === 'checking'}
-            <p class="text-sm" role="status">Checking whether your campaign was created… Do not send again until this finishes.</p>
-            <div class="flex flex-wrap items-center gap-3">
+            <ZenAlert variant="info">
+              {#snippet title()}Checking whether your campaign was created{/snippet}
+              Do not send again until this finishes.
+            </ZenAlert>
+            <div class="flex flex-wrap items-center gap-4">
               <ZenButton variant="secondary" class="rounded-full min-h-11" onclick={recheck} disabled={!!busy}>{busy || 'Check again'}</ZenButton>
-              {#if env.PUBLIC_EXPLORER_TX_URL && sentTx}<a href="{env.PUBLIC_EXPLORER_TX_URL}{sentTx}" target="_blank" rel="noopener noreferrer" class="text-sm">View it on the explorer</a>{/if}
+              {@render explorerLink(sentTx ?? '')}
             </div>
           {:else if txState === 'settling'}
-            <p class="text-sm" role="status">That attempt was refunded. Making sure an earlier attempt did not land (about 90 seconds) before these links can change…</p>
+            <ZenAlert variant="info">
+              {#snippet title()}Making sure an earlier send did not land{/snippet}
+              That attempt was refunded. One more look in about 90 seconds before these links can change.
+            </ZenAlert>
           {:else if txState === 'mismatch'}
-            <p class="text-sm text-zen-error" role="alert">The contract holds a campaign for these links that does not match this draft. It is not used. Generate new links.</p>
-            <ZenButton variant="secondary" class="rounded-full self-start min-h-11" onclick={startOver}>Generate new links</ZenButton>
+            <ZenAlert variant="error">
+              {#snippet title()}These links cannot be used{/snippet}
+              The contract holds a different campaign for them. Generate new links.
+            </ZenAlert>
+            <ZenButton variant="primary" class="rounded-full self-start min-h-11" onclick={startOver}>Generate new links</ZenButton>
           {:else if txState === 'unclear'}
-            <p class="text-sm text-zen-error" role="alert">
-              The transaction ran but did not create this campaign, and we could not confirm your tokens came back. Do not send again; check it on the explorer first.
-            </p>
-            {#if env.PUBLIC_EXPLORER_TX_URL && sentTx}<a href="{env.PUBLIC_EXPLORER_TX_URL}{sentTx}" target="_blank" rel="noopener noreferrer" class="text-sm">View it on the explorer</a>{/if}
+            <ZenAlert variant="warning">
+              {#snippet title()}Do not send again yet{/snippet}
+              The transaction ran but did not create this campaign, and we could not confirm your tokens came back. Check it on the explorer first.
+            </ZenAlert>
+            {@render explorerLink(sentTx ?? '')}
           {:else}
+            {#if busy}<Note tone="pending">{busy}</Note>{/if}
             <div class="mt-4 pt-6 border-t-[0.5px] border-zen-border-subtle flex items-center {pinned ? 'justify-end' : 'justify-between'} gap-3">
-              {#if !pinned}<ZenButton variant="ghost" class="rounded-full min-h-11" onclick={() => (draft = null)} disabled={!!busy}>Edit recipients</ZenButton>{/if}
-              <ZenButton variant="primary" class="rounded-full min-h-11" disabled={!recoveryAck || !!busy || !!sentTx || !sendable.ok} onclick={create}>{busy || 'Create campaign'}</ZenButton>
+              {#if !pinned}<ZenButton variant="ghost" class="rounded-full min-h-11 !text-zen-fg" onclick={() => ((draft = null), (uiStep = 0))} disabled={!!busy}>Edit recipients</ZenButton>{/if}
+              <ZenButton variant="primary" class="rounded-full min-h-11" disabled={!recoveryAck || !!busy || !!sentTx || !sendable.ok} onclick={create}>Create campaign</ZenButton>
             </div>
           {/if}
         {/if}
 
-        {#if error}<p class="text-sm text-zen-error" role="alert">{error}</p>{/if}
+        {#if error}<Note tone="error">{error}</Note>{/if}
 
         <details class="group mt-6 text-sm text-zen-fg-muted">
           <summary class="flex items-center gap-2 min-h-11 cursor-pointer list-none hover:text-zen-fg">
@@ -581,13 +634,12 @@
 
       <!-- What the first recipient will see (desktop only): the claim card in miniature -->
       <aside class="hidden lg:block lg:flex-1 lg:sticky lg:top-24" aria-label="Preview of a claim">
-        <p class="mb-4 ml-1 text-xs font-semibold uppercase tracking-wider text-zen-fg-subtle">What they see</p>
-        <ZenCard variant="glass" padding="lg" radius="3xl">
-          <div class="flex flex-col items-center text-center gap-3" aria-hidden="true">
-            <div class="w-14 h-14 rounded-full bg-zen-primary/10 text-zen-primary flex items-center justify-center"><Mail class="w-6 h-6" /></div>
-            <span class="text-4xl font-bold tracking-tighter tabular-nums">{previewAmount} USDC</span>
-            <span class="text-sm text-zen-fg-muted">is waiting for you</span>
-            <span class="text-xs text-zen-fg-subtle">From <span class="font-mono">{account ?? 'your account'}</span>{#if previewDeadline} · claim by {previewDeadline}{/if}</span>
+        <p class="mb-4 ml-1 text-[11px] font-medium uppercase tracking-[0.15em] text-zen-fg-muted">What they see</p>
+        <ZenCard variant="elevated" padding="lg">
+          <div class="flex flex-col items-center text-center gap-4" aria-hidden="true">
+            <Medallion icon={Mail} />
+            <Amount label="Waiting for you" value={previewAmount} unit={config?.network === 'mainnet' ? 'USDC' : 'test USDC'} />
+            <span class="text-xs text-zen-fg-muted">From {#if account}<span class="font-mono">{account}</span>{:else}you{/if}{#if previewLeft}{' · '}{previewLeft}{/if}</span>
           </div>
         </ZenCard>
       </aside>

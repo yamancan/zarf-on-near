@@ -1,10 +1,11 @@
+<script lang="ts">
+  import PageHeader from '$lib/zen/components/PageHeader.svelte';
+</script>
+
 <svelte:head><title>Privacy and terms · Zarf</title></svelte:head>
 
-<article class="prose-zarf w-full max-w-2xl mx-auto px-4 sm:px-6 py-8 md:py-12">
-<header class="mb-10 space-y-2">
-  <h1 class="text-2xl md:text-3xl font-light tracking-tight">Privacy and terms</h1>
-  <p class="text-sm md:text-base text-zen-fg-muted font-light">Operated by Trion Labs. Contact: [CONTACT EMAIL].</p>
-</header>
+<article class="prose-zarf w-full max-w-xl mx-auto px-6 py-8 md:py-12">
+<PageHeader title="Privacy and terms" description="Operated by Trion Labs. Contact: [CONTACT EMAIL]." />
 
 <h2>Your email</h2>
 <p>
@@ -13,9 +14,9 @@
   Your email never goes on chain.
 </p>
 <p>
-  The judge page (<code>/try</code>) uses the email you type only to create your test claim link. For its daily
-  limits it keeps counters keyed by an irreversible HMAC of the email and of your IP address, never either one
-  in the clear.
+  The <a href="https://zarf-near-faucet-testnet.sparkling-queen-5e77.workers.dev/try" class="underline underline-offset-2 hover:text-zen-fg">judge page</a>
+  uses the email you type only to create your test claim link. For its daily limits it keeps counters keyed by a
+  keyed hash of the email and of your IP address, never either one in the clear.
 </p>
 <p>
   We ask Google only for <code>openid</code> and <code>email</code>. We use no analytics. The judge page loads

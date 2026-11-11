@@ -3,6 +3,7 @@ import vectors from '../../../../spec/vectors.json';
 import { parseLinkFragment } from '../claim';
 import { buildDraft, claimLink, commitment, mailtoHref, newSalt, recoveryFile } from './campaign';
 import {
+  fundsShort,
   campaignIdFrom, checkCreation, failedWith, fundCampaign, fundingTxs, LookupPending, minDeadlineMs, NotCreated, OutcomeUnclear, ownerKeySlack,
   NotSent, prepayShortfall, resolveByRoot, SendUncertain, settleAfterUncertain, mayCreate, readMarker, MARKER_TTL_MS, type FundDeps, type Outcome,
 } from './funding';
@@ -417,5 +418,17 @@ describe('readMarker (unresolved send seen from another tab)', () => {
     expect(readMarker(s, 'k', 2_000)).toBeNull();
     expect(s.has()).toBe(false);
     expect(readMarker(store('{'), 'k', 2_000)).toBeNull();
+  });
+});
+
+describe('fundsShort (step 3 blocks Continue below the total)', () => {
+  it('is the missing amount, or 0 when the balance covers it', () => {
+    expect(fundsShort('120000000', 37_500_000n)).toBe(0n);
+    expect(fundsShort('37500000', 37_500_000n)).toBe(0n);
+    expect(fundsShort('10000000', 37_500_000n)).toBe(27_500_000n);
+  });
+  it('never blocks when the balance could not be read', () => {
+    expect(fundsShort(null, 37_500_000n)).toBe(0n);
+    expect(fundsShort('unclaimed', 37_500_000n)).toBe(0n);
   });
 });

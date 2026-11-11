@@ -321,3 +321,10 @@ export function readMarker(store: Pick<Storage, 'getItem' | 'removeItem'>, key: 
   }
   return m;
 }
+
+/**
+ * USDC the sender is short of for this campaign (0n if enough). null balance (the read failed) never
+ * blocks: the wallet still shows a shortfall before signing.
+ */
+export const fundsShort = (balance: string | null, total: bigint): bigint =>
+  balance === null || !/^\d+$/.test(balance) || BigInt(balance) >= total ? 0n : total - BigInt(balance);

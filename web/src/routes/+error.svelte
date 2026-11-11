@@ -1,22 +1,28 @@
 <script lang="ts">
   // After the main claim app's +error.svelte: icon + mono status, one title, one line, one way home.
   import { page } from '$app/state';
-  import { AlertTriangle } from 'lucide-svelte';
+  import { AlertTriangle, SearchX } from 'lucide-svelte';
+  import Medallion from '$lib/Medallion.svelte';
+  import ZenButton from '$lib/zen/components/ZenButton.svelte';
+  import ZenCard from '$lib/zen/components/ZenCard.svelte';
 </script>
 
-<svelte:head><title>Not found · Zarf</title></svelte:head>
+<svelte:head><title>{page.status === 404 ? 'Not found' : 'Error'} · Zarf</title></svelte:head>
 
-<section class="flex flex-col items-center justify-center min-h-[60vh] gap-5 text-center px-6">
-  <div class="flex items-center gap-3 text-zen-fg-muted">
-    <AlertTriangle class="w-5 h-5" aria-hidden="true" />
-    <span class="text-xs font-mono uppercase tracking-widest">Error {page.status}</span>
-  </div>
-  {#if page.status === 404}
-    <h1 class="text-3xl font-semibold tracking-tight">This page does not exist</h1>
-    <p class="max-w-md text-sm text-zen-fg-muted">If you followed a claim link, open it again from the message you received, in full.</p>
-  {:else}
-    <h1 class="text-3xl font-semibold tracking-tight">Something went wrong</h1>
-    <p class="max-w-md text-sm text-zen-fg-muted">Try again in a minute. If you followed a claim link, open it again from the message you received.</p>
-  {/if}
-  <a href="/" class="inline-flex items-center min-h-11 px-6 rounded-full text-sm font-semibold no-underline bg-zen-btn-primary-bg text-zen-btn-primary-text hover:bg-zen-btn-primary-bg-hover transition-colors">What is Zarf?</a>
-</section>
+<!-- The same terminal card as the claim states: medallion, title, one line, one way out -->
+<div class="w-full max-w-lg mx-auto px-4 py-8 sm:py-14">
+  <ZenCard variant="elevated" class="!p-6 sm:!p-8">
+    <div class="flex flex-col items-center text-center gap-4 py-2">
+      {#if page.status === 404}
+        <Medallion icon={SearchX} tone="muted" />
+        <h1 class="text-xl font-semibold tracking-tight">This page does not exist</h1>
+        <p class="text-sm text-zen-fg-muted max-w-xs">If you followed a claim link, open it again from the message you received, in full.</p>
+      {:else}
+        <Medallion icon={AlertTriangle} tone="error" />
+        <h1 class="text-xl font-semibold tracking-tight">Something went wrong</h1>
+        <p class="text-sm text-zen-fg-muted max-w-xs">Try again in a minute. If you followed a claim link, open it again from the message you received.</p>
+      {/if}
+      <ZenButton href="/" variant="secondary" class="rounded-full min-h-11 mt-2">What is Zarf?</ZenButton>
+    </div>
+  </ZenCard>
+</div>

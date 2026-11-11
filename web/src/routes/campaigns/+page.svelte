@@ -6,6 +6,12 @@
   import { formatAmount } from '$lib/create/recipients';
   import { myNearWallet, type SenderWallet } from '$lib/create/wallet';
   import { nearView } from '$lib/services';
+  import { deadlineText, timeLeft } from '$lib/claim';
+  import { ArrowUpRight, ChevronDown, Send, Wallet } from 'lucide-svelte';
+  import Medallion from '$lib/Medallion.svelte';
+  import Note from '$lib/Note.svelte';
+  import PageHeader from '$lib/zen/components/PageHeader.svelte';
+  import ZenAlert from '$lib/zen/components/ZenAlert.svelte';
   import ZenButton from '$lib/zen/components/ZenButton.svelte';
   import ZenCard from '$lib/zen/components/ZenCard.svelte';
 
@@ -20,8 +26,11 @@
   let rows = $state<{ id: string; c: CampaignView }[] | null>(null);
   let freePrepay = $state('0');
   let busy = $state('');
-  let error = $state('');
-  let note = $state('');
+  let error = $state(''); // loading the list
+  // The outcome of the last action, shown under the button that started it ('prepay' or a campaign id).
+  let result = $state<{ for: string; tone: 'success' | 'error'; text: string; code?: string; hash?: string } | null>(null);
+  let acting = $state('');
+  let walletError = $state('');
   let now = $state(Date.now());
 
   const view = <T,>(method: string, args: object) => nearView<T>(rpc!, contract!, method, args, 'optimistic');
@@ -55,17 +64,20 @@
   }
 
   async function connect() {
+    walletError = '';
     try {
       account = await wallet!.signIn();
-      await load();
-    } catch (e) {
-      error = `Wallet: ${(e as Error).message}`;
+    } catch {
+      walletError = 'The wallet did not connect. Try again.';
+      return;
     }
+    await load();
   }
 
   /** Sends one tx, waits for its outcome, then re-reads everything from the chain. */
-  async function run(label: string, tx: ReturnType<typeof reclaimTx>, campaignId?: string) {
-    error = note = '';
+  async function run(label: string, tx: ReturnType<typeof reclaimTx>, target: string, campaignId?: string) {
+    result = null;
+    acting = target;
     busy = label;
     try {
       const [hash] = await wallet!.send([tx]);
@@ -73,98 +85,128 @@
       const outcome = (await txOutcome(rpc!, hash, account!)) as Parameters<typeof reclaimOutcome>[0];
       if (campaignId) {
         const r = reclaimOutcome(outcome, contract!, campaignId);
-        note =
-          r.kind === 'reclaimed' ? `Reclaimed ${formatAmount(BigInt(r.amount))} USDC.`
-          : r.kind === 'reverted' ? 'The transfer failed; your balance is back. Try again.'
-          : r.kind === 'failed' ? `The transaction did not go through (${r.code}).`
-          : 'Done: the unused storage reservation is back in your free pre-pay.';
+        result =
+          r.kind === 'reclaimed' ? { for: target, tone: 'success', text: `Reclaimed ${formatAmount(BigInt(r.amount))} USDC.`, hash }
+          : r.kind === 'reverted' ? { for: target, tone: 'error', text: 'The transfer failed; the balance is back in the campaign. Try again.', hash }
+          : r.kind === 'failed' ? { for: target, tone: 'error', text: 'The transaction did not go through.', code: r.code, hash }
+          : { for: target, tone: 'success', text: 'The unused storage reservation is back in your free pre-pay.', hash };
       } else {
         const failure = outcome.receipts_outcome?.find((r) => r.outcome?.status?.Failure !== undefined)?.outcome?.status?.Failure;
         const code = failure ? (/E1\d\d_[A-Z_]+/.exec(JSON.stringify(failure))?.[0] ?? 'FAILED') : null;
-        note = code ? `The transaction did not go through (${code}).` : 'Done.';
+        result = code ? { for: target, tone: 'error', text: 'The transaction did not go through.', code, hash } : { for: target, tone: 'success', text: 'Withdrawn to your wallet.', hash };
       }
-      if (env.PUBLIC_EXPLORER_TX_URL) note += ` Transaction: ${env.PUBLIC_EXPLORER_TX_URL}${hash}`;
-    } catch (e) {
-      error = `Wallet: ${(e as Error).message}. Check your campaigns below before trying again.`;
+    } catch {
+      result = { for: target, tone: 'error', text: 'The wallet did not send it. Check this campaign before trying again.' };
     } finally {
       busy = '';
       await load();
     }
   }
-
-  const fmtDate = (ns: string) => new Date(Number(BigInt(ns) / 1_000_000n)).toLocaleString();
 </script>
 
 <svelte:head><title>Your campaigns · Zarf</title></svelte:head>
 
-<div class="w-full max-w-3xl mx-auto px-4 sm:px-6 py-8 md:py-12">
-  <!-- PageHeader (main repo) -->
-  <header class="mb-10 flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
-    <div class="space-y-2">
-      <h1 class="text-2xl md:text-3xl font-light tracking-tight">Your campaigns</h1>
-      <p class="text-sm md:text-base text-zen-fg-muted font-light">After the deadline, take back what was not claimed.</p>
-    </div>
-    <a href="/create" class="inline-flex items-center min-h-11 text-xs font-medium no-underline text-zen-fg-muted hover:text-zen-fg">Create a campaign</a>
-  </header>
+{#snippet outcome(target: string)}
+  {#if busy && acting === target}
+    <Note tone="pending">{busy}</Note>
+  {:else if result?.for === target}
+    <Note tone={result.tone}>{result.text}</Note>
+    {#if result.code}<p class="text-xs text-zen-fg-muted">Code <span class="font-mono">{result.code}</span></p>{/if}
+    {#if result.hash && env.PUBLIC_EXPLORER_TX_URL}
+      <a href="{env.PUBLIC_EXPLORER_TX_URL}{result.hash}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 min-h-11 text-xs text-zen-fg-muted underline underline-offset-2 hover:text-zen-fg">View the transaction<ArrowUpRight class="w-3 h-3" aria-hidden="true" /></a>
+    {/if}
+  {/if}
+{/snippet}
+
+<div class="w-full max-w-3xl mx-auto px-6 py-8 md:py-12">
+  <PageHeader title="Your campaigns" description="After the deadline, take back what was not claimed." />
 
   {#if setupError}
-    <p class="text-sm text-zen-error" role="alert">{setupError}</p>
+    <ZenAlert variant="error">{setupError}</ZenAlert>
+  {:else if !walletReady}
+    <Note tone="pending">Loading…</Note>
   {:else if !account}
-    <div class="flex flex-col items-start gap-3">
-      <p class="text-sm text-zen-fg-muted">Connect the wallet you sent from.</p>
-      <ZenButton variant="primary" class="rounded-full min-h-11" onclick={connect} disabled={!walletReady}>Connect MyNearWallet</ZenButton>
-    </div>
-  {:else}
-    <div class="flex flex-col gap-1 pb-6 mb-8 border-b-[0.5px] border-zen-border-subtle">
-      <p class="text-sm text-zen-fg-muted">Sender <span class="font-mono text-zen-fg">{account}</span></p>
-      <div class="flex flex-wrap items-center justify-between gap-3">
-        <h2 class="text-sm"><span class="font-semibold tabular-nums">{formatNear(freePrepay)} NEAR</span> <span class="text-zen-fg-muted">free storage pre-pay, not reserved by any campaign</span></h2>
-        <ZenButton variant="secondary" size="sm" class="rounded-full min-h-11" disabled={BigInt(freePrepay) === 0n || !!busy} onclick={() => run('Withdrawing…', withdrawTx(account!, contract!))}>Withdraw free pre-pay</ZenButton>
+    <ZenCard variant="elevated" class="max-w-lg mx-auto !p-6 sm:!p-8">
+      <div class="flex flex-col items-center text-center gap-4 py-2">
+        <Medallion icon={Wallet} />
+        <h2 class="text-xl font-semibold tracking-tight">Connect the wallet you sent from</h2>
+        <p class="text-sm text-zen-fg-muted max-w-xs">Your campaigns, what was claimed, and what you can take back.</p>
+        <ZenButton variant="primary" class="rounded-full min-h-11 mt-2" onclick={connect} disabled={!walletReady}>Connect MyNearWallet</ZenButton>
+        {#if walletError}<Note tone="error">{walletError}</Note>{/if}
       </div>
-    </div>
-
-    <h2 class="text-sm font-medium mb-4">Campaigns</h2>
-    {#if rows === null}
-      <p class="text-sm text-zen-fg-muted" role="status">Loading…</p>
-    {:else if rows.length === 0}
-      <p class="text-sm text-zen-fg-muted">No campaigns from this account yet.</p>
-    {:else}
-      <div class="flex flex-col gap-4">
-        {#each rows as r (r.id)}
-          {@const can = reclaimable(r.c, now)}
-          {@const claimed = claimedAmount(r.c)}
-          {@const total = BigInt(r.c.amount)}
-          <ZenCard variant="elevated" padding="md" radius="2xl">
-            <section class="flex flex-col gap-4" aria-label="Campaign {r.id}">
-              <div class="flex items-baseline justify-between gap-3">
-                <h3 class="text-base font-semibold">Campaign {r.id}</h3>
-                <span class="text-xl font-bold tracking-tight tabular-nums">{formatAmount(total)} USDC</span>
+    </ZenCard>
+  {:else if error}
+    <ZenAlert variant="error">
+      {error}
+      {#snippet actions()}<ZenButton variant="secondary" size="sm" class="rounded-full min-h-11" onclick={load}>Try again</ZenButton>{/snippet}
+    </ZenAlert>
+  {:else if rows === null}
+    <Note tone="pending">Loading your campaigns…</Note>
+  {:else if rows.length === 0}
+    <ZenCard variant="elevated" class="max-w-lg mx-auto !p-6 sm:!p-8">
+      <div class="flex flex-col items-center text-center gap-4 py-2">
+        <Medallion icon={Send} tone="muted" />
+        <h2 class="text-xl font-semibold tracking-tight">No campaigns yet</h2>
+        <p class="text-sm text-zen-fg-muted">Nothing sent from <span class="font-mono">{account}</span> so far.</p>
+        <ZenButton href="/create" variant="primary" class="rounded-full min-h-11 mt-2">Send USDC</ZenButton>
+      </div>
+    </ZenCard>
+  {:else}
+    <p class="text-sm text-zen-fg-muted mb-6">Sent from <span class="font-mono text-zen-fg">{account}</span></p>
+    <div class="flex flex-col gap-4">
+      {#each rows as r (r.id)}
+        {@const can = reclaimable(r.c, now)}
+        {@const claimed = claimedAmount(r.c)}
+        {@const total = BigInt(r.c.amount)}
+        {@const ms = Number(BigInt(r.c.deadline_ns) / 1_000_000n)}
+        {@const left = timeLeft(ms, now)}
+        <ZenCard variant="elevated" padding="md">
+          <section class="flex flex-col gap-4" aria-label="Campaign {r.id}">
+            <div class="flex items-start justify-between gap-3">
+              <div class="flex flex-col gap-1">
+                <span class="text-[10px] font-medium uppercase tracking-[0.15em] text-zen-fg-muted">Campaign {r.id}</span>
+                <span class="flex items-baseline gap-2"><span class="text-3xl font-light tracking-tighter tabular-nums">{formatAmount(total)}</span><span class="text-xs font-medium uppercase tracking-widest text-zen-primary">USDC</span></span>
               </div>
-              <!-- Claimed share of the campaign: the value, shown -->
+              <span class="text-xs text-zen-fg-muted pt-1" title={deadlineText(ms, now)}>{left || 'Claims closed'}</span>
+            </div>
+            <!-- Claimed share of the campaign: the value, shown -->
+            <div class="flex flex-col gap-2">
               <div class="h-1 rounded-full bg-zen-fg/10 overflow-hidden" aria-hidden="true">
                 <div class="h-full bg-zen-fg rounded-full" style="width: {total === 0n ? 0 : Number((claimed * 100n) / total)}%"></div>
               </div>
-              <dl class="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-3 text-sm">
-                <div><dt class="text-xs text-zen-fg-muted">Claimed</dt><dd class="tabular-nums">{formatAmount(claimed)} USDC</dd></div>
-                <div><dt class="text-xs text-zen-fg-muted">Balance</dt><dd class="tabular-nums">{formatAmount(BigInt(r.c.balance))} USDC</dd></div>
-                <div><dt class="text-xs text-zen-fg-muted">In flight</dt><dd class="tabular-nums">{formatAmount(BigInt(r.c.in_flight))} USDC</dd></div>
-                <div><dt class="text-xs text-zen-fg-muted">Storage reserved</dt><dd class="tabular-nums">{formatNear(r.c.storage_reserved)} NEAR</dd></div>
-                <div class="col-span-2 sm:col-span-4"><dt class="text-xs text-zen-fg-muted">Deadline</dt><dd>{fmtDate(r.c.deadline_ns)}</dd></div>
+              <p class="text-sm"><span class="tabular-nums">{formatAmount(claimed)}</span> <span class="text-zen-fg-muted">of {formatAmount(total)} USDC claimed</span></p>
+            </div>
+            <details class="group text-xs text-zen-fg-muted">
+              <summary class="inline-flex items-center gap-1.5 min-h-11 cursor-pointer list-none hover:text-zen-fg">Details <ChevronDown class="w-3.5 h-3.5 transition-transform group-open:rotate-180" aria-hidden="true" /></summary>
+              <dl class="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1">
+                <dt>Left in the campaign</dt><dd class="tabular-nums text-zen-fg">{formatAmount(BigInt(r.c.balance))} USDC</dd>
+                <dt>Being paid now</dt><dd class="tabular-nums text-zen-fg">{formatAmount(BigInt(r.c.in_flight))} USDC</dd>
+                <dt>Storage reserved</dt><dd class="tabular-nums text-zen-fg">{formatNear(r.c.storage_reserved)} NEAR</dd>
+                <dt>Claim deadline</dt><dd class="text-zen-fg">{deadlineText(ms, now)}</dd>
               </dl>
-              <div class="flex flex-wrap items-center gap-3">
-                <ZenButton variant={can.ok ? 'primary' : 'secondary'} size="sm" class="rounded-full min-h-11" disabled={!can.ok || !!busy} onclick={() => run(`Reclaiming campaign ${r.id}…`, reclaimTx(account!, contract!, r.id), r.id)}>Reclaim</ZenButton>
-                {#if !can.ok}<p class="text-xs text-zen-fg-muted">{can.reason}</p>{/if}
-              </div>
-            </section>
-          </ZenCard>
-        {/each}
-      </div>
-    {/if}
-  {/if}
+            </details>
+            <div class="flex flex-col items-start gap-2">
+              {#if can.ok}
+                <ZenButton variant="primary" size="sm" class="rounded-full min-h-11" disabled={!!busy} onclick={() => run('Reclaiming…', reclaimTx(account!, contract!, r.id), r.id, r.id)}>Reclaim</ZenButton>
+              {:else}
+                <p class="text-xs text-zen-fg-muted">{left ? 'You can reclaim what is left once claims close.' : can.reason}</p>
+              {/if}
+              {@render outcome(r.id)}
+            </div>
+          </section>
+        </ZenCard>
+      {/each}
+    </div>
 
-  <div class="mt-6 flex flex-col gap-2 text-sm">
-    {#if busy}<p role="status">{busy}</p>{/if}
-    {#if note}<p role="status" class="break-all">{note}</p>{/if}
-    {#if error}<p class="text-zen-error" role="alert">{error}</p>{/if}
-  </div>
+    <!-- Free storage pre-pay: a footer line, not the page's first block -->
+    <div class="mt-8 pt-6 border-t-[0.5px] border-zen-border-subtle flex flex-col items-start gap-2">
+      <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+        <span><span class="tabular-nums">{formatNear(freePrepay)} NEAR</span> <span class="text-zen-fg-muted">free storage pre-pay</span></span>
+        {#if BigInt(freePrepay) > 0n}
+          <ZenButton variant="ghost" size="sm" class="rounded-full min-h-11 !text-zen-fg" disabled={!!busy} onclick={() => run('Withdrawing…', withdrawTx(account!, contract!), 'prepay')}>Withdraw</ZenButton>
+        {/if}
+      </div>
+      {@render outcome('prepay')}
+    </div>
+  {/if}
 </div>
