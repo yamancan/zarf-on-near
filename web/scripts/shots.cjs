@@ -126,9 +126,9 @@ const chainClaim = async (p, o = {}) => {
   if (o.stopAt === 'signin') { await p.waitForTimeout(o.wait ?? 1200); return { full: true }; }
   await p.waitForURL(/receipt/); await p.waitForTimeout(o.wait ?? 3000); return { full: true };
 };
-// Receipt page only: run timers 1000x faster (the 30-minute bridge watch) or move the clock (quote expiry).
-const fastTimers = (ctx) => ctx.addInitScript(() => { if (!location.pathname.endsWith('/receipt')) return; const st = window.setTimeout; window.setTimeout = (f, ms, ...a) => st(f, (ms || 0) / 1000, ...a); });
-const lateClock = (ctx) => ctx.addInitScript(() => { if (!location.pathname.endsWith('/receipt')) return; const n = Date.now.bind(Date); Date.now = () => n() + 3_600_000; });
+// Receipt page only (it is reached from /auth/google by client navigation, so both paths): run timers 1000x faster (the 30-minute bridge watch) or move the clock (quote expiry).
+const fastTimers = (ctx) => ctx.addInitScript(() => { if (!/\/receipt$|\/auth\/google$/.test(location.pathname)) return; const st = window.setTimeout; window.setTimeout = (f, ms, ...a) => st(f, (ms || 0) / 1000, ...a); });
+const lateClock = (ctx) => ctx.addInitScript(() => { if (!/\/receipt$|\/auth\/google$/.test(location.pathname)) return; const n = Date.now.bind(Date); Date.now = () => n() + 3_600_000; });
 
 // MyNearWallet's popup: 'ok' posts the tx hash back, 'fail' posts a failure, 'hang' never answers.
 const walletPopup = (ctx, mode) => ctx.route('https://testnet.mynearwallet.com/**', (r) => r.fulfill({ contentType: 'text/html', body:
@@ -223,7 +223,7 @@ const S = {
   'term-claimed-paid': async (p) => { await nearClaim(p); await p.unrouteAll(); await rpc(p, { claimState: 'claimed' }); await p.goto(base + LINK); await p.waitForSelector('h1'); await p.waitForTimeout(500); return {}; },
   'receipt-quote-expired': async (p, ctx) => { await lateClock(ctx); return chainClaim(p, { wait: 1500 }); },
   'receipt-chain-failed': (p) => chainClaim(p, { final: 'FAILED' }),
-  'receipt-chain-stalled': async (p, ctx) => { await fastTimers(ctx); return chainClaim(p, { final: 'PROCESSING', wait: 4000 }); },
+  'receipt-chain-stalled': async (p, ctx) => { await fastTimers(ctx); return chainClaim(p, { final: 'PROCESSING', wait: 20000 }); },
   'receipt-chain-resumed': async (p) => { await chainClaim(p, { final: 'PROCESSING', wait: 2000 }); await p.reload(); await p.waitForSelector('h1'); await p.waitForTimeout(1500); return { full: true }; },
   'receipt-chain-checking': (p) => chainClaim(p, { verifierHang: true, wait: 1500 }),
   'receipt-chain-notclaimed': (p) => chainClaim(p, { verifierError: 'COMMITMENT_MISMATCH', wait: 1500 }),

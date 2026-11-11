@@ -186,6 +186,7 @@
         <h1 class="text-xl font-semibold tracking-tight">
           {#if step === 'checking'}Checking your claim…{:else if step === 'paying' || step === 'settling'}Sending your tokens…{:else if step === 'done'}{arrived ? `Arrived on ${payout.chainName}` : returned ? 'Not delivered' : `Sending to ${payout.chainName}…`}{:else if step === 'unsettled'}Still settling{:else}Not claimed{/if}
         </h1>
+        {#if step === 'done' || working || step === 'unsettled'}
         <Amount
           label={arrived ? 'You received' : returned ? 'Returned to the sender' : 'On its way'}
           value={twoDecimals(arrived && bridge?.amountOutFormatted ? bridge.amountOutFormatted : payout.amountOutFormatted)}
@@ -193,6 +194,7 @@
           struck={returned}
         />
         <p class="text-sm text-zen-fg-muted">to <span class="font-mono text-zen-fg" title={payout.recipient}>{middle(payout.recipient)}</span> on {payout.chainName}</p>
+        {/if}
         {#if step === 'done'}
           <!-- Two legs, one mark each: the NEAR claim, then the bridge payout -->
           <ol class="w-full flex flex-col gap-3 text-left text-sm border-y-[0.5px] border-zen-border-subtle py-4 my-1">
