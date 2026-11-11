@@ -2,7 +2,7 @@ import { httpRpc, stubCreator, testnetCreator, viewCall, type CampaignCreator } 
 import { handleFaucet } from './faucet';
 import type { KvLike } from './limits';
 import { parseNearKey } from './near';
-import { tryPage, tryScript } from './page';
+import { pageAsset, tryPage, tryScript } from './page';
 import { isTurnstileTestKey, verifyTurnstile } from './turnstile';
 
 export interface Env {
@@ -76,8 +76,10 @@ const json = (body: unknown, status: number) => Response.json(body, { status, he
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url), path = url.pathname;
-    if (req.method === 'GET' && (path === '/' || path === '/try')) return tryPage(env.TURNSTILE_SITE_KEY ?? '', env.CLAIM_HOST ?? '');
+    if (req.method === 'GET' && (path === '/' || path === '/try')) return tryPage(env.TURNSTILE_SITE_KEY ?? '', env.CLAIM_HOST ?? '', env.AMOUNT ?? '');
     if (req.method === 'GET' && path === '/try.js') return tryScript();
+    const asset = req.method === 'GET' ? pageAsset(path) : null;
+    if (asset) return asset;
     if (req.method === 'GET' && path === '/health') {
       // Public: chain ids and balances only, never a secret. 503 when the chain read fails.
       if (env.CREATOR !== 'testnet') return json({ ok: true, stub: true }, 200);
