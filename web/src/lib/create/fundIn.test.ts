@@ -184,9 +184,17 @@ describe('each status on the funding screen', () => {
     const m = new Map<string, string>();
     const store = { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k) } as Storage;
     const f = { chainKey: 'base', depositAddress: dep, refundTo: REFUND, amountIn: '1', amountInFormatted: '0.000001', amountOut: '1', deadline: 'x' };
-    archiveFunding('c', 'a.near', f, store);
-    expect(earlierFundings('c', 'a.near', store)).toEqual([f]);
+    expect(archiveFunding('c', 'a.near', f, store)).toBe(true);
+    expect(archiveFunding('c', 'a.near', { ...f, depositAddress: dep.toLowerCase() }, store)).toBe(true); // the same address again
+    expect(earlierFundings('c', 'a.near', store)).toHaveLength(1);
     expect(earlierFundings('c', 'b.near', store)).toEqual([]);
+    m.set('zarf-near:funding-earlier:c/a.near', JSON.stringify([f, f])); // two tabs wrote it twice
+    expect(earlierFundings('c', 'a.near', store)).toEqual([f]);
+  });
+  it('a failed archive write says so: the active record is never dropped without it', () => {
+    const full = { getItem: () => null, setItem: () => { throw new Error('QuotaExceededError'); }, removeItem: () => {} } as unknown as Storage;
+    const f = { chainKey: 'base', depositAddress: dep, refundTo: REFUND, amountIn: '1', amountInFormatted: '0.000001', amountOut: '1', deadline: 'x' };
+    expect(archiveFunding('c', 'a.near', f, full)).toBe(false);
   });
   it('the poller stops at a final status', async () => {
     const seq: StatusView[] = [{ status: 'PENDING_DEPOSIT' }, { status: 'PROCESSING' }, { status: 'SUCCESS' }];

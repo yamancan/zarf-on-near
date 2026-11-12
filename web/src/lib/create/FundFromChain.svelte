@@ -116,7 +116,11 @@
     if (!canStartOver) return;
     poller++;
     if (saved && unresolved(status?.status)) {
-      archiveFunding(contract, account, saved); // expired and unpaid as far as 1Click knows: kept as a reference
+      // expired and unpaid as far as 1Click knows: kept as a reference, or the active record stays
+      if (!archiveFunding(contract, account, saved)) {
+        error = "Couldn't keep this address for later in this browser, so it stays here. Note it down, then try again.";
+        return;
+      }
       earlier = earlierFundings(contract, account);
     }
     saveFunding(contract, account, null);
@@ -202,6 +206,7 @@
           <ZenButton variant="ghost" size="sm" onclick={() => saved && follow(saved)}>Check Again</ZenButton>
         </div>
       {/if}
+      {#if error && saved}<Note tone="error">{error}</Note>{/if}
       {#if canStartOver}
         <div class="flex flex-wrap gap-2">
           <ZenButton variant="ghost" size="sm" onclick={startOver}>{line?.done ? 'Done' : 'Start Over'}</ZenButton>
@@ -212,7 +217,7 @@
   {#if earlier.length && !saved}
     <div class="flex flex-col gap-1 text-xs text-zen-fg-subtle">
       {#each earlier as e (e.depositAddress)}
-        <p class="break-all">Earlier address, expired: <span class="font-mono">{e.depositAddress}</span>. If you sent to it, 1Click refunds to <span class="font-mono">{e.refundTo}</span>; give 1Click support this address.</p>
+        <p class="break-all">Earlier address, expired: <span class="font-mono">{e.depositAddress}</span>. If you sent USDC to it, the outcome is unknown here: ask 1Click support with this address. Refund address on record: <span class="font-mono">{e.refundTo}</span>.</p>
       {/each}
     </div>
   {/if}

@@ -226,20 +226,31 @@ export function saveFunding(contract: string, account: string, f: SavedFunding |
 
 const earlierKey = (contract: string, account: string) => `zarf-near:funding-earlier:${contract}/${account}`;
 
-/** Keeps an unresolved funding's address and refund address when the screen starts over (the last 5). */
-export function archiveFunding(contract: string, account: string, f: SavedFunding, store?: Storage): void {
+/**
+ * Keeps an unresolved funding's address and refund address when the screen starts over (the last 5, one per
+ * address). false when it could not be written: the caller then keeps the active record.
+ */
+export function archiveFunding(contract: string, account: string, f: SavedFunding, store?: Storage): boolean {
   try {
     const s = store ?? localStorage;
-    s.setItem(earlierKey(contract, account), JSON.stringify([f, ...earlierFundings(contract, account, s)].slice(0, 5)));
+    const rest = earlierFundings(contract, account, s).filter((e) => e.depositAddress.toLowerCase() !== f.depositAddress.toLowerCase());
+    s.setItem(earlierKey(contract, account), JSON.stringify([f, ...rest].slice(0, 5)));
+    return earlierFundings(contract, account, s).some((e) => e.depositAddress === f.depositAddress);
   } catch {
-    // best effort, as saveFunding
+    return false;
   }
 }
 
 export function earlierFundings(contract: string, account: string, store?: Storage): SavedFunding[] {
   try {
     const list = JSON.parse((store ?? localStorage).getItem(earlierKey(contract, account)) ?? '[]');
-    return Array.isArray(list) ? list.filter((f: SavedFunding) => f && !evmAddressError(f.depositAddress) && !evmAddressError(f.refundTo)) : [];
+    if (!Array.isArray(list)) return [];
+    const seen = new Set<string>(); // one per address, whatever another tab wrote
+    return list.filter((f: SavedFunding) => {
+      if (!f || evmAddressError(f.depositAddress) || evmAddressError(f.refundTo) || seen.has(f.depositAddress.toLowerCase())) return false;
+      seen.add(f.depositAddress.toLowerCase());
+      return true;
+    });
   } catch {
     return [];
   }
