@@ -64,6 +64,15 @@ describe('verifier and relayer', () => {
     expect(isUnmapped(new ClaimError('E999'))).toBe(true);
     expect(isUnmapped(new ClaimError('COMMITMENT_MISMATCH'))).toBe(false);
   });
+  it.each([
+    ['DESTINATION_CREDITS_NOBODY', 'That account cannot receive USDC this way. Use your own NEAR account.'],
+    ['EMAIL_NOT_GOOGLE_AUTHORITATIVE', 'This address cannot prove itself with Google. Ask the sender to use your Gmail or work Google address.'],
+    ['INTENTS_QUOTE_UNSIGNED', 'The exchange quote could not be checked. Try again or take it on NEAR.'],
+    ['INTENTS_BAD_SIGNATURE', 'The exchange quote could not be checked. Try again or take it on NEAR.'],
+  ])('T-006 server code %s gets its own line', (code, line) => {
+    expect(describeError(new ClaimError(code))).toBe(line);
+    expect(isUnmapped(new ClaimError(code))).toBe(false);
+  });
   it('never puts a machine code in the sentence (critic P1-7)', () => {
     for (const c of ['HTTP_503', 'RPC_ERROR', 'E114_CLAIM_EXPIRED', 'RELAYER_NO_TX', 'BAD_AUDIENCE', 'INTENTS_WRONG_RECIPIENT', 'UNKNOWN_KID']) {
       expect(describeError(new ClaimError(c))).not.toMatch(/[A-Z]{2,}_[A-Z0-9]/);
