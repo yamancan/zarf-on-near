@@ -59,19 +59,20 @@
 </script>
 
 <div class="space-y-4">
-  <div class="flex flex-wrap items-center gap-2">
-    <ZenButton variant="ghost" size="sm" onclick={onAddRow} {disabled}><Plus class="mr-1 h-4 w-4" aria-hidden="true" /> Add Row</ZenButton>
-    <ZenButton variant="ghost" size="sm" onclick={() => (open = !open)} aria-expanded={open} aria-controls="paste-list" {disabled}><ClipboardPaste class="mr-1 h-4 w-4" aria-hidden="true" /> Paste List</ZenButton>
-    <ZenButton variant="ghost" size="sm" onclick={() => fileInput?.click()} {disabled}><Upload class="mr-1 h-4 w-4" aria-hidden="true" /> Import CSV</ZenButton>
+  <!-- T-010 review minor 5: px-3 keeps all five on one line in the 576 px form column -->
+  <div class="flex flex-wrap items-center gap-1">
+    <ZenButton variant="ghost" size="sm" class="!px-3" onclick={onAddRow} {disabled}><Plus class="mr-1 h-4 w-4" aria-hidden="true" /> Add Row</ZenButton>
+    <ZenButton variant="ghost" size="sm" class="!px-3" onclick={() => (open = !open)} aria-expanded={open} aria-controls="paste-list" {disabled}><ClipboardPaste class="mr-1 h-4 w-4" aria-hidden="true" /> Paste List</ZenButton>
+    <ZenButton variant="ghost" size="sm" class="!px-3" onclick={() => fileInput?.click()} {disabled}><Upload class="mr-1 h-4 w-4" aria-hidden="true" /> Import CSV</ZenButton>
     <input bind:this={fileInput} type="file" accept=".csv,.tsv,.txt,text/csv,text/plain" class="hidden" onchange={onFile} tabindex="-1" aria-hidden="true" />
     <label id="backup" class="inline-flex">
-      <span class="inline-flex cursor-pointer items-center rounded-full px-4 py-2 text-xs font-medium text-zen-fg-muted transition-colors hover:bg-zen-fg/5 hover:text-zen-fg has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-zen-fg {backupDisabled ? 'pointer-events-none opacity-50' : ''}">
+      <span class="inline-flex cursor-pointer items-center rounded-full px-3 py-2 text-xs font-medium text-zen-fg-muted transition-colors hover:bg-zen-fg/5 hover:text-zen-fg has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-zen-fg {backupDisabled ? 'pointer-events-none opacity-50' : ''}">
         <FolderOpen class="mr-1 h-4 w-4" aria-hidden="true" /> Open Backup
         <input class="sr-only" type="file" accept="application/json,.json" disabled={backupDisabled} onchange={(e) => onOpenBackup(e.currentTarget.files?.[0])} />
       </span>
     </label>
     {#if hasRows}
-      <ZenButton variant="ghost" size="sm" onclick={onClear} {disabled}><X class="mr-1 h-4 w-4" aria-hidden="true" /> Clear</ZenButton>
+      <ZenButton variant="ghost" size="sm" class="!px-3" onclick={onClear} {disabled}><X class="mr-1 h-4 w-4" aria-hidden="true" /> Clear</ZenButton>
     {/if}
   </div>
 
@@ -98,7 +99,7 @@
       </label>
       <div class="flex items-center gap-2">
         <ZenButton variant="primary" size="sm" onclick={apply} disabled={!text.trim()}>Add to List</ZenButton>
-        <ZenButton variant="ghost" size="sm" onclick={() => (open = false)}>Cancel</ZenButton>
+        <ZenButton variant="ghost" size="sm" class="!px-3" onclick={() => (open = false)}>Cancel</ZenButton>
       </div>
     </div>
   {/if}

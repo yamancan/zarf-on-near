@@ -930,7 +930,7 @@
             {#if unsure.length}<p class="text-xs text-zen-fg-subtle">{unsure.length === 1 ? 'This person must be able to sign in to Google with this exact address, or the share waits until the deadline.' : 'Each person marked must be able to sign in to Google with that exact address, or their share waits until the deadline.'}</p>{/if}
             {#if capError}<Note tone="error">{capError}</Note>{/if}
           </div>
-          {@render actions(false, 'Continue', recipientsOk, () => (uiStep = 1), recipientsOk ? '' : capError ? 'Up to 100 USDC per send.' : parsed.rejected.length ? `Fix row ${parsed.rejected[0].line} first.` : '')}
+          {@render actions(false, 'Continue', recipientsOk, () => (uiStep = 1), recipientsOk ? '' : capError ? 'Up to 100 USDC per send.' : parsed.rejected.length ? `Fix row ${parsed.rejected[0].line} first.` : 'Add a recipient first.' /* T-010 review minor 2 */)}
         {:else if step === 1}
           {@render stepHeader('Deadline', 'Until then, only your list can claim.')}
           <div class="flex flex-col gap-3">
