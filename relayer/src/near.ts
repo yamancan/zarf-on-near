@@ -113,3 +113,34 @@ export async function signTx(key: CryptoKey, tx: FunctionCallTx): Promise<{ sign
   const signature = new Uint8Array(await crypto.subtle.sign('Ed25519', key, digest));
   return { signed: concat(encoded, Uint8Array.of(0), signature), hash: base58Encode(digest) };
 }
+
+export interface TransferTx {
+  signerId: string;
+  publicKey: Uint8Array; // ed25519, 32 bytes
+  nonce: bigint;
+  receiverId: string;
+  blockHash: Uint8Array; // 32 bytes
+  deposit: bigint; // yoctoNEAR
+}
+
+/** borsh(Transaction) with one Transfer action. Only the starter-NEAR module (starter.ts) uses it, with its own key. */
+export const encodeTransferTx = (t: TransferTx): Uint8Array<ArrayBuffer> =>
+  concat(
+    str(t.signerId),
+    Uint8Array.of(0), // KeyType::ED25519
+    t.publicKey,
+    uintLe(t.nonce, 8),
+    str(t.receiverId),
+    t.blockHash,
+    uintLe(1n, 4), // one action
+    Uint8Array.of(3), // Action::Transfer
+    uintLe(t.deposit, 16),
+  );
+
+/** Signs sha256(borsh(transfer tx)); returns borsh(SignedTransaction) and the transaction hash. */
+export async function signTransferTx(key: CryptoKey, tx: TransferTx): Promise<{ signed: Uint8Array; hash: string }> {
+  const encoded = encodeTransferTx(tx);
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', encoded));
+  const signature = new Uint8Array(await crypto.subtle.sign('Ed25519', key, digest));
+  return { signed: concat(encoded, Uint8Array.of(0), signature), hash: base58Encode(digest) };
+}
