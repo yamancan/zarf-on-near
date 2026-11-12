@@ -5,7 +5,7 @@
   import { AlertCircle, CheckCircle, Info, Loader2 } from 'lucide-svelte';
   let { tone = 'info', center = false, children, class: cls = '' }: { tone?: 'error' | 'success' | 'info' | 'pending'; center?: boolean; children: Snippet; class?: string } = $props();
   const Icon = $derived({ error: AlertCircle, success: CheckCircle, info: Info, pending: Loader2 }[tone]);
-  const color = $derived(tone === 'error' ? 'text-zen-error-content' : tone === 'success' ? 'text-zen-success-content' : 'text-zen-fg-muted');
+  const color = $derived(tone === 'error' ? 'text-zen-error' : tone === 'success' ? 'text-zen-success' : 'text-zen-fg-muted');
 </script>
 
 {#if center}

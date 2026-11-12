@@ -34,7 +34,8 @@
       "vars": {
         "PUBLIC_GOOGLE_CLIENT_ID": "581739717233-vlkg0umlung1r9h7m19vhcd1hccfvef2.apps.googleusercontent.com",
         "PUBLIC_IMPLICIT_ACCOUNTS": "",
-        "PUBLIC_ETH_ACCOUNTS": "",
+        // T-016: a 0x account received a payout and spent it with its Ethereum key on testnet
+        "PUBLIC_ETH_ACCOUNTS": "on",
         "PUBLIC_VERIFIER_URL": "https://zarf-near-verifier-testnet.sparkling-queen-5e77.workers.dev",
         "PUBLIC_RELAYER_URL": "https://zarf-near-relayer-testnet.sparkling-queen-5e77.workers.dev",
         "PUBLIC_RELAYER_ACCOUNT_ID": "zarf-near-relayer-1111.testnet",

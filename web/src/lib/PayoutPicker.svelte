@@ -7,6 +7,7 @@
   import { ChevronDown } from 'lucide-svelte';
   import { twoDecimals } from '$lib/claim';
   import Note from '$lib/Note.svelte';
+  import ZenButton from '$lib/zen/components/ZenButton.svelte';
   import ZenInput from '$lib/zen/components/ZenInput.svelte';
   import ZenSelect from '$lib/zen/components/ZenSelect.svelte';
   import {
@@ -98,60 +99,58 @@
       </li>
     {/each}
   </ul>
-  <Note tone="info">This is NEAR testnet, so the claim goes to a NEAR account. On mainnet it can be paid out on these chains through the NEAR Intents bridge.</Note>
 {:else if capError}
   <Note tone="error">{capError}</Note>
-  {#if onUseNear}<button type="button" class="self-start min-h-11 text-sm underline underline-offset-2 hover:text-zen-fg" onclick={onUseNear}>Use a NEAR account</button>{/if}
+  {#if onUseNear}<ZenButton variant="secondary" size="sm" class="self-start" onclick={onUseNear}>Use a NEAR Account</ZenButton>{/if}
 {:else if loadError}
   <Note tone="error">{loadError}</Note>
 {:else if !assets}
   <Note tone="pending">Loading chains…</Note>
 {:else}
-  <p class="text-xs text-zen-fg-muted">Very small payouts may be refused when the bridge's cost is above 2%. Claiming to a NEAR account has no such limit.</p>
-  <span id="chain-l" class="text-sm font-medium text-zen-fg">Chain</span>
+  <p class="text-xs text-zen-fg-subtle">Very small payouts may be refused when the bridge's cost is above 2%. Claiming to a NEAR account has no such limit.</p>
+  <span id="chain-l" class="block pl-1 text-xs font-bold uppercase tracking-widest text-zen-fg-subtle">Chain</span>
   <div id="chain" role="group" aria-labelledby="chain-l">
     <ZenSelect bind:value={key} options={assets.map((a) => ({ value: a.chain.key, label: `USDC on ${a.chain.name}` }))} aria-label="Chain" class="w-full [&>button]:w-full [&>button]:min-h-11 [&>button]:!border [&>button]:!border-[var(--zarf-control-border)]" />
   </div>
   {#if asset}
-    <label for="addr" class="text-sm font-medium text-zen-fg">Your {asset.chain.name} address</label>
     <ZenInput
       id="addr"
+      label="{asset.chain.name} Address"
       class="control-border font-mono"
       bind:value={address}
       placeholder={asset.chain.placeholder}
       autocomplete="off"
       autocapitalize="off"
       spellcheck={false}
-      aria-invalid={!!addressError}
-      aria-describedby="addr-note"
+      error={addressError}
+      hint="Your own wallet, not an exchange."
     />
-    <div id="addr-note" class="flex flex-col gap-2 pl-1">
+    <div id="addr-note" class="flex flex-col gap-2 pl-1" aria-live="polite">
       {#if addressError}
-        <Note tone="error">{addressError}</Note>
+        <!-- shown under the field -->
       {:else if quoting}
         <Note tone="pending">Getting a quote…</Note>
       {:else if quoteError}
         <Note tone="error">{quoteError}</Note>
-        {#if tooSmall && onUseNear}<button type="button" class="self-start min-h-11 text-sm underline underline-offset-2 hover:text-zen-fg" onclick={onUseNear}>Use a NEAR account</button>{/if}
+        {#if tooSmall && onUseNear}<ZenButton variant="secondary" size="sm" class="self-start" onclick={onUseNear}>Use a NEAR Account</ZenButton>{/if}
       {:else if quote}
-        <p class="quote text-sm text-zen-fg" role="status">
-          <span class="font-semibold tabular-nums">≈ {twoDecimals(quote.q.amountOutFormatted)} USDC</span> on {asset.chain.name}
-          <span class="text-zen-fg-muted">· about {quote.q.timeEstimate} s</span>
+        <p class="quote text-sm text-zen-fg tabular-nums" role="status">
+          <span class="font-semibold">≈ {twoDecimals(quote.q.amountOutFormatted)} USDC</span>
+          <span class="text-zen-fg-subtle">· about {quote.q.timeEstimate} s</span>
         </p>
       {/if}
-      <details class="group text-xs text-zen-fg-muted">
-        <summary class="inline-flex items-center gap-1.5 min-h-11 cursor-pointer list-none hover:text-zen-fg">
+      <details class="group text-xs text-zen-fg-subtle">
+        <summary class="inline-flex items-center gap-1.5 py-1 cursor-pointer list-none hover:text-zen-fg">
           Details <ChevronDown class="w-3.5 h-3.5 transition-transform group-open:rotate-180" aria-hidden="true" />
         </summary>
         <div class="flex flex-col gap-2 leading-relaxed">
           {#if quote}
-            <p>
+            <p class="text-xs text-zen-fg-subtle">
               About {quote.q.amountOutFormatted} USDC, at least {fmt(quote.q.minAmountOut, asset.decimals)}. Cost
               {cost(quote.q, asset.decimals)} USDC. A fresh quote is taken when you sign in.
             </p>
           {/if}
-          <p>If the bridge does not complete the payout by its deadline, it refunds <span class="font-mono">{refundTo}</span> on NEAR (the sender), not this address.</p>
-          {#if asset.chain.note}<p>{asset.chain.note}</p>{/if}
+          <p class="text-xs text-zen-fg-subtle">If the bridge does not complete the payout by its deadline, it refunds <span class="font-mono">{refundTo}</span> on NEAR (the sender), not this address.</p>
         </div>
       </details>
     </div>

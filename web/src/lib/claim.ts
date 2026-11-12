@@ -11,6 +11,8 @@ export const isValidAccountId = (id: string): boolean => id.length >= 2 && id.le
 
 /** A NEAR implicit account: the hex of an ed25519 public key. It exists on chain only once NEAR is sent to it. */
 export const isImplicitAccount = (id: string): boolean => /^[0-9a-f]{64}$/.test(id);
+/** NEP-518 (MetaMask) id: exists on NEAR only once it has received NEAR, which deploys its wallet contract (T-016). */
+export const isEthAccount = (id: string): boolean => /^0x[0-9a-f]{40}$/.test(id);
 
 export type Destination =
   | { kind: 'empty' }
@@ -49,8 +51,18 @@ export type AccountCheck = { id: string; state: 'checking' | 'found' | 'missing'
 export const nearAccountReady = (dest: Destination, acct: AccountCheck, unfundedAck: boolean, confirmedFor: string): boolean =>
   (dest.kind === 'named' || dest.kind === 'implicit') &&
   acct?.id === dest.id &&
-  (acct.state === 'found' || (acct.state === 'missing' && dest.kind === 'implicit' && unfundedAck)) &&
+  (acct.state === 'found' || (acct.state === 'missing' && dest.kind === 'implicit' && !isEthAccount(dest.id) && unfundedAck)) &&
   confirmedFor === dest.id;
+
+/** The line under the field when the typed account is not on chain yet. A new 0x id can't spend until it holds NEAR. */
+export const missingAccountLine = (dest: Destination): string =>
+  dest.kind !== 'named' && dest.kind !== 'implicit'
+    ? ''
+    : dest.kind === 'named'
+      ? 'No such account. Check the spelling.'
+      : isEthAccount(dest.id)
+        ? 'This MetaMask address is new on NEAR: send it a little test NEAR first, then claim.'
+        : 'Not on NEAR yet. Check every character.';
 
 export const isCampaignId = (s: string): boolean => /^(0|[1-9]\d{0,19})$/.test(s) && BigInt(s) < 1n << 64n;
 export const isHex32 = (s: string): boolean => /^[0-9a-f]{64}$/.test(s);
@@ -147,6 +159,33 @@ export interface PayoutAttempt {
   requestDeadline: string; // ISO: the app refuses to start the claim after it
   amountOutFormatted: string;
 }
+
+/**
+ * The NEAR account typed before a failed sign-in (another Google account, expired), so "Back to Claim" keeps it.
+ * A cross-chain attempt's destination is a 1Click deposit address, never something the recipient typed.
+ */
+export const typedBefore = (a: Attempt | null, campaign: string, commitment: string): string =>
+  a && a.campaign === campaign && a.commitment === commitment && !a.intents ? a.destination : '';
+
+/** A sign-in for this link started in this tab (the claim page saved an attempt id): a reload mid-claim, not "nothing yet". */
+export const claimStartedHere = (a: Attempt | null, campaign: string, commitment: string): boolean =>
+  !!a && a.campaign === campaign && a.commitment === commitment && !!a.attemptId;
+
+/** Claimed on chain, and this browser has no record of it: never implies theft (red-team UX #3). */
+export const CLAIMED_NO_RECORD = 'This link was claimed. If you just tried, check your wallet. If not, contact the sender.';
+/** No secret part in the address: the usual cause is "Open in browser" from a chat app, which drops it (#4). */
+export const INCOMPLETE_LINE = 'Part is missing. Opened it from another app? Open the link from your message in Safari or Chrome.';
+/** While a claim runs, leaving asks first: the sign-in lives in this tab only (#3). Returns the remover. */
+export function holdPage(target: EventTarget): () => void {
+  const ask = (e: Event) => {
+    e.preventDefault();
+    (e as BeforeUnloadEvent).returnValue = ''; // older browsers show the prompt only with this set
+  };
+  target.addEventListener('beforeunload', ask);
+  return () => target.removeEventListener('beforeunload', ask);
+}
+/** The receipt's button opens an explorer, not a wallet (#10). */
+export const EXPLORER_LABEL = 'View on Explorer';
 
 const KEY = 'zarf-near:attempt';
 export const saveAttempt = (a: Attempt, store: Storage = sessionStorage) => store.setItem(KEY, JSON.stringify(a));

@@ -5,7 +5,7 @@
   import { onMount } from 'svelte';
   import { env } from '$env/dynamic/public';
   import { AlertTriangle, ArrowUpRight, Check, Clock, Undo2 } from 'lucide-svelte';
-  import { claimedAt, middle, shownAmount, type Receipt } from '$lib/claim';
+  import { CLAIMED_NO_RECORD, claimedAt, middle, shownAmount, type Receipt } from '$lib/claim';
   import { needsRecheck, nextStep, notReturnedYet, recheckReceipt } from '$lib/intents';
   import BridgeDetails from '$lib/BridgeDetails.svelte';
   import { formatAmount } from '$lib/create/recipients';
@@ -22,7 +22,7 @@
   const kind = $derived(!rec ? 'unknown' : rec.chainName ? (rec.bridge ?? 'in-transit') : 'paid');
   const shown = $derived(shownAmount(rec ?? {}, formatAmount(BigInt(amount)), UNIT));
   const heading = $derived(
-    title ?? (kind === 'paid' ? (rec?.chainName ? `Arrived on ${rec.chainName}` : 'Arrived') : kind === 'in-transit' ? `On its way to ${rec?.chainName}` : kind === 'failed' ? 'Payout failed' : 'Not delivered'),
+    title ?? (kind === 'paid' ? (rec?.chainName ? `Arrived on ${rec.chainName}` : 'Arrived') : kind === 'in-transit' ? `On Its Way to ${rec?.chainName}` : kind === 'failed' ? 'Payout Failed' : 'Not Delivered'),
   );
 
   onMount(() => {
@@ -52,13 +52,13 @@
 {:else}<Medallion icon={Check} tone="muted" />{/if}
 <h1 class="text-xl font-semibold tracking-tight">{heading}</h1>
 <Amount
-  label={kind === 'unknown' ? 'This link held' : kind === 'paid' ? 'Paid out' : kind === 'in-transit' ? 'On its way' : kind === 'refunded' ? 'Returned to the sender' : kind === 'refunding' ? 'Going back to the sender' : 'Not delivered'}
+  label={kind === 'unknown' ? 'This Link Held' : kind === 'paid' ? 'Paid Out' : kind === 'in-transit' ? 'On Its Way' : kind === 'refunded' ? 'Returned to the Sender' : kind === 'refunding' ? 'Going Back to the Sender' : 'Not Delivered'}
   value={shown.value}
   unit={shown.unit}
   struck={kind === 'refunded'}
 />
 {#if !rec}
-  <p class="text-sm text-zen-fg-muted max-w-xs">If that was not you, contact the sender.</p>
+  <p class="text-sm text-zen-fg-muted max-w-xs">{CLAIMED_NO_RECORD}</p>
 {:else}
   <p class="text-sm text-zen-fg-muted max-w-xs" role="status">
     {#if kind === 'paid'}
@@ -81,8 +81,8 @@
   {#if !rec.txHash}
     <!-- the relayer's answer was lost: the chain says claimed, but this browser never got the hash -->
   {:else if env.PUBLIC_EXPLORER_TX_URL}
-    <ZenButton href="{env.PUBLIC_EXPLORER_TX_URL}{rec.txHash}" target="_blank" rel="noopener noreferrer" variant="secondary" class="rounded-full min-h-11">
-      View the transaction
+    <ZenButton href="{env.PUBLIC_EXPLORER_TX_URL}{rec.txHash}" target="_blank" rel="noopener noreferrer" variant="secondary">
+      View Transaction
       {#snippet iconRight()}<ArrowUpRight class="w-3.5 h-3.5" />{/snippet}
     </ZenButton>
   {:else}

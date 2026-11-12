@@ -89,7 +89,7 @@ export async function submitClaim(relayerUrl: string | undefined, args: ClaimArg
 }
 
 const MESSAGES: Record<string, string> = {
-  COMMITMENT_MISMATCH: 'This link was sent to a different Google account. Sign in with exactly the address it was sent to: Gmail dots and +aliases count as a different address here.',
+  COMMITMENT_MISMATCH: 'This link was sent to a different Google account. Sign in with exactly that address (Gmail dots and +aliases count). Already on the right one? The sender may have typed it differently: ask them to check the spelling and send a new link. This one goes back to them after the deadline.',
   E125_CAMPAIGN_ENDED: 'This campaign has ended. The sender can take back what was not claimed.',
   E110_UNKNOWN_CAMPAIGN: 'This campaign does not exist.',
   E102_INVALID_MERKLE_PROOF: 'This claim is not in the campaign list.',
@@ -109,6 +109,11 @@ const MESSAGES: Record<string, string> = {
   E128_INSUFFICIENT_STORAGE: "This campaign's storage reserve on NEAR has run out, so the claim can't be paid yet. Ask the sender to top it up (fund_campaign_storage); your claim stays open.",
   DESTINATION_IS_CONTRACT: 'That account is the Zarf contract itself; USDC sent there could never be taken out. Choose your own account.',
   DESTINATION_IS_TOKEN: 'That account is the USDC token contract; USDC sent there would be lost. Choose your own account.',
+  // T-006 server refusals
+  DESTINATION_CREDITS_NOBODY: 'That account cannot receive USDC this way. Use your own NEAR account.',
+  EMAIL_NOT_GOOGLE_AUTHORITATIVE: 'This address cannot prove itself with Google. Ask the sender to use your Gmail or work Google address.',
+  INTENTS_QUOTE_UNSIGNED: 'The exchange quote could not be checked. Try again or take it on NEAR.',
+  INTENTS_BAD_SIGNATURE: 'The exchange quote could not be checked. Try again or take it on NEAR.',
   E115_TOKEN_TRANSFER_FAILED: 'The transfer failed and your claim is open again. Open your claim link to try again.',
   INTENTS_QUOTE_EXPIRES_FIRST: 'Your cross-chain quote expired. Open your claim link to get a new one and sign in again.',
   INTENTS_NOT_PENDING: 'This cross-chain quote was already used. Open your claim link to get a new one.',
@@ -139,9 +144,9 @@ export function describeError(e: unknown): string {
  * claimed is not "Not claimed", and a claim another tab is paying is not a failure. `muted`: no red.
  */
 export function failureHeading(code: string): { title: string; muted: boolean } {
-  if (code === 'E105_ALREADY_CLAIMED') return { title: 'Already claimed', muted: true };
-  if (code === 'E123_CLAIM_PENDING') return { title: 'Already being paid', muted: true };
-  return { title: 'Not claimed', muted: false };
+  if (code === 'E105_ALREADY_CLAIMED') return { title: 'Already Claimed', muted: true };
+  if (code === 'E123_CLAIM_PENDING') return { title: 'Already Being Paid', muted: true };
+  return { title: 'Not Claimed', muted: false };
 }
 
 /** True when describeError fell back to a generic sentence, so the code is worth showing as a detail. */

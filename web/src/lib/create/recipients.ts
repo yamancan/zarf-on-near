@@ -38,13 +38,13 @@ export interface Rejected {
 }
 
 // RFC 5322 dot-atom addr-spec, lowercase (checked after canonicalising): no wrappers, no spaces.
-const ADDR_SPEC = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9-]+(\.[a-z0-9-]+)+$/;
+export const ADDR_SPEC = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9-]+(\.[a-z0-9-]+)+$/;
 /** One pair of surrounding double quotes, as spreadsheets export a cell. */
 const unquote = (cell: string) => {
   const t = cell.replace(/^[ \t\r]+|[ \t\r]+$/g, '');
   return t.length >= 2 && t.startsWith('"') && t.endsWith('"') ? t.slice(1, -1) : cell;
 };
-const MAX_LEAVES = 1 << 20; // proof.len() <= 20
+export const MAX_LEAVES = 1 << 20; // proof.len() <= 20
 
 /**
  * One recipient per line: `email,amount` (comma, semicolon or tab). A first line naming the columns is skipped.

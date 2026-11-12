@@ -109,8 +109,9 @@ Read this before using it with real money.
   address.
 - **The sender's wallet code comes from the wallets.** The send pages connect through NEAR Connect with a
   pinned list of wallets (Meteor, Intear, Nightly; HOT on mainnet). Each wallet's code runs in a sandboxed
-  iframe that cannot read the page. The code from GitHub is pinned to a commit; Intear's is served by Intear
-  and not pinned. A changed wallet script could ask the wallet to sign a different transaction, so the
+  iframe that cannot read the page. The code from GitHub is pinned to a commit; Intear serves its own, which
+  is pinned by SHA-256 (`integrity` in wallets.json, checked by web/patches/@hot-labs__near-connect@0.12.0.patch):
+  when Intear ships a new file, Intear stops opening until someone reads it and updates the hash. A changed wallet script could ask the wallet to sign a different transaction, so the
   wallet's own approval screen, which shows the receiver and amount, is the last check before signing. The
   claim page uses the same list only to read the recipient's account name ("Use my wallet"), never to sign,
   and the recipient confirms that name before Google sign-in. With 0x accounts switched on there it also

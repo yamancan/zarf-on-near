@@ -2,7 +2,7 @@
 // selector: it shows a wallet picker and runs each wallet's code in a sandboxed iframe. MyNearWallet stopped
 // accepting app connections in Nov 2026, so it is excluded. Loaded only by /create, /campaigns and the claim form.
 
-import type { Tx } from './funding';
+import { AccountChanged, type Tx } from './funding';
 // Pinned copy of NEAR Connect's manifest (hot-dao/near-selector repository/manifest.json, v1.1.0, 12 Nov 2026),
 // cut to the wallets we offer: no runtime manifest fetch, and no wallet appears that we have not looked at.
 import manifest from './wallets.json';
@@ -27,6 +27,15 @@ export const walletRequest = (txs: Tx[]) => ({
     return { receiverId: t.receiverId, actions: t.actions };
   }),
 });
+
+/**
+ * NEAR Connect re-reads the selected wallet on every call, so another tab can switch it under this one
+ * (T-012 finding 2). Refuse before signing unless the wallet about to sign holds the request's signer.
+ */
+export function assertSigner(accounts: readonly { accountId: string }[], txs: Tx[]): void {
+  const signer = txs[0]?.signerId;
+  if (!signer || !accounts.some((a) => a.accountId === signer)) throw new AccountChanged(signer ?? '');
+}
 
 export async function nearConnectWallet(networkId: string, rpcUrl: string, { ethereum = false } = {}): Promise<SenderWallet> {
   const { NearConnector } = await import('@hot-labs/near-connect');
@@ -61,6 +70,7 @@ export async function nearConnectWallet(networkId: string, rpcUrl: string, { eth
     },
     async send(txs) {
       const wallet = await connector.wallet();
+      assertSigner(await wallet.getAccounts(), txs);
       const outcomes = await wallet.signAndSendTransactions(walletRequest(txs));
       return (outcomes ?? []).map((o) => o.transaction.hash);
     },

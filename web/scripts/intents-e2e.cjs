@@ -66,7 +66,7 @@ async function run(final) {
     body: JSON.stringify({ status: 'paid', tx_hash: '6zgh2u9DqHHiXzdy9ouTP7oGky2T4nugqzqt9wJZwNFm' }) }));
 
   await p.goto(base + v.links.main[0]);
-  await p.getByText('Another chain', { exact: true }).click();
+  await p.getByText('Another Chain', { exact: true }).click();
   await p.waitForSelector('#chain');
   assert((await p.locator('#chain button').first().innerText()).trim() === 'USDC on Base', 'Base is first');
   await p.fill('#addr', RECIPIENT.slice(0, -1) + 'D'); // checksum typo
@@ -81,7 +81,7 @@ async function run(final) {
   assert(/does not complete the payout by its deadline, it refunds sender\.near on NEAR/.test(detail) && !/If it cannot be paid/.test(detail), 'refund copy is the documented one and names the sender');
   await p.locator('button.google').click();
   await p.waitForURL(/receipt/);
-  const title = { SUCCESS: 'Arrived on Base', REFUNDED: 'Not delivered', FAILED: 'Payout failed', REOPENED: 'Sending to Base' }[final];
+  const title = { SUCCESS: 'Arrived on Base', REFUNDED: 'Not Delivered', FAILED: 'Payout Failed', REOPENED: 'Sending to Base' }[final];
   await p.waitForFunction((t) => document.querySelector('h1')?.textContent?.includes(t), title, { timeout: 20000 });
   const text = await p.locator('main').innerText();
 
@@ -99,7 +99,7 @@ async function run(final) {
     assert(!/goes back|go back|will be returned|is refunded|refunds|Returned to|Went back|Keep this page/i.test(text), `a failed payout promises no refund: ${text}`);
     await p.getByText('Details', { exact: true }).click();
     const more = await p.locator('main details').last().innerText();
-    assert(more.includes(DEP) && /Not returned to sender\.near as of the last check/.test(more) && /Copy address/.test(more), `failed details: ${more}`);
+    assert(more.includes(DEP) && /Not returned to sender\.near as of the last check/.test(more) && /Copy Address/.test(more), `failed details: ${more}`);
   }
   // One amount: the link's 10 USDC until the bridge confirms, then what it paid.
   assert(final === 'SUCCESS' ? /9\.99\s*USDC/.test(text) : /10\s*(TEST )?USDC/.test(text), `receipt amount: ${text}`);

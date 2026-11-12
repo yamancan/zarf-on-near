@@ -2,12 +2,12 @@
   import PageHeader from '$lib/zen/components/PageHeader.svelte';
 </script>
 
-<svelte:head><title>Privacy and terms · Zarf</title></svelte:head>
+<svelte:head><title>Privacy and Terms · Zarf</title></svelte:head>
 
-<article class="prose-zarf w-full max-w-xl mx-auto px-6 py-8 md:py-12">
-<PageHeader title="Privacy and terms" description="Operated by Trion Labs. Contact: privacy@trionlabs.dev." />
+<article class="prose-zarf w-full max-w-xl mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-12">
+<PageHeader title="Privacy and Terms" description="Operated by Trion Labs. Contact: privacy@trionlabs.dev." />
 
-<h2>Your email</h2>
+<h2>Your Email</h2>
 <p>
   When you claim, you sign in with Google. Our verifier receives your email address from Google, checks that it
   matches your claim link, and signs the claim. It processes the email only at that moment and never stores it.
@@ -24,7 +24,7 @@
   scripts.
 </p>
 
-<h2>Cross-chain payouts</h2>
+<h2>Cross-Chain Payouts</h2>
 <p>
   If you choose USDC on another chain, your destination address and the amount go to NEAR Intents 1Click, a third-party
   swap service, which also sees your IP address. 1Click's status for the deposit address of your payout is public, so
@@ -32,10 +32,10 @@
   payout by its deadline, it refunds the sender on NEAR, not your address.
 </p>
 
-<h2>Testnet only</h2>
+<h2>Testnet Only</h2>
 <p>This service runs on NEAR testnet. The tokens are test funds with no value.</p>
 
-<h2>No warranty</h2>
+<h2>No Warranty</h2>
 <p>
   The service is provided "as is", without warranty of any kind. To the extent the law allows, we are not liable
   for any loss from using it.

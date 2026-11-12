@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { claimedAmount, formatNear, listCampaignIds, listCampaigns, mapLimit, reclaimable, reclaimOutcome, reclaimTx, RPC_CONCURRENCY, withdrawTx, type CampaignView, type View } from './campaigns';
+import { claimedAmount, formatNear, listCampaignIds, listCampaigns, mapLimit, reclaimable, reclaimOutcome, reclaimTx, RPC_CONCURRENCY, withdrawTx, type CampaignView, type View, sig3 } from './campaigns';
 
 const campaign = (o: Partial<CampaignView> = {}): CampaignView => ({
   sender: 'alice.testnet', token: 'usdc.testnet', amount: '30000000', merkle_root: 'ab'.repeat(32), deadline_ns: '2000000000000000',
@@ -107,5 +107,22 @@ describe('reclaimOutcome', () => {
   it('a panic is failed with its code', () => {
     const o = { receipts_outcome: [{ outcome: { executor_id: 'zarf-near.testnet', status: { Failure: { ActionError: { kind: { FunctionCallError: { ExecutionError: 'Smart contract panicked: E117_NOT_YET_RECLAIMABLE' } } } } } } }] };
     expect(reclaimOutcome(o, 'zarf-near.testnet', '12')).toEqual({ kind: 'failed', code: 'E117_NOT_YET_RECLAIMABLE' });
+  });
+});
+
+describe('sig3 (design spec G6f: 3 significant digits in view)', () => {
+  const y = (near: number) => BigInt(Math.round(near * 1e9)) * 10n ** 15n;
+  it('rounds to 3 significant digits', () => {
+    expect(sig3(y(4.99818))).toBe('5.00');
+    expect(sig3(y(0.01434))).toBe('0.0143');
+    expect(sig3(0n)).toBe('0');
+  });
+  it('a need rounds up, never down', () => {
+    expect(sig3(y(0.01434), true)).toBe('0.0144');
+    expect(sig3(y(0.02), true)).toBe('0.0200');
+  });
+  it('1000 and above is whole NEAR, also when rounding reaches it', () => {
+    expect(sig3(y(999.6), true)).toBe('1,000');
+    expect(sig3(y(12345.6))).toBe('12,346');
   });
 });

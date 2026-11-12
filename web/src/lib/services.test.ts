@@ -64,6 +64,22 @@ describe('verifier and relayer', () => {
     expect(isUnmapped(new ClaimError('E999'))).toBe(true);
     expect(isUnmapped(new ClaimError('COMMITMENT_MISMATCH'))).toBe(false);
   });
+  it('a different Google account: names the sender typo case and sends the recipient back to the sender (T-004)', () => {
+    const m = describeError(new ClaimError('COMMITMENT_MISMATCH'));
+    expect(m).toMatch(/different Google account/);
+    expect(m).toMatch(/sender may have typed it differently/);
+    expect(m).toMatch(/send a new link/);
+    expect(m).toMatch(/goes back to them after the deadline/);
+  });
+  it.each([
+    ['DESTINATION_CREDITS_NOBODY', 'That account cannot receive USDC this way. Use your own NEAR account.'],
+    ['EMAIL_NOT_GOOGLE_AUTHORITATIVE', 'This address cannot prove itself with Google. Ask the sender to use your Gmail or work Google address.'],
+    ['INTENTS_QUOTE_UNSIGNED', 'The exchange quote could not be checked. Try again or take it on NEAR.'],
+    ['INTENTS_BAD_SIGNATURE', 'The exchange quote could not be checked. Try again or take it on NEAR.'],
+  ])('T-006 server code %s gets its own line', (code, line) => {
+    expect(describeError(new ClaimError(code))).toBe(line);
+    expect(isUnmapped(new ClaimError(code))).toBe(false);
+  });
   it('never puts a machine code in the sentence (critic P1-7)', () => {
     for (const c of ['HTTP_503', 'RPC_ERROR', 'E114_CLAIM_EXPIRED', 'RELAYER_NO_TX', 'BAD_AUDIENCE', 'INTENTS_WRONG_RECIPIENT', 'UNKNOWN_KID']) {
       expect(describeError(new ClaimError(c))).not.toMatch(/[A-Z]{2,}_[A-Z0-9]/);
@@ -179,10 +195,10 @@ describe('describeCheckError (claim page, before any claim)', () => {
 });
 
 describe('failureHeading (receipt title agrees with its sentence, critic r3 M6)', () => {
-  it('maps already claimed and already being paid; everything else is Not claimed', () => {
-    expect(failureHeading('E105_ALREADY_CLAIMED')).toEqual({ title: 'Already claimed', muted: true });
-    expect(failureHeading('E123_CLAIM_PENDING')).toEqual({ title: 'Already being paid', muted: true });
-    for (const c of ['RPC_ERROR', 'E125_CAMPAIGN_ENDED', 'UNEXPECTED', '']) expect(failureHeading(c)).toEqual({ title: 'Not claimed', muted: false });
+  it('maps already claimed and already being paid; everything else is Not Claimed', () => {
+    expect(failureHeading('E105_ALREADY_CLAIMED')).toEqual({ title: 'Already Claimed', muted: true });
+    expect(failureHeading('E123_CLAIM_PENDING')).toEqual({ title: 'Already Being Paid', muted: true });
+    for (const c of ['RPC_ERROR', 'E125_CAMPAIGN_ENDED', 'UNEXPECTED', '']) expect(failureHeading(c)).toEqual({ title: 'Not Claimed', muted: false });
   });
 });
 
