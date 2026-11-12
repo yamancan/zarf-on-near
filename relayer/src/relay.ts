@@ -1,4 +1,4 @@
-import { claimPayload, isValidAccountId, unhex } from '../../verifier/src/claim';
+import { claimPayload, isUncreditedDestination, isValidAccountId, unhex } from '../../verifier/src/claim';
 import { base58Decode, signTx, type NearKey } from './near';
 import { RpcError, viewAccessKey, viewAccount, viewFunction, type Rpc } from './rpc';
 
@@ -42,6 +42,8 @@ export async function handleRelay(input: unknown, ip: string, d: RelayDeps): Pro
   const { campaign_id, commitment, amount, proof, destination, expires_at_ns, signer, signature } = b;
   const isU64 = (v: unknown): v is string => typeof v === 'string' && U64.test(v) && !(BigInt(v) >> 64n);
   const isHex32 = (v: unknown): v is string => typeof v === 'string' && HEX32.test(v);
+  // Same refusal as the verifier, before the format check: a plain ft_transfer there credits nobody.
+  if (typeof destination === 'string' && isUncreditedDestination(destination)) return refuse(400, 'DESTINATION_CREDITS_NOBODY');
   if (typeof destination !== 'string' || !isValidAccountId(destination)) return refuse(400, 'BAD_DESTINATION');
   // Paying the escrow itself would lock the USDC in it for good (second audit S1); a token is checked in submit().
   if (destination === d.contractId) return refuse(400, 'DESTINATION_IS_CONTRACT');
