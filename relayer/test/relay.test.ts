@@ -20,7 +20,8 @@ const event = (name: string, commitment = valid.commitment, executor = context.c
 const executed = (...receipts: unknown[]) => ({ status: { SuccessValue: '' }, receipts_outcome: receipts });
 
 type Sent = { signed: Uint8Array };
-function stubRpc(o: { permission?: unknown; nonce?: number; gas?: unknown; send?: (n: number) => unknown } = {}) {
+function stubRpc(o: { permission?: unknown; nonce?: number; gas?: unknown; state?: string; send?: (n: number) => unknown } = {}) {
+  const stateArgs: unknown[] = [];
   const sent: Sent[] = [];
   const finalities: string[] = [];
   let calls = 0;
@@ -35,6 +36,10 @@ function stubRpc(o: { permission?: unknown; nonce?: number; gas?: unknown; send?
       if (method === 'query' && params.method_name === 'get_config') {
         return { result: [...new TextEncoder().encode(JSON.stringify({ token_ids: ['usdc.testnet'] }))] } as T;
       }
+      if (method === 'query' && params.method_name === 'claim_state') {
+        stateArgs.push(JSON.parse(atob(params.args_base64)));
+        return { result: [...new TextEncoder().encode(JSON.stringify(o.state ?? 'unclaimed'))] } as T;
+      }
       if (method === 'query' && params.method_name === 'required_claim_gas') {
         return { result: [...new TextEncoder().encode(JSON.stringify('gas' in o ? o.gas : GAS))] } as T;
       }
@@ -47,7 +52,7 @@ function stubRpc(o: { permission?: unknown; nonce?: number; gas?: unknown; send?
       throw new Error(`unexpected rpc ${method}`);
     },
   };
-  return { rpc, sent, calls: () => calls, finalities };
+  return { rpc, sent, calls: () => calls, finalities, stateArgs };
 }
 const allow: RateLimiter = { limit: async () => ({ success: true }) };
 const deny: RateLimiter = { limit: async () => ({ success: false }) };
@@ -161,6 +166,32 @@ describe('handleRelay', () => {
     const s = stubRpc({ permission });
     expect(await handleRelay({ ...valid }, 'ip', deps({ rpc: s.rpc }))).toEqual({ status: 500, body: { error: 'RELAYER_MISCONFIGURED' } });
     expect(s.sent).toHaveLength(0);
+  });
+
+  it('does not spend the per-commitment budget on a signature our verifier did not make (red-team L3)', async () => {
+    const s = stubRpc();
+    const keysSeen: string[] = [];
+    const perCommitment: RateLimiter = { limit: async ({ key }) => (keysSeen.push(key), { success: false }) };
+    const forged = { ...valid, signature: (valid.signature[0] === '0' ? '1' : '0') + valid.signature.slice(1) };
+    expect(await handleRelay(forged, 'ip', deps({ rpc: s.rpc, perCommitment }))).toEqual({ status: 403, body: { error: 'E101_INVALID_SIGNATURE' } });
+    expect(keysSeen).toEqual([]);
+    expect(s.calls()).toBe(0);
+  });
+
+  it.each([
+    ['claimed', 'E105_ALREADY_CLAIMED'],
+    ['pending', 'E123_CLAIM_PENDING'],
+  ])('refuses a replay when claim_state is %s, signing and sending nothing (red-team M2)', async (state, error) => {
+    const s = stubRpc({ state });
+    expect(await handleRelay({ ...valid }, 'ip', deps({ rpc: s.rpc }))).toEqual({ status: 409, body: { error } });
+    expect(s.sent).toEqual([]);
+    expect(s.stateArgs).toEqual([{ campaign_id: valid.campaign_id, commitment: valid.commitment }]);
+  });
+
+  it('relays when claim_state is unclaimed', async () => {
+    const s = stubRpc({ state: 'unclaimed' });
+    expect((await handleRelay({ ...valid }, 'ip', deps({ rpc: s.rpc }))).status).toBe(200);
+    expect(s.sent).toHaveLength(1);
   });
 
   it('retries once on InvalidNonce from the ak_nonce in the error, then gives up', async () => {
