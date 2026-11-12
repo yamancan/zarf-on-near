@@ -5,6 +5,7 @@
   import { claimedAmount, formatNear, listCampaigns, reclaimable, reclaimOutcome, reclaimTx, withdrawTx, type CampaignView } from '$lib/create/campaigns';
   import { formatAmount } from '$lib/create/recipients';
   import { nearConnectWallet, type SenderWallet } from '$lib/create/wallet';
+  import { readSentOutcome } from '$lib/create/funding';
   import { nearView } from '$lib/services';
   import { deadlineText, timeLeft } from '$lib/claim';
   import { UNIT } from '$lib/network';
@@ -33,7 +34,7 @@
   let busy = $state('');
   let error = $state(''); // loading the list
   // The outcome of the last action, shown under the button that started it ('prepay' or a campaign id).
-  let result = $state<{ for: string; tone: 'success' | 'error'; text: string; code?: string; hash?: string } | null>(null);
+  let result = $state<{ for: string; tone: 'success' | 'error' | 'info'; text: string; code?: string; hash?: string } | null>(null);
   let acting = $state('');
   let walletError = $state('');
   let now = $state(Date.now());
@@ -84,10 +85,17 @@
     result = null;
     acting = target;
     busy = label;
+    let hash: string | undefined;
     try {
-      const [hash] = await wallet!.send([tx]);
+      [hash] = await wallet!.send([tx]);
       busy = 'Waiting for the transaction…';
-      const outcome = (await txOutcome(rpc!, hash, account!)) as Parameters<typeof reclaimOutcome>[0];
+      // Retried like /create's lookup; a read that never succeeds is "sent, not read", never "not sent" (T-012 finding 6).
+      const read = await readSentOutcome({ outcome: (h) => txOutcome(rpc!, h, account!) }, hash);
+      if (!read) {
+        result = { for: target, tone: 'info', text: 'Sent; result not read yet. Check the transaction, then reload.', hash };
+        return;
+      }
+      const outcome = read as Parameters<typeof reclaimOutcome>[0];
       if (campaignId) {
         const r = reclaimOutcome(outcome, contract!, campaignId);
         result =
@@ -100,8 +108,12 @@
         const code = failure ? (/E1\d\d_[A-Z_]+/.exec(JSON.stringify(failure))?.[0] ?? 'FAILED') : null;
         result = code ? { for: target, tone: 'error', text: 'The transaction did not go through.', code, hash } : { for: target, tone: 'success', text: 'Withdrawn to your wallet.', hash };
       }
-    } catch {
-      result = { for: target, tone: 'error', text: 'The wallet did not send it. Check this campaign before trying again.' };
+    } catch (e) {
+      result = hash
+        ? { for: target, tone: 'info', text: 'Sent; result not read yet. Check the transaction, then reload.', hash }
+        : (e as Error).message === 'ACCOUNT_CHANGED'
+          ? { for: target, tone: 'error', text: 'Nothing was sent: your wallet switched to another account. Reconnect it and try again.' }
+          : { for: target, tone: 'error', text: 'The wallet did not send it. Check this campaign before trying again.' };
     } finally {
       busy = '';
       await load();

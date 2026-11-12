@@ -4,8 +4,9 @@
   import { buildDraft, claimLink, LONG_LINKS_ABOVE, mailtoHref, messageText, readRecoveryFile, recoveryFile, type Draft } from '$lib/create/campaign';
   import { getAccount, getCampaignByRoot, getCampaignView, getConfig, getGasPrice, getPrepayBalance, getStorageCosts, txOutcome, type ContractConfig } from '$lib/create/chain';
   import {
-    attachedGas, checkCreation, fundCampaign, fundsShort, LookupPending, mayCreate, minDeadlineMs, nearNeeded, NotCreated, NotSent, OutcomeUnclear, ownerKeySlack,
-    prepayShortfall, readMarker, resolveByRoot, settleAfterUncertain, spendableNear, type StorageCosts, type UnresolvedMarker,
+    AccountChanged, attachedGas, checkCreation, fundCampaign, fundsShort, LookupPending, mayCreate, minDeadlineMs, nearNeeded, NotCreated, NotSent, OutcomeUnclear, ownerKeySlack,
+    prepayShortfall, readMarker, releaseAfterReject, resolveByRoot, sendHooks, settleAfterUncertain, spendableNear, WAITING_FOR_WALLET, walletWaitNote,
+    type StorageCosts, type UnresolvedMarker,
   } from '$lib/create/funding';
   import { saveFile } from '$lib/create/publish';
   import { formatAmount, sendCapError } from '$lib/create/recipients';
@@ -92,6 +93,9 @@
   let copied = $state(false);
   // A funding tx that was sent: while set, Create stays off until its outcome is known.
   let sentTx = $state<string | null>(null);
+  let rejectedFree = $state(false); // the wallet was rejected and no campaign exists for this root: offer "Change the list"
+  let walletSince = $state<number | null>(null); // when the wallet window opened (phase 1), for the reload hint
+  let now = $state(Date.now());
   let txState = $state<'checking' | 'settling' | 'unclear' | 'mismatch' | null>(null);
   // Once a send may have gone out, this draft (its merkle_root) is pinned: re-sending the same root is
   // safe (E132 refunds a duplicate), a new draft is not. Unpinned only by a campaign or a proven refund.
@@ -359,6 +363,7 @@
       } else {
         // Not landed (yet). Keep the draft pinned: only the same root may be sent again.
         sentTx = txState = null;
+        rejectedFree = true;
         errorTitle = "Your wallet didn't confirm";
         error = 'Sending again is safe: if both go through, the second is refunded.';
       }
@@ -377,6 +382,11 @@
       txState = 'checking'; // sent, outcome unknown: Create stays off
     } else if (e instanceof OutcomeUnclear) {
       txState = 'unclear';
+    } else if (e instanceof AccountChanged) {
+      // Refused before signing: nothing was sent. Another tab switched the wallet's account.
+      errorTitle = 'Nothing was sent';
+      error = `Your wallet switched to another account. Reconnect ${e.expected} to send.`;
+      rejectedFree = true; // beforeSend already pinned the list: offer Change the list (it re-checks by root first)
     } else if (e instanceof NotSent) {
       errorTitle = 'Nothing was sent';
       error = 'This browser blocked site storage. Allow it and try again.';
@@ -404,6 +414,28 @@
     setMarker(null);
     errorTitle = `Not sent: your ${UNIT} is back in your wallet`;
     error = msg;
+  }
+
+  /** "Change the list" after a rejected wallet: look by root once more (90 s), then let the draft go. */
+  async function changeAfterReject() {
+    rejectedFree = false;
+    txState = 'settling';
+    error = errorTitle = '';
+    try {
+      const r = await releaseAfterReject(byRoot(), { merkleRoot: draft!.merkleRoot, total: draft!.total });
+      if (r.kind === 'created') {
+        await created({ campaignId: r.campaignId, txHash: sentTx ?? '' });
+        return;
+      }
+      sentTx = txState = null;
+      pinned = hadUncertain = false;
+      clearFunding();
+      setMarker(null);
+      draft = null;
+      uiStep = 0; // back to the list, as Edit does
+    } catch (e) {
+      txState = (e as Error).message === 'CAMPAIGN_MISMATCH' ? 'mismatch' : 'checking';
+    }
   }
 
   /** An earlier send's outcome was lost, so it may still land: look by root once more before unpinning. */
@@ -446,9 +478,23 @@
       error = cap; // defence in depth: step 1 already refuses this
       return;
     }
-    busy = WAITING;
+    busy = WAITING_FOR_WALLET;
+    rejectedFree = false;
     try {
       const d = draft!;
+      const hooks = sendHooks({
+        set: (p) => {
+          if (p.sentTx !== undefined) sentTx = p.sentTx;
+          if (p.busy !== undefined) busy = p.busy;
+        },
+        uncertain: () => hadUncertain,
+        save: (r) => saveFunding({ txHash: r.txHash, sender: account!, draft: d, deadline, uncertain: r.uncertain }),
+        pin: () => {
+          sentFrom = account;
+          pinned = true;
+          setMarker({ root: d.merkleRoot, sender: account!, total: d.total, at: Date.now() });
+        },
+      });
       await created(
         await fundCampaign(
           {
@@ -458,18 +504,7 @@
             send: (txs) => wallet!.send(txs),
             campaignByRoot: byRoot().campaignByRoot,
             campaign: byRoot().campaign,
-            beforeSend: () => {
-              if (!saveFunding({ txHash: null, sender: account!, draft: d, deadline, uncertain: hadUncertain })) throw new Error('session storage unavailable');
-              sentFrom = account;
-              pinned = true;
-              setMarker({ root: d.merkleRoot, sender: account!, total: d.total, at: Date.now() });
-            },
-            onSent: (txHash) => {
-              sentTx = txHash;
-              sentFrom = account;
-              busy = 'Checking the transaction…';
-              saveFunding({ txHash, sender: account!, draft: d, deadline });
-            },
+            ...hooks,
             outcome: lookup.outcome,
           },
           { merkleRoot: d.merkleRoot, deadlineNs: (BigInt(deadlineMs) * 1_000_000n).toString(), leafCount: d.recipients.length, total: d.total },
@@ -566,7 +601,18 @@
   // Display only: what this send asks the wallet for, mirroring fundingTxs (a pre-pay tx only when short).
   const txCount = $derived(storageShort === null ? null : storageShort > 0n ? 2 : 1);
   const people = (n: number) => `${n} ${n === 1 ? 'person' : 'people'}`;
-  const WAITING = 'Waiting for your wallet…';
+  const WAITING = WAITING_FOR_WALLET;
+  // (T-012 finding 5) a wallet that never answers: after ~2 min in phase 1, suggest a reload (it recovers by root).
+  $effect(() => {
+    if (busy !== WAITING) {
+      walletSince = null;
+      return;
+    }
+    walletSince = Date.now();
+    const t = setInterval(() => (now = Date.now()), 5_000);
+    return () => clearInterval(t);
+  });
+  const waitNote = $derived(walletWaitNote(walletSince, now));
   /** The sending pipeline's current row: 1 the wallet, 2 the chain. 0: not sending. */
   const phase = $derived(busy === WAITING ? 1 : busy || sentTx || txState === 'checking' || txState === 'settling' ? 2 : 0);
   const sendBlocker = $derived(
@@ -729,6 +775,7 @@
       {/if}
       {#if row.state === 'active' && i === 0}
         <span class="text-sm text-zen-fg-muted" role="status">Waiting for you in the wallet window.</span>
+        {#if waitNote}<span class="text-sm text-zen-fg-muted">{waitNote}</span>{/if}
       {:else if row.state === 'active' && i === 1}
         <span class="text-sm text-zen-fg-muted" role="status">{idle ? 'Not confirmed yet.' : sentTx ? 'Sent. Checking it went through.' : 'Checking whether it went through.'}</span>
         {#if sentTx}<span class="text-zen-fg-muted">{@render explorerLink(sentTx)}</span>{/if}
@@ -1067,7 +1114,7 @@
               <ZenAlert variant="error">
                 {#snippet title()}{errorTitle}{/snippet}
                 {error}{#if errorTitle.startsWith('Not sent') && storageShort !== null && storageShort > 0n}{' '}Any NEAR it added for storage stays in your Zarf balance for your next send; you can withdraw it in Campaigns.{/if}
-                {#snippet actions()}{#if deadlineFix}<ZenButton variant="primary" size="sm" onclick={() => ((draft = null), (uiStep = 1), (error = errorTitle = errorCode = ''))}>Change Deadline</ZenButton>{/if}{/snippet}
+                {#snippet actions()}{#if deadlineFix}<ZenButton variant="primary" size="sm" onclick={() => ((draft = null), (uiStep = 1), (error = errorTitle = errorCode = ''))}>Change Deadline</ZenButton>{:else if rejectedFree}<ZenButton variant="secondary" size="sm" onclick={changeAfterReject} disabled={!!busy}>Change the List</ZenButton>{/if}{/snippet}
               </ZenAlert>
             {/if}
             <!-- Zarf's action bar -->
