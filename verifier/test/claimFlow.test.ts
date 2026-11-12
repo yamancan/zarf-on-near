@@ -42,7 +42,8 @@ let google: TestIssuer, signer: Signer, deps: ClaimDeps;
 const token = async (claimsOver: object = {}, destination = named.call_args.destination) =>
   sign(google, {
     iss: 'https://accounts.google.com', aud: CLIENT_ID, exp: NOW_MS / 1000 + 600,
-    email: alice.email, email_verified: true, nonce: await destinationNonce(destination), ...claimsOver,
+    email: alice.email, email_verified: true, hd: alice.email.split('@')[1], // Workspace: Google is authoritative
+    nonce: await destinationNonce(destination), ...claimsOver,
   });
 const request = async (over: Record<string, unknown> = {}) => ({
   id_token: await token(),
@@ -109,6 +110,7 @@ describe('handleClaim', () => {
     ['amount above u128', 400, 'E109_INVALID_AMOUNT', () => request({ amount: (1n << 128n).toString() })],
     ['token for another destination', 401, 'BAD_NONCE', async () => request({ id_token: await token({}, 'bob.testnet') })],
     ['expired token', 401, 'EXPIRED', async () => request({ id_token: await token({ exp: NOW_MS / 1000 - 120 }) })],
+    ['an address Google is not authoritative for (no hd)', 401, 'EMAIL_NOT_GOOGLE_AUTHORITATIVE', async () => request({ id_token: await token({ hd: undefined }) })],
     ['unknown campaign', 404, 'E110_UNKNOWN_CAMPAIGN', () => request(), { chain: chain({ missing: true }) }],
     ['one ns past the deadline', 409, 'E125_CAMPAIGN_ENDED', () => request(), { chain: chain({ deadline: (BigInt(context.now_ns) - 1n).toString() }) }],
     ['someone else\'s salt', 403, 'COMMITMENT_MISMATCH', () => request({ salt: campaigns.main.recipients[1].salt })],
