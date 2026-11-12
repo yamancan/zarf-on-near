@@ -3,6 +3,7 @@ import vectors from '../../spec/vectors.json';
 import type { ChainReader } from '../src/chain';
 import { destinationNonce, hex, importSigner, isValidAccountId, leafHash, verifyMerkleProof, type Signer } from '../src/claim';
 import { handleClaim, type ClaimDeps } from '../src/claimFlow';
+import { ed25519B58, quoteSignedBytes } from '../src/intents';
 import { remoteJwks } from '../src/jwks';
 import { UpstreamError } from '../src/upstream';
 import recorded from './fixtures/1click-status-pending.json';
@@ -41,7 +42,8 @@ let google: TestIssuer, signer: Signer, deps: ClaimDeps;
 const token = async (claimsOver: object = {}, destination = named.call_args.destination) =>
   sign(google, {
     iss: 'https://accounts.google.com', aud: CLIENT_ID, exp: NOW_MS / 1000 + 600,
-    email: alice.email, email_verified: true, nonce: await destinationNonce(destination), ...claimsOver,
+    email: alice.email, email_verified: true, hd: alice.email.split('@')[1], // Workspace: Google is authoritative
+    nonce: await destinationNonce(destination), ...claimsOver,
   });
 const request = async (over: Record<string, unknown> = {}) => ({
   id_token: await token(),
@@ -108,6 +110,7 @@ describe('handleClaim', () => {
     ['amount above u128', 400, 'E109_INVALID_AMOUNT', () => request({ amount: (1n << 128n).toString() })],
     ['token for another destination', 401, 'BAD_NONCE', async () => request({ id_token: await token({}, 'bob.testnet') })],
     ['expired token', 401, 'EXPIRED', async () => request({ id_token: await token({ exp: NOW_MS / 1000 - 120 }) })],
+    ['an address Google is not authoritative for (no hd)', 401, 'EMAIL_NOT_GOOGLE_AUTHORITATIVE', async () => request({ id_token: await token({ hd: undefined }) })],
     ['unknown campaign', 404, 'E110_UNKNOWN_CAMPAIGN', () => request(), { chain: chain({ missing: true }) }],
     ['one ns past the deadline', 409, 'E125_CAMPAIGN_ENDED', () => request(), { chain: chain({ deadline: (BigInt(context.now_ns) - 1n).toString() }) }],
     ['someone else\'s salt', 403, 'COMMITMENT_MISMATCH', () => request({ salt: campaigns.main.recipients[1].salt })],
@@ -181,19 +184,25 @@ describe('handleClaim with a 1Click payout (intents)', () => {
   const asset = recorded.quoteResponse.quoteRequest.destinationAsset as string;
   const recipient = recorded.quoteResponse.quoteRequest.recipient as string;
   const later = new Date(NOW_MS + 2 * 3600_000).toISOString();
-  const status = (fn: (s: typeof recorded) => void = () => {}) => {
+  // The recorded quote is edited to match this claim, so a test key stands in for 1Click's and re-signs it.
+  const quoteKey = crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']) as Promise<CryptoKeyPair>;
+  const quoteSigner = quoteKey.then(async (k) => ed25519B58(new Uint8Array(await crypto.subtle.exportKey('raw', k.publicKey))));
+  const status = async (fn: (s: typeof recorded) => void = () => {}, after: (s: typeof recorded) => void = () => {}) => {
     const s = structuredClone(recorded);
     s.quoteResponse.quote.depositAddress = DEP;
     s.quoteResponse.quote.deadline = later;
     s.quoteResponse.quote.minAmountOut = named.call_args.amount; // within the 5% loss bound
     Object.assign(s.quoteResponse.quoteRequest, { amount: named.call_args.amount, deadline: later, refundTo: 'sender.testnet' });
     fn(s);
+    const sig = await crypto.subtle.sign('Ed25519', (await quoteKey).privateKey, await quoteSignedBytes(s));
+    s.quoteResponse.signature = ed25519B58(new Uint8Array(sig));
+    after(s); // edits made after signing
     return s;
   };
   const run = async (over: Partial<ClaimDeps>, req: Record<string, unknown> = {}) =>
     handleClaim(
       await request({ id_token: await token({}, DEP), destination: DEP, intents: { destination_asset: asset, recipient }, ...req }),
-      { ...deps, chain: chain({ network: 'mainnet' }), ...over },
+      { ...deps, chain: chain({ network: 'mainnet' }), quoteSigner: await quoteSigner, ...over },
     );
 
   it('signs when 1Click holds the matching unfunded quote, refunding to the campaign sender', async () => {
@@ -206,6 +215,19 @@ describe('handleClaim with a 1Click payout (intents)', () => {
   it('409s with the check code when the quote does not match', async () => {
     const res = await run({ intentsStatus: async () => status((s) => (s.quoteResponse.quoteRequest.refundTo = 'someone.near')) });
     expect(res).toEqual({ status: 409, body: { error: 'INTENTS_WRONG_REFUND' } });
+  });
+  it('409s INTENTS_BAD_SIGNATURE, signing nothing, when the quote was changed after 1Click signed it', async () => {
+    // A signed field the field checks do not read, so only the signature can catch it.
+    const res = await run({ intentsStatus: () => status(() => {}, (s) => (s.quoteResponse.quote.amountOutUsd = '999999')) });
+    expect(res).toEqual({ status: 409, body: { error: 'INTENTS_BAD_SIGNATURE' } });
+  });
+  it('409s INTENTS_QUOTE_UNSIGNED when the quote carries no signature', async () => {
+    const res = await run({ intentsStatus: () => status(() => {}, (s) => delete (s.quoteResponse as { signature?: string }).signature) });
+    expect(res).toEqual({ status: 409, body: { error: 'INTENTS_QUOTE_UNSIGNED' } });
+  });
+  it("409s INTENTS_BAD_SIGNATURE under 1Click's pinned key when another key signed", async () => {
+    const res = await run({ intentsStatus: () => status(), quoteSigner: undefined });
+    expect(res).toEqual({ status: 409, body: { error: 'INTENTS_BAD_SIGNATURE' } });
   });
   it('409s INTENTS_QUOTE_NOT_FOUND for an address 1Click does not know', async () => {
     const intentsStatus = async () => { throw new (await import('../src/intents')).IntentsError('INTENTS_QUOTE_NOT_FOUND'); };
@@ -225,6 +247,21 @@ describe('handleClaim with a 1Click payout (intents)', () => {
 });
 
 describe('a destination that would lose the funds (second audit S1)', () => {
+  it.each(['intents.near', 'wrap.near', 'intents.testnet', 'wrap.testnet', 'Intents.NEAR', 'WRAP.near', 'INTENTS.TESTNET', 'Wrap.Testnet'])(
+    'refuses %s (a plain ft_transfer there credits nobody) before any token or chain work',
+    async (destination) => {
+      const getCampaign = vi.fn();
+      const res = await handleClaim(await request({ destination, id_token: 'x' }), { ...deps, chain: { ...chain(), getCampaign } });
+      expect(res).toEqual({ status: 400, body: { error: 'DESTINATION_CREDITS_NOBODY' } });
+      expect(getCampaign).not.toHaveBeenCalled();
+    },
+  );
+  it('still accepts look-alike accounts that are not those contracts', async () => {
+    for (const destination of ['myintents.near', 'intents.near.near', 'wrap-near.testnet']) {
+      const res = await handleClaim(await request({ destination, id_token: 'x' }), deps);
+      expect(res.body.error).not.toBe('DESTINATION_CREDITS_NOBODY');
+    }
+  });
   it('refuses the escrow contract itself before any token or chain work', async () => {
     const getCampaign = vi.fn();
     const res = await handleClaim(await request({ destination: context.contract_id, id_token: 'x' }), { ...deps, chain: { ...chain(), getCampaign } });

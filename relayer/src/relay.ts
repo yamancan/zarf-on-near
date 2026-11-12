@@ -1,4 +1,4 @@
-import { claimPayload, isValidAccountId, unhex } from '../../verifier/src/claim';
+import { claimPayload, isUncreditedDestination, isValidAccountId, unhex } from '../../verifier/src/claim';
 import { base58Decode, signTx, type NearKey } from './near';
 import { RpcError, viewAccessKey, viewAccount, viewFunction, type Rpc } from './rpc';
 
@@ -42,6 +42,8 @@ export async function handleRelay(input: unknown, ip: string, d: RelayDeps): Pro
   const { campaign_id, commitment, amount, proof, destination, expires_at_ns, signer, signature } = b;
   const isU64 = (v: unknown): v is string => typeof v === 'string' && U64.test(v) && !(BigInt(v) >> 64n);
   const isHex32 = (v: unknown): v is string => typeof v === 'string' && HEX32.test(v);
+  // Same refusal as the verifier, before the format check: a plain ft_transfer there credits nobody.
+  if (typeof destination === 'string' && isUncreditedDestination(destination)) return refuse(400, 'DESTINATION_CREDITS_NOBODY');
   if (typeof destination !== 'string' || !isValidAccountId(destination)) return refuse(400, 'BAD_DESTINATION');
   // Paying the escrow itself would lock the USDC in it for good (second audit S1); a token is checked in submit().
   if (destination === d.contractId) return refuse(400, 'DESTINATION_IS_CONTRACT');
@@ -49,8 +51,6 @@ export async function handleRelay(input: unknown, ip: string, d: RelayDeps): Pro
   if (typeof signature !== 'string' || !/^[0-9a-f]{128}$/.test(signature)) return refuse(400, 'E108_INVALID_INPUT');
   if (!Array.isArray(proof) || proof.length > 20 || !proof.every(isHex32)) return refuse(400, 'E108_INVALID_INPUT');
   if (typeof amount !== 'string' || !U128.test(amount) || BigInt(amount) >> 128n) return refuse(400, 'E109_INVALID_AMOUNT');
-
-  if (!(await d.perCommitment.limit({ key: `${campaign_id}/${commitment}` })).success) return refuse(429, 'RATE_LIMITED');
 
   // Every tx costs the relayer gas, so relay only what our verifier signed and the contract will accept in time.
   const nowNs = BigInt(Math.floor(d.nowMs ?? Date.now())) * 1_000_000n;
@@ -60,13 +60,16 @@ export async function handleRelay(input: unknown, ip: string, d: RelayDeps): Pro
   const payload = claimPayload({ network: d.network, contract_id: d.contractId, campaign_id, commitment, amount, destination, expires_at_ns });
   const signerKey = await crypto.subtle.importKey('raw', unhex(signer, 32), 'Ed25519', false, ['verify']);
   if (!(await crypto.subtle.verify('Ed25519', signerKey, unhex(signature, 64), payload))) return refuse(403, 'E101_INVALID_SIGNATURE');
+  // Only a claim our verifier signed spends this link's budget, so garbage signatures cannot block a recipient (red-team L3).
+  if (!(await d.perCommitment.limit({ key: `${campaign_id}/${commitment}` })).success) return refuse(429, 'RATE_LIMITED');
 
   const args = new TextEncoder().encode(JSON.stringify({ campaign_id, commitment, amount, proof, destination, expires_at_ns, signer, signature }));
   try {
-    return await submit(args, d, true, destination);
+    return await submit(args, d, true, { destination, campaign_id, commitment });
   } catch (e) {
     // Logs are fixed tags only: never the request, the error text or the tx.
     if (e instanceof DestinationIsToken) return refuse(400, 'DESTINATION_IS_TOKEN');
+    if (e instanceof AlreadyDecided) return refuse(409, e.code);
     if (e instanceof RelayerMisconfigured) {
       console.log('misconfigured');
       return refuse(500, 'RELAYER_MISCONFIGURED');
@@ -81,6 +84,12 @@ export async function handleRelay(input: unknown, ip: string, d: RelayDeps): Pro
 
 class RelayerMisconfigured extends Error {}
 class DestinationIsToken extends Error {}
+/** claim_state says this link is already paid or in flight: a replay would only burn the relayer's gas. */
+class AlreadyDecided extends Error {
+  constructor(readonly code: 'E105_ALREADY_CLAIMED' | 'E123_CLAIM_PENDING') {
+    super(code);
+  }
+}
 
 interface TxOutcome {
   status?: { SuccessValue?: string; Failure?: unknown };
@@ -115,12 +124,19 @@ export function claimEvent(o: TxOutcome, contractId: string, commitment: string)
 
 const submitted = (hash: string): RelayResult => ({ status: 202, body: { tx_hash: hash, status: 'submitted' } });
 
-async function submit(args: Uint8Array, d: RelayDeps, retryNonce: boolean, destination: string): Promise<RelayResult> {
-  const [gas, ak, config] = await Promise.all([
+type ClaimRef = { destination: string; campaign_id: string; commitment: string };
+
+async function submit(args: Uint8Array, d: RelayDeps, retryNonce: boolean, claim: ClaimRef): Promise<RelayResult> {
+  const { destination } = claim;
+  const [gas, ak, config, state] = await Promise.all([
     viewFunction<string>(d.rpc, d.contractId, 'required_claim_gas', {}),
     viewAccessKey(d.rpc, d.relayerAccountId, d.key.publicKeyStr),
     viewFunction<{ token_ids?: unknown }>(d.rpc, d.contractId, 'get_config', {}),
+    viewFunction<string>(d.rpc, d.contractId, 'claim_state', { campaign_id: claim.campaign_id, commitment: claim.commitment }),
   ]);
+  // A replay of a public, already-landed claim (red-team M2): refuse before signing or paying gas.
+  if (state === 'claimed') throw new AlreadyDecided('E105_ALREADY_CLAIMED');
+  if (state === 'pending') throw new AlreadyDecided('E123_CLAIM_PENDING');
   // A claim paid to a token contract is lost to the recipient (second audit S1).
   if (Array.isArray(config?.token_ids) && config.token_ids.includes(destination)) throw new DestinationIsToken();
   // Never sign with a key that can do more than call `claim` on our contract.
@@ -148,7 +164,7 @@ async function submit(args: Uint8Array, d: RelayDeps, retryNonce: boolean, desti
       const ak = /"ak_nonce":\s*(\d+)/.exec(detail);
       if (ak && BigInt(ak[1]) > lastNonce) lastNonce = BigInt(ak[1]);
       console.log('nonce_retry');
-      return submit(args, d, false, destination);
+      return submit(args, d, false, claim);
     }
     if (detail.includes('TIMEOUT_ERROR')) return submitted(hash); // sent; the app follows claim_state
     throw e;

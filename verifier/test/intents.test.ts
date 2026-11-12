@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 // Recorded 2026-11-10 from GET /v0/status for a real, never-funded mainnet quote (spike S3).
 import recorded from './fixtures/1click-status-pending.json';
-import { checkIntentsStatus, fetchIntentsStatus, IntentsError, type IntentsClaim } from '../src/intents';
+import {
+  checkIntentsStatus, ed25519B58, fetchIntentsStatus, IntentsError, quoteSignedBytes, verifyQuoteSignature, type IntentsClaim,
+} from '../src/intents';
 
 const ns = (iso: string) => (BigInt(Date.parse(iso)) * 1_000_000n).toString();
 const QR_DEADLINE = recorded.quoteResponse.quoteRequest.deadline;
@@ -197,5 +199,87 @@ describe('T-001: the loss check is exact, no truncation (Duo P2)', () => {
   it('odd amounts at the 2% boundary', () => {
     expect(code(odd('980005'), { ...claim, amount: '1000005' })).toBeUndefined();
     expect(code(odd('980004'), { ...claim, amount: '1000005' })).toBe('INTENTS_LOSS_TOO_HIGH');
+  });
+});
+
+describe('verifyQuoteSignature (1Click quote signature)', () => {
+  const sigCode = async (status: unknown, signer?: string): Promise<string | undefined> => {
+    try {
+      await verifyQuoteSignature(status, signer);
+      return undefined;
+    } catch (e) {
+      if (e instanceof IntentsError) return e.code;
+      throw e;
+    }
+  };
+  type Resp = { quoteResponse: Record<string, unknown> & { quoteRequest: Record<string, unknown>; quote: Record<string, unknown> } };
+  const edit = (fn: (s: Resp) => void): unknown => {
+    const s = structuredClone(recorded) as unknown as Resp;
+    fn(s);
+    return s;
+  };
+  // A test key that re-signs an edited quote exactly as 1Click would.
+  const testKey = async () => {
+    const k = (await crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify'])) as CryptoKeyPair;
+    const pub = ed25519B58(new Uint8Array(await crypto.subtle.exportKey('raw', k.publicKey)));
+    const resign = async (s: unknown) => {
+      const r = (s as Resp).quoteResponse;
+      r.signature = ed25519B58(new Uint8Array(await crypto.subtle.sign('Ed25519', k.privateKey, await quoteSignedBytes(s))));
+      return s;
+    };
+    return { pub, resign };
+  };
+
+  it("accepts the recorded quote: 1Click's real signature under the pinned key", async () => {
+    expect(await sigCode(recorded)).toBeUndefined();
+  });
+
+  it.each([
+    ['depositAddress', (s: Resp) => (s.quoteResponse.quote.depositAddress = 'e'.repeat(64))],
+    ['minAmountOut', (s: Resp) => (s.quoteResponse.quote.minAmountOut = '1')],
+    ['deadline', (s: Resp) => (s.quoteResponse.quote.deadline = '2030-01-01T00:00:00.000Z')],
+    ['recipient', (s: Resp) => (s.quoteResponse.quoteRequest.recipient = '0x' + '1'.repeat(40))],
+    ['refundTo', (s: Resp) => (s.quoteResponse.quoteRequest.refundTo = 'someone.near')],
+    ['amount', (s: Resp) => (s.quoteResponse.quoteRequest.amount = '1')],
+    ['timestamp', (s: Resp) => (s.quoteResponse.timestamp = '2026-11-11T13:02:16.077Z')],
+  ])('refuses a quote whose signed %s was changed', async (_, fn) => {
+    expect(await sigCode(edit(fn))).toBe('INTENTS_BAD_SIGNATURE');
+  });
+
+  it.each([
+    ['no signature', (s: Resp) => delete s.quoteResponse.signature],
+    ['an empty signature', (s: Resp) => (s.quoteResponse.signature = '')],
+    ['a null signature', (s: Resp) => (s.quoteResponse.signature = null)],
+    ['no timestamp', (s: Resp) => delete s.quoteResponse.timestamp],
+  ])('refuses a quote with %s as unsigned', async (_, fn) => {
+    expect(await sigCode(edit(fn))).toBe('INTENTS_QUOTE_UNSIGNED');
+  });
+
+  it.each([
+    ['not base58', 'ed25519:0OIl'],
+    ['too short', 'ed25519:3kS4dLJnhLVr'],
+    ['all ones', 'ed25519:' + '1'.repeat(64)],
+  ])('refuses a signature that is %s', async (_, sig) => {
+    expect(await sigCode(edit((s) => (s.quoteResponse.signature = sig)))).toBe('INTENTS_BAD_SIGNATURE');
+  });
+
+  it('refuses a quote signed by any key other than the pinned one', async () => {
+    const { resign } = await testKey();
+    expect(await sigCode(await resign(edit(() => {})))).toBe('INTENTS_BAD_SIGNATURE');
+  });
+
+  it('verifies against the given key, and drops unsigned fields from the message (dry and non-dry)', async () => {
+    const { pub, resign } = await testKey();
+    expect(await sigCode(await resign(edit(() => {})), pub)).toBeUndefined();
+    // appFees, depositMode and confidentiality are not signed by 1Click: changing them keeps the signature valid.
+    const signed = await resign(edit(() => {}));
+    (signed as Resp).quoteResponse.quoteRequest.appFees = [];
+    expect(await sigCode(signed, pub)).toBeUndefined();
+    // A dry quote signs only the priced fields: the deposit address is outside the message.
+    const dry = await resign(edit((s) => (s.quoteResponse.quoteRequest.dry = true)));
+    (dry as Resp).quoteResponse.quote.depositAddress = 'f'.repeat(64);
+    expect(await sigCode(dry, pub)).toBeUndefined();
+    // The real 1Click signature does not verify under another key.
+    expect(await sigCode(recorded, pub)).toBe('INTENTS_BAD_SIGNATURE');
   });
 });
