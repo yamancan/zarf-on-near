@@ -246,7 +246,7 @@
       <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
         <span class="tabular-nums" title="{formatNear(freePrepay)} NEAR">{formatNear(freePrepay)} NEAR</span>
         <span class="inline-flex items-center gap-1 text-zen-fg-muted">Zarf Balance
-          <Tooltip text="NEAR you keep at the Zarf contract to pay for storage. Each send draws on it; what is left is yours." position="top">
+          <Tooltip text="NEAR held for storage; the rest is yours." position="top">
             <button type="button" class="inline-flex items-center justify-center w-6 h-6 rounded-full text-zen-fg-subtle hover:text-zen-fg" aria-label="What is my Zarf balance: NEAR you keep at the Zarf contract to pay for storage. Each send draws on it; what is left is yours."><Info class="w-3.5 h-3.5" aria-hidden="true" /></button>
           </Tooltip>
         </span>

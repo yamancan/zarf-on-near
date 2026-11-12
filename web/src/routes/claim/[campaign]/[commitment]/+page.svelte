@@ -346,7 +346,7 @@
               <span class="inline-flex items-center gap-1.5 min-w-0"><Avatar name={sender} /><span class="font-mono truncate">{sender}</span></span>
               <span class="inline-flex items-center gap-1.5 whitespace-nowrap">
               {#if left}<span class="tabular-nums" title="Claim by {deadline}">{left}</span>{/if}
-              <Tooltip text="The email never goes on chain. Our verifier sees it once, to check this claim." position="bottom">
+              <Tooltip text="The email never goes on chain." position="bottom">
                 <button type="button" class="inline-flex items-center justify-center w-6 h-6 rounded-full text-zen-fg-subtle hover:text-zen-fg" aria-label="Who sees the email: the email never goes on chain. Our verifier sees it once, to check this claim.">
                   <Info class="w-3.5 h-3.5" aria-hidden="true" />
                 </button>
