@@ -346,6 +346,7 @@
       // Refused before signing: nothing was sent. Another tab switched the wallet's account.
       errorTitle = 'Nothing was sent';
       error = `Your wallet switched to another account. Reconnect ${e.expected} to send.`;
+      rejectedFree = true; // beforeSend already pinned the list: offer Change the list (it re-checks by root first)
     } else if (e instanceof NotSent) {
       errorTitle = 'Nothing was sent';
       error = 'This browser blocked site storage. Allow it and try again.';
@@ -391,6 +392,7 @@
       clearFunding();
       setMarker(null);
       draft = null;
+      uiStep = 0; // back to the list, as Edit does
     } catch (e) {
       txState = (e as Error).message === 'CAMPAIGN_MISMATCH' ? 'mismatch' : 'checking';
     }
