@@ -8,7 +8,11 @@
     prepayShortfall, readMarker, resolveByRoot, settleAfterUncertain, spendableNear, type StorageCosts, type UnresolvedMarker,
   } from '$lib/create/funding';
   import { saveFile } from '$lib/create/publish';
-  import { formatAmount, parseRecipients, sendCapError } from '$lib/create/recipients';
+  import { formatAmount, sendCapError } from '$lib/create/recipients';
+  import { checkGrid, isBlankRow, parsePaste, type GridRow } from '$lib/create/grid';
+  import RecipientGrid from '$lib/create/RecipientGrid.svelte';
+  import RecipientImportControls from '$lib/create/RecipientImportControls.svelte';
+  import { mayNotSignIn } from '$lib/create/googleSignIn';
   import { nearConnectWallet, type SenderWallet } from '$lib/create/wallet';
   import { deadlineText, timeLeft } from '$lib/claim';
   import { formatNear } from '$lib/create/campaigns';
@@ -31,8 +35,36 @@
   const contract = env.PUBLIC_CONTRACT_ID;
   const token = env.PUBLIC_TOKEN_ID;
 
-  let csv = $state('');
-  const parsed = $derived(parseRecipients(csv));
+  let gridRows = $state<GridRow[]>([{ email: '', amount: '' }]);
+  const parsed = $derived(checkGrid(gridRows));
+  let grid = $state<{ addRow: () => Promise<void> }>();
+  let skipped = $state<string[]>([]);
+  // One-step undo for Clear. Raw: it holds a snapshot.
+  let cleared = $state.raw<GridRow[] | null>(null);
+  /** Pasted or imported rows go after the filled ones; blank rows make way. False when no line had an address. */
+  function addPasted(text: string, sameAmount = ''): boolean {
+    const { rows, skipped: s } = parsePaste(text, sameAmount);
+    skipped = s;
+    cleared = null;
+    if (!rows.length) return false;
+    gridRows = [...gridRows.filter((r) => !isBlankRow(r)), ...rows];
+    return true;
+  }
+  function clearRows() {
+    cleared = $state.snapshot(gridRows);
+    gridRows = [{ email: '', amount: '' }];
+    skipped = [];
+  }
+  // Rows whose address may not sign in with Google: a calm hint, never a block. Debounced so typing a domain doesn't query each prefix.
+  let notGoogle = $state<Set<string>>(new Set());
+  $effect(() => {
+    const emails = parsed.rows.map((r) => r.email);
+    let live = true;
+    const t = setTimeout(() => mayNotSignIn(emails).then((s) => live && (notGoogle = s)), 500);
+    return () => { live = false; clearTimeout(t); };
+  });
+  const unsure = $derived(parsed.rows.filter((r) => notGoogle.has(r.email)));
+  const unsureRow = (i: number) => parsed.rows.some((r) => r.line === i + 1 && notGoogle.has(r.email));
   let config = $state<ContractConfig | null>(null);
   let setupError = $state('');
   let setupRetry = $state(false);
@@ -470,7 +502,10 @@
     draft = result = null;
     sentTx = sentFrom = txState = null;
     pinned = recoverySaved = recoveryAck = copied = false;
-    csv = error = errorTitle = errorCode = '';
+    error = errorTitle = errorCode = '';
+    gridRows = [{ email: '', amount: '' }];
+    skipped = [];
+    cleared = null;
     claims = [];
     previewRow = 0;
     uiStep = 0;
@@ -478,7 +513,7 @@
 
   // Wizard: the first three steps are local; Send and the links follow the draft and the result.
   const STEPS = ['Recipients', 'Deadline', 'Wallet', 'Send'];
-  const QUESTIONS = ['Who gets it?', 'Until when can they claim?', 'Which wallet pays?', 'Check and send'];
+  const QUESTIONS = ['Recipients', 'Until when can they claim?', 'Which wallet pays?', 'Check and send'];
   let uiStep = $state(0);
   const step = $derived(result && draft ? 4 : draft ? 3 : uiStep);
   const capError = $derived(sendCapError(parsed.total, TESTNET));
@@ -860,27 +895,29 @@
         {#if usdcOpen}<div class="-mt-4">{@render usdcWhat()}</div>{/if}
 
         {#if step === 0}
-          <label for="recipients" class="flex flex-col gap-1">
-            <span class="text-sm font-medium">Their Google email and amount</span>
-            <span class="text-xs text-zen-fg-muted">One per line, like alice@gmail.com, 10. Use exactly the address they sign in to Google with: Gmail dots and +aliases count as a different address here.</span>
-          </label>
-          <textarea id="recipients" bind:value={csv} rows="8" class="control-border w-full rounded-2xl bg-transparent p-4 !font-mono text-sm" placeholder={'alice@gmail.com,10\nbob@gmail.com,2.5'} disabled={!!draft}></textarea>
-          {#if parsed.rows.length}
-            <p class="text-sm"><span class="font-semibold tabular-nums">{formatAmount(parsed.total)} <span class="uppercase text-xs tracking-widest font-medium">{UNIT}</span></span> <span class="text-zen-fg-muted">to {people(parsed.rows.length)}</span></p>
+          <p class="-mt-4 text-xs text-zen-fg-subtle">Their Google sign-in email and amount.</p>
+          <RecipientImportControls
+            hasRows={gridRows.some((r) => !isBlankRow(r))}
+            backupDisabled={!config || !!busy}
+            {skipped}
+            onAddRow={() => grid?.addRow()}
+            onClear={clearRows}
+            onPaste={addPasted}
+            onImportFile={async (f) => addPasted(await f.text())}
+            onOpenBackup={openBackup}
+            onDismissSkipped={() => (skipped = [])}
+          />
+          <!-- Undo restores a snapshot, so it goes away once anything is typed. -->
+          {#if cleared && !gridRows.some((r) => !isBlankRow(r))}
+            <div role="status" class="flex items-center justify-between gap-3 rounded-xl bg-zen-fg/[0.03] px-3 py-2 text-sm text-zen-fg-muted">
+              <span>List cleared.</span>
+              <ZenButton variant="ghost" size="sm" onclick={() => ((gridRows = cleared!), (cleared = null))}>Undo</ZenButton>
+            </div>
           {/if}
+          <RecipientGrid bind:this={grid} bind:rows={gridRows} problems={parsed.problems} notGoogle={unsureRow} total={parsed.total} count={parsed.rows.length} unit={UNIT} />
+          {#if unsure.length}<p class="text-xs text-zen-fg-subtle">{unsure.length === 1 ? 'This person must be able to sign in to Google with this exact address, or the share waits until the deadline.' : 'Each person marked must be able to sign in to Google with that exact address, or their share waits until the deadline.'}</p>{/if}
           {#if capError}<Note tone="error">{capError}</Note>{/if}
-          {#if parsed.rejected.length}
-            <Note tone="error">
-              Fix these lines first:
-              {#each parsed.rejected as r (r.line)}<span class="block font-normal">Line {r.line}: {r.reason}</span>{/each}
-            </Note>
-          {/if}
-          <Term q="Which email?">Exactly the address they sign in to Google with. a.lice@gmail.com and alice+pay@gmail.com reach the same inbox but count as different addresses here, and a +alias can't sign in at all.</Term>
-          <label id="backup" class="self-start text-xs text-zen-fg-muted underline underline-offset-2 hover:text-zen-fg cursor-pointer min-h-11 flex items-center">
-            Open a backup file
-            <input class="sr-only" type="file" accept="application/json,.json" disabled={!config || !!busy} onchange={(e) => openBackup(e.currentTarget.files?.[0])} />
-          </label>
-          {@render actions(false, 'Continue', recipientsOk, () => (uiStep = 1), recipientsOk ? '' : capError ? 'Up to 100 USDC per send.' : parsed.rejected.length ? `Fix line ${parsed.rejected[0].line} first.` : 'Add at least one line.')}
+          {@render actions(false, 'Continue', recipientsOk, () => (uiStep = 1), recipientsOk ? '' : capError ? 'Up to 100 USDC per send.' : parsed.rejected.length ? `Fix row ${parsed.rejected[0].line} first.` : '')}
         {:else if step === 1}
           <div class="control-border grid gap-1 p-1 rounded-full" style="grid-template-columns: repeat({picks.length + 1}, minmax(0, 1fr))" role="radiogroup" aria-label="Claim deadline">
             {#each [...picks, 'date' as const] as p (p)}
