@@ -19,7 +19,8 @@
   import ZenCard from '$lib/zen/components/ZenCard.svelte';
   import { describeStatus, getStatus, loadPayout, nextStep, notReturnedYet, savePayout, submitDeposit, type StatusView } from '$lib/intents';
   import BridgeDetails from '$lib/BridgeDetails.svelte';
-  import { accountBalances, formatNear, passkeyOffered, unlockPasskeyAccount } from '$lib/passkey';
+  import { passkeyOffered } from '$lib/passkey';
+  import PasskeyAccount from '$lib/PasskeyAccount.svelte';
 
   const attempt = loadAttempt();
   const idToken = signedIn.idToken;
@@ -33,22 +34,7 @@
   const campaignId = page.params.campaign!, commitmentId = page.params.commitment!;
   // T-021: a passkey account opens again with one Face ID (the key is re-derived, never stored).
   const passkeyOn = passkeyOffered(TESTNET ? 'testnet' : '', env.PUBLIC_IMPLICIT_ACCOUNTS, env.PUBLIC_PASSKEY_ACCOUNTS);
-  let opened = $state<{ id: string; near: bigint; token: bigint } | null>(null);
-  let opening = $state(false);
-  let openError = $state('');
-  async function openWithFaceId(to: string) {
-    openError = '';
-    opening = true;
-    try {
-      const a = await unlockPasskeyAccount();
-      if (a.accountId !== to) openError = `That passkey opens another account (${middle(a.accountId, 8)}). Pick the one you made for this claim.`;
-      else opened = { id: a.accountId, ...(await accountBalances(env.PUBLIC_NEAR_RPC_URL ?? '', env.PUBLIC_TOKEN_ID ?? '', a.accountId)) };
-    } catch {
-      openError = 'Face ID was cancelled, or this browser cannot open the passkey. Try again.';
-    } finally {
-      opening = false;
-    }
-  }
+
   let txHash = $state('');
   const explorer = $derived(env.PUBLIC_EXPLORER_TX_URL && txHash ? `${env.PUBLIC_EXPLORER_TX_URL}${txHash}` : '');
   // A reload after the NEAR claim has no sign-in left, but the payout it started can still be followed.
@@ -138,7 +124,7 @@
         step = 'done';
         clearAttempt(); // salt and destination are no longer needed in this tab
         saveReceipt(contract, attempt.campaign, attempt.commitment, {
-          amount: attempt.amount, txHash, at: Date.now(), destination: attempt.intents?.recipient ?? attempt.destination,
+          amount: attempt.amount, txHash, at: Date.now(), destination: attempt.intents?.recipient ?? attempt.destination, ...(attempt.passkey ? { passkey: true as const } : {}),
           ...(attempt.intents ? { chainName: attempt.intents.chainName, bridge: 'in-transit' as const, depositAddress, refundTo: attempt.intents.refundTo } : {}),
         });
         if (attempt.intents) {
@@ -240,7 +226,7 @@
   {/if}
 {/snippet}
 
-{#snippet nearDone(amount: string, to: string, hash: string)}
+{#snippet nearDone(amount: string, to: string, hash: string, passkey = false)}
   <!-- Main claim app ClaimStep5Submit: header row, Amount Highlight, two-button grid (h-14 rounded-2xl) -->
   <div class="w-full text-left space-y-8" in:swapIn>
     <div class="flex items-start gap-4">
@@ -258,17 +244,7 @@
     {#if isImplicitAccount(to)}
       <p class="text-xs text-zen-fg-subtle">To move these funds later, this account needs a little NEAR for gas.</p>
     {/if}
-    {#if passkeyOn && isImplicitAccount(to)}
-      {#if opened?.id === to}
-        <div class="rounded-2xl border border-zen-border-subtle p-4 text-sm space-y-1" role="status">
-          <p class="text-zen-fg-muted">Your account <span class="font-mono text-zen-fg" title={to}>{middle(to, 8)}</span></p>
-          <p class="font-medium">{formatAmount(opened.token)} {UNIT} · {formatNear(opened.near)} NEAR</p>
-        </div>
-      {:else}
-        <ZenButton variant="secondary" class="w-full" disabled={opening} onclick={() => openWithFaceId(to)}>Open My Account with Face ID</ZenButton>
-        {#if openError}<Note tone="error">{openError}</Note>{/if}
-      {/if}
-    {/if}
+    {#if passkeyOn && passkey && isImplicitAccount(to)}<PasskeyAccount expected={to} />{/if}
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
       {#if hash && env.PUBLIC_EXPLORER_TX_URL}
         <a href="{env.PUBLIC_EXPLORER_TX_URL}{hash}" target="_blank" rel="external noopener noreferrer" class="flex items-center justify-center border border-zen-border-subtle bg-zen-bg hover:bg-zen-fg/5 h-14 rounded-2xl text-[10px] uppercase tracking-widest font-bold transition-colors">
@@ -302,7 +278,7 @@
         <p class="text-sm text-zen-fg-muted max-w-xs" role="alert">NEAR is not answering right now.</p>
         <ZenButton variant="primary" class="w-full sm:w-auto" onclick={verifyRemembered}>Check Again</ZenButton>
       {:else if stored && !stored.chainName}
-        {@render nearDone(stored.amount, stored.destination, stored.txHash)}
+        {@render nearDone(stored.amount, stored.destination, stored.txHash, !!stored.passkey)}
       {:else if stored}
         <ClaimRecord r={stored} amount={stored.amount} {contract} campaign={campaignId} commitment={commitmentId} />
       {:else if !resumed && (!ok || !attempt)}
@@ -314,6 +290,7 @@
         {:else}
           <h1 class="text-xl font-bold">Nothing to Show Yet</h1>
           <p class="text-sm text-zen-fg-muted max-w-xs">This page shows your claim after you sign in with Google.</p>
+          {#if passkeyOn}<PasskeyAccount label="Claimed with Face ID? Open Your Account" />{/if}
         {/if}
         {#if canGoBack}
           {@render back()}
@@ -383,7 +360,7 @@
         {/if}
       {:else if attempt}
         {#if step === 'done'}
-          {@render nearDone(attempt.amount, attempt.destination, txHash)}
+          {@render nearDone(attempt.amount, attempt.destination, txHash, !!attempt.passkey)}
         {:else if working}
           <div class="w-full text-left space-y-8" in:swapIn>
             <div class="space-y-1">

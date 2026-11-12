@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { accountFromPrf, passkeyOffered, seedFromPrf } from './passkey';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { accountBalances, accountFromPrf, formatNear, passkeyOffered, PRF_SALT, seedFromPrf } from './passkey';
 
 const prf = (b: number) => new Uint8Array(32).fill(b);
 
@@ -20,6 +20,44 @@ describe('passkey seed derivation', () => {
   });
   it('pins the derivation: changing salt or info would strand every account', async () => {
     expect((await accountFromPrf(prf(0))).accountId).toBe(PINNED);
+  });  it('reads the bytes of the PRF output whatever view the browser hands over (WebAuthn allows any BufferSource)', async () => {
+    const bytes = Uint8Array.from({ length: 32 }, (_, i) => i * 7);
+    const want = (await accountFromPrf(bytes)).accountId;
+    const padded = new Uint8Array(48); padded.set(bytes, 8);
+    for (const v of [bytes.buffer, new Uint32Array(bytes.buffer), new DataView(bytes.buffer), new Uint8Array(padded.buffer, 8, 32), new DataView(padded.buffer, 8, 32)])
+      expect((await accountFromPrf(v)).accountId).toBe(want);
+  });
+  it('refuses a PRF output that is not 32 bytes (an empty view never maps to an account)', async () => {
+    await expect(accountFromPrf(new DataView(new ArrayBuffer(0)))).rejects.toThrow('PRF_LENGTH');
+    await expect(accountFromPrf(new Uint8Array(31))).rejects.toThrow('PRF_LENGTH');
+  });
+  it('pins the WebAuthn PRF input: changing it changes every account', () => {
+    expect(new TextDecoder().decode(PRF_SALT)).toBe('zarf-near/v1');
+  });
+});
+
+describe('accountBalances', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const rpc = (viewAccount: unknown) =>
+    vi.stubGlobal('fetch', async (_u: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      if (body.params.request_type === 'view_account') return Response.json(viewAccount);
+      return Response.json({ result: { result: [...new TextEncoder().encode('"100000"')] } });
+    });
+  it('an account that does not exist yet holds 0 NEAR', async () => {
+    rpc({ error: { name: 'HANDLER_ERROR', cause: { name: 'UNKNOWN_ACCOUNT' } } });
+    expect(await accountBalances('https://rpc.test', 'usdc.testnet', 'ab'.repeat(32))).toEqual({ near: 0n, token: 100000n });
+  });
+  it('any other RPC error is an error, never 0 NEAR', async () => {
+    rpc({ error: { name: 'INTERNAL_ERROR' } });
+    await expect(accountBalances('https://rpc.test', 'usdc.testnet', 'ab'.repeat(32))).rejects.toThrow('RPC_ERROR');
+    rpc({ result: {} });
+    await expect(accountBalances('https://rpc.test', 'usdc.testnet', 'ab'.repeat(32))).rejects.toThrow('RPC_ERROR');
+  });
+  it('reads NEAR and the token, and formats NEAR', async () => {
+    rpc({ result: { amount: '20000000000000000000000' } });
+    const b = await accountBalances('https://rpc.test', 'usdc.testnet', 'ab'.repeat(32));
+    expect([formatNear(b.near), b.token]).toEqual(['0.02', 100000n]);
   });
 });
 

@@ -28,6 +28,7 @@
   import { formatAmount } from '$lib/create/recipients';
   import { createImplicitAccount, keyFile, type ImplicitAccount } from '$lib/implicit';
   import { createPasskeyAccount, passkeyOffered } from '$lib/passkey';
+  import PasskeyAccount from '$lib/PasskeyAccount.svelte';
 
   const campaign = page.params.campaign!;
   const commitment = page.params.commitment!;
@@ -260,7 +261,7 @@
         return;
       }
     }
-    saveAttempt({ campaign, commitment, ...link!, destination: to, attemptId, intents });
+    saveAttempt({ campaign, commitment, ...link!, destination: to, attemptId, intents, ...(mode === 'new' && passkeyPrf ? { passkey: true as const } : {}) });
     location.href = googleAuthUrl({
       clientId,
       redirectUri: `${location.origin}/auth/google`,
@@ -295,6 +296,7 @@
     {:else if loaded && !link && recalled}
       <div class="flex flex-col items-center text-center gap-4 py-2" in:swapIn>
         <ClaimRecord r={recalled} amount={recalled.amount} contract={env.PUBLIC_CONTRACT_ID ?? ''} {campaign} {commitment} />
+        {#if passkeyOn}<PasskeyAccount label="Claimed with Face ID? Open Your Account" />{/if}
       </div>
     {:else if loaded && !link && !recalling}
       {@render terminal(Link2Off, 'muted', 'Incomplete Link', INCOMPLETE_LINE, 'home')}
@@ -305,6 +307,7 @@
     {:else if check === 'claimed'}
       <div class="flex flex-col items-center text-center gap-4 py-2" in:swapIn>
         <ClaimRecord r={paid} amount={link!.amount} title="Already Claimed" contract={env.PUBLIC_CONTRACT_ID ?? ''} {campaign} {commitment} />
+        {#if passkeyOn}<PasskeyAccount label="Claimed with Face ID? Open Your Account" />{/if}
       </div>
     {:else if check === 'pending'}
       {@render terminal(Clock, 'muted', 'Payment in Progress', 'It usually settles within a minute.', 'recheck')}
