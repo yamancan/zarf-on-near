@@ -2,7 +2,7 @@
   // One layer down for a cross-chain payout that did not arrive: the deposit address (public, copyable: the
   // sender gives it to NEAR Intents support) and any line the surface leaves out.
   import { ChevronDown } from 'lucide-svelte';
-  import ZenButton from '$lib/zen/components/ZenButton.svelte';
+  import ZenButton from '$lib/zarf-kit/components/ui/ZenButton.svelte';
 
   let { depositAddress, lines = [] }: { depositAddress: string; lines?: string[] } = $props();
   let copied = $state(false);

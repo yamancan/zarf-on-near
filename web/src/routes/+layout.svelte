@@ -5,9 +5,9 @@
   import { beforeNavigate } from '$app/navigation';
   import { TESTNET } from '$lib/network';
   import { brandName } from '$lib/text';
-  import ZarfMark from '$lib/ZarfMark.svelte';
-  import ThemeToggle from '$lib/zen/components/ThemeToggle.svelte';
-  import { themeStore } from '$lib/zen/stores/themeStore.svelte';
+  import ZLockup from '$lib/zarf-kit/components/brand/ZLockup.svelte';
+  import ThemeToggle from '$lib/zarf-kit/components/layout/ThemeToggle.svelte';
+  import { themeStore } from '$lib/zarf-kit/stores/themeStore.svelte';
 
   let { children } = $props();
   const brand = brandName(location.hostname); // ssr=false: always in the browser
@@ -35,11 +35,8 @@
 </script>
 
 {#snippet lockup(small: boolean)}
-  <!-- Brand kit lockup: the mark as tall as the "f" of zarf.to; ink gap mark→"z" 0.4x the mark (the "z" side
-       bearing and the mark's own edge add about 2 px to the box gap, measured from renders) -->
-  <span class="flex items-center {small ? 'gap-[2px] text-xs' : 'gap-[3px] text-base'} font-semibold tracking-tight">
-    <ZarfMark size={small ? 11 : 12} />{brand}
-  </span>
+  <!-- The kit lockup (zarf-kit/components/brand/ZLockup): Zarf's ZarfLogo lg in the navbar (16 px), sm in the footer (12 px) -->
+  <ZLockup fontSize={small ? 12 : 16} label={brand} />
 {/snippet}
 
 <!-- Subtle ripple background texture (main repo apps/claim + apps/create +layout.svelte). Behind the page: the
@@ -51,55 +48,59 @@
 <div class="min-h-screen {landing ? 'font-sans bg-zen-bg' : 'font-app relative z-[1] overflow-x-clip'} text-zen-fg flex flex-col">
   <!-- ZarfNavbar (main repo): logo and nav on the left, actions on the right, solid ground, one hairline -->
   <!-- Landing: Zarf's landing header (transparent, blur and hairline once scrolled); elsewhere ZarfNavbar's solid bar -->
-  <header class="h-16 flex items-center justify-between gap-3 px-4 sm:px-6 sticky top-0 z-50 transition-all duration-500
-    {!landing ? 'bg-zen-bg border-b-[0.5px] border-zen-border-subtle' : scrollY > 20 ? 'backdrop-blur-xl bg-base-100/70 border-b border-base-content/5' : 'bg-transparent border-b border-transparent'}">
-    <div class="flex items-center gap-4 sm:gap-5 md:gap-8">
-      <a href="/" class="group flex items-center min-h-11 opacity-80 hover:opacity-100 transition-opacity" aria-label="{brand} home">
-        {@render lockup(false)}
-      </a>
-      <!-- Zarf hides the nav below md; here Send stays reachable on phones (critic P1-24), but not for recipients -->
-      {#if !recipient}
-      <nav class="flex items-center gap-3 sm:gap-4 md:gap-6" aria-label="Main">
-        {#each NAV as n (n.href)}
-          <a
-            href={n.href}
-            aria-current={page.url.pathname.startsWith(n.href) ? 'page' : undefined}
-            class="inline-flex items-center min-h-11 text-xs font-medium transition-colors
-              {page.url.pathname.startsWith(n.href) ? 'text-zen-fg' : 'text-zen-fg-muted hover:text-zen-fg'}">{n.label}</a
-          >
-        {/each}
-      </nav>
-      {/if}
-    </div>
-    <div class="flex items-center gap-3 sm:gap-4">
-      {#if TESTNET}
-        <span class="whitespace-nowrap text-[10px] font-medium uppercase tracking-[0.15em] text-zen-fg-subtle">NEAR Testnet</span>
-      {/if}
-      {#if landing}
-        <!-- Zarf landing header's Follow pill -->
+  {#if landing}
+    <!-- Zarf's landing header (main repo apps/landing +page.svelte:70-125): transparent, blur and a hairline once scrolled;
+         one text link, the Follow pill, a divider, the theme toggle -->
+    <header class="sticky top-0 w-full z-50 px-6 py-4 flex items-center justify-between transition-all duration-500 {scrollY > 20
+      ? 'backdrop-blur-xl bg-base-100/70 border-b border-base-content/5'
+      : 'backdrop-blur-none bg-transparent border-transparent'}">
+      <a href="/" class="flex items-center gap-2.5" aria-label="{brand} home">{@render lockup(false)}</a>
+      <div class="flex items-center gap-3">
+        <a href="/create" class="text-xs font-medium tracking-wide text-base-content/60 hover:text-base-content transition-colors duration-300 px-1.5">Send</a>
         <a href="https://x.com/zarfto" target="_blank" rel="noopener noreferrer" aria-label="Follow Zarf on X" class="inline-flex items-center gap-1.5 rounded-full bg-base-content/5 text-base-content/70 border border-base-content/8 hover:text-base-content hover:bg-base-content/10 px-4 py-1.5 text-xs font-medium transition-colors">
           <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
             <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"></path>
           </svg>
           <span class="hidden sm:inline">Follow</span>
         </a>
-      {:else}
-        <a
-          href="https://x.com/zarfto"
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="Follow Zarf on X"
-          class="hidden sm:inline-flex items-center justify-center min-h-11 text-zen-fg-subtle hover:text-zen-fg transition-colors"
-        >
+        <div class="hidden sm:block w-px h-5 bg-base-content/8" aria-hidden="true"></div>
+        <ThemeToggle />
+      </div>
+    </header>
+  {:else}
+    <!-- ZarfNavbar (main repo packages/ui/lib/components/layout/ZarfNavbar.svelte): h-16, solid ground, 0.5 px hairline,
+         lockup and nav on the left, X, divider and theme toggle on the right. NEAR adds the network name where Zarf
+         has its wallet button, and keeps Send reachable on phones (critic P1-24) -->
+    <header class="h-16 bg-zen-bg border-b-[0.5px] border-zen-border-subtle flex items-center justify-between gap-3 px-4 sm:px-6 sticky top-0 z-50">
+      <div class="flex items-center gap-5 md:gap-8">
+        <a href="/" class="group opacity-80 hover:opacity-100 transition-opacity" aria-label="{brand} home">{@render lockup(false)}</a>
+        {#if !recipient}
+          <nav class="flex items-center gap-4 md:gap-6" aria-label="Main">
+            {#each NAV as n (n.href)}
+              <a
+                href={n.href}
+                aria-current={page.url.pathname.startsWith(n.href) ? 'page' : undefined}
+                class="text-xs font-medium transition-colors hover:text-zen-fg {page.url.pathname.startsWith(n.href) ? 'text-zen-fg' : 'text-zen-fg-muted'}">{n.label}</a
+              >
+            {/each}
+          </nav>
+        {/if}
+      </div>
+      <div class="flex items-center gap-4">
+        <a href="https://x.com/zarfto" target="_blank" rel="noopener noreferrer" aria-label="Follow Zarf on X" class="hidden sm:inline-flex text-zen-fg-subtle hover:text-zen-fg transition-colors">
           <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
             <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"></path>
           </svg>
         </a>
-      {/if}
-      <div class="hidden sm:block w-px h-4 bg-zen-border" aria-hidden="true"></div>
-      <ThemeToggle />
-    </div>
-  </header>
+        {#if TESTNET}
+          <div class="hidden sm:block w-px h-4 bg-zen-border" aria-hidden="true"></div>
+          <span class="whitespace-nowrap text-xs font-medium text-zen-fg-muted">NEAR Testnet</span>
+        {/if}
+        <div class="w-px h-4 bg-zen-border" aria-hidden="true"></div>
+        <ThemeToggle />
+      </div>
+    </header>
+  {/if}
 
   <main id="main" class="flex-1 flex flex-col">{@render children()}</main>
 

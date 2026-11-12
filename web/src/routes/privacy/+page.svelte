@@ -1,5 +1,5 @@
 <script lang="ts">
-  import PageHeader from '$lib/zen/components/PageHeader.svelte';
+  import PageHeader from '$lib/zarf-kit/components/ui/PageHeader.svelte';
 </script>
 
 <svelte:head><title>Privacy and Terms · Zarf</title></svelte:head>

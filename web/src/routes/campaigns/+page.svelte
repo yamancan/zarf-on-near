@@ -9,17 +9,17 @@
   import { nearView } from '$lib/services';
   import { deadlineText, timeLeft } from '$lib/claim';
   import { UNIT } from '$lib/network';
-  import { ArrowDownToLine, ArrowUpRight, ChevronDown, Info, Send, Wallet } from 'lucide-svelte';
+  import { ArrowDownToLine, ArrowUpRight, ChevronDown, Info, Plus, Send, Wallet } from 'lucide-svelte';
   import Avatar from '$lib/Avatar.svelte';
   import { titleCase } from '$lib/text';
-  import Tooltip from '$lib/zen/components/Tooltip.svelte';
-  import ZenBadge from '$lib/zen/components/ZenBadge.svelte';
+  import Tooltip from '$lib/zarf-kit/components/ui/Tooltip.svelte';
+  import ZenBadge from '$lib/zarf-kit/components/ui/ZenBadge.svelte';
   import Medallion from '$lib/Medallion.svelte';
   import Note from '$lib/Note.svelte';
-  import PageHeader from '$lib/zen/components/PageHeader.svelte';
-  import ZenAlert from '$lib/zen/components/ZenAlert.svelte';
-  import ZenButton from '$lib/zen/components/ZenButton.svelte';
-  import ZenCard from '$lib/zen/components/ZenCard.svelte';
+  import PageHeader from '$lib/zarf-kit/components/ui/PageHeader.svelte';
+  import ZenAlert from '$lib/zarf-kit/components/ui/ZenAlert.svelte';
+  import ZenButton from '$lib/zarf-kit/components/ui/ZenButton.svelte';
+  import ZenCard from '$lib/zarf-kit/components/ui/ZenCard.svelte';
 
   const rpc = env.PUBLIC_NEAR_RPC_URL;
   const contract = env.PUBLIC_CONTRACT_ID;
@@ -140,25 +140,31 @@
   {/if}
 {/snippet}
 
-<div class="w-full max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-12">
-  <!-- PageHeader verbatim (design spec 3.7); the connected account sits on its right -->
-  <PageHeader title="My Campaigns" description="Claims, deadlines and take-backs.">
-    {#snippet extra()}
+<!-- Zarf's distributions page frame (apps/create/src/routes/distributions/+page.svelte:126-151): max-w-7xl, the page's own
+     gutters, a header row with PageHeader on the left and the primary action on the right -->
+<div class="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 h-full flex flex-col gap-8">
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+  <PageHeader title="My Campaigns" description="Claims, deadlines and take-backs." />
+    <div class="flex flex-wrap items-center justify-between sm:justify-end gap-4">
+      <!-- The connected account sits beside the primary action, where Zarf's navbar keeps its wallet button -->
       {#if account}
         <span class="flex items-center gap-2 text-sm">
           <Avatar name={account} /><span class="hidden sm:inline font-mono truncate max-w-40">{account}</span>
           <ZenButton variant="ghost" size="sm" disabled={!!busy} onclick={async () => { await wallet?.signOut(); account = null; rows = null; }}>Disconnect</ZenButton>
         </span>
       {/if}
-    {/snippet}
-  </PageHeader>
+    <ZenButton href="/create" variant="primary" size="lg">
+      {#snippet iconLeft()}<Plus class="w-4 h-4" />{/snippet}New Send
+    </ZenButton>
+    </div>
+  </div>
 
   {#if setupError}
     <ZenAlert variant="error">{setupError}</ZenAlert>
   {:else if !walletReady}
     <Note tone="pending">Loading…</Note>
   {:else if !account}
-    <ZenCard variant="elevated" class="max-w-lg mx-auto !rounded-3xl !p-6 sm:!p-8">
+    <ZenCard variant="elevated" padding="lg" class="max-w-lg mx-auto">
       <div class="flex flex-col items-center text-center space-y-6 py-2">
         <Medallion icon={Wallet} />
         <div class="space-y-2">
@@ -177,7 +183,7 @@
   {:else if rows === null}
     <Note tone="pending">Loading your campaigns…</Note>
   {:else if rows.length === 0}
-    <ZenCard variant="elevated" class="max-w-lg mx-auto !rounded-3xl !p-6 sm:!p-8">
+    <ZenCard variant="elevated" padding="lg" class="max-w-lg mx-auto">
       <div class="flex flex-col items-center text-center space-y-6 py-2">
         <Medallion icon={Send} tone="muted" />
         <div class="space-y-2">

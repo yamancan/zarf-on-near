@@ -1,6 +1,6 @@
 @import 'tailwindcss';
 /* Zen design system, copied from the main repo (web/packages/ui/lib/styles), values unchanged. */
-@import './lib/zen/styles/index.css';
+@import './lib/zarf-kit/styles/index.css';
 
 /* As in the main repo's landing (apps/landing/src/app.css): font-sans is Saira. */
 @theme {
@@ -20,6 +20,11 @@
  * Zen base.css's optimizeLegibility (the one Zen value this overrides).
  */
 html { text-rendering: geometricPrecision; }
+/*
+ * Overscroll: pulled past the top or bottom, the browser shows the root's own ground. Both html and body paint the page
+ * ground and the rubber band is off, so no other layer or texture shows through (T-023, owner 14 Nov).
+ */
+html, body { background-color: var(--zen-bg); overscroll-behavior-y: none; }
 button, input, select, textarea { text-rendering: inherit; } /* form controls reset it to auto */
 
 /* The claim app's deeper fume ground (main repo apps/claim/src/app.css). */

@@ -7,9 +7,9 @@
   import { ChevronDown } from 'lucide-svelte';
   import { twoDecimals } from '$lib/claim';
   import Note from '$lib/Note.svelte';
-  import ZenButton from '$lib/zen/components/ZenButton.svelte';
-  import ZenInput from '$lib/zen/components/ZenInput.svelte';
-  import ZenSelect from '$lib/zen/components/ZenSelect.svelte';
+  import ZenButton from '$lib/zarf-kit/components/ui/ZenButton.svelte';
+  import ZenInput from '$lib/zarf-kit/components/ui/ZenInput.svelte';
+  import ZenSelect from '$lib/zarf-kit/components/ui/ZenSelect.svelte';
   import {
     getQuote, PAYOUT_CHAINS, payoutCapError, withinLossBound, QUOTE_LIFETIME_MS, QuoteError, refusal, resolveAssets, type PayoutAsset, type Quote,
   } from '$lib/intents';

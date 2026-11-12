@@ -12,7 +12,7 @@
   import { UNIT } from '$lib/network';
   import Amount from '$lib/Amount.svelte';
   import Medallion from '$lib/Medallion.svelte';
-  import ZenButton from '$lib/zen/components/ZenButton.svelte';
+  import ZenButton from '$lib/zarf-kit/components/ui/ZenButton.svelte';
 
   let { r, amount, title, contract, campaign, commitment }: {
     r: Receipt | null; amount: string; title?: string; contract: string; campaign: string; commitment: string;

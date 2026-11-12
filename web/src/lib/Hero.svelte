@@ -7,8 +7,8 @@
   import { onMount } from 'svelte';
   import { ArrowRight } from 'lucide-svelte';
   import { TESTNET } from '$lib/network';
-  import { themeStore } from '$lib/zen/stores/themeStore.svelte';
-  import ZenButton from '$lib/zen/components/ZenButton.svelte';
+  import { themeStore } from '$lib/zarf-kit/stores/themeStore.svelte';
+  import ZenButton from '$lib/zarf-kit/components/ui/ZenButton.svelte';
 
   let { tryUrl }: { tryUrl: string } = $props();
 

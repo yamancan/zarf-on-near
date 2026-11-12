@@ -6,7 +6,7 @@
   import { formatAmount } from '$lib/create/recipients';
   import { UNIT } from '$lib/network';
   import Note from '$lib/Note.svelte';
-  import ZenButton from '$lib/zen/components/ZenButton.svelte';
+  import ZenButton from '$lib/zarf-kit/components/ui/ZenButton.svelte';
   import { accountBalances, formatNear, unlockPasskeyAccount } from '$lib/passkey';
 
   let { expected = '', label = 'Open My Account with Face ID' }: { expected?: string; label?: string } = $props();

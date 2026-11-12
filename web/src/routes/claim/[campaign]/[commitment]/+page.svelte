@@ -14,17 +14,18 @@
   import AmountPanel from '$lib/AmountPanel.svelte';
   import Avatar from '$lib/Avatar.svelte';
   import GoogleG from '$lib/GoogleG.svelte';
-  import Tooltip from '$lib/zen/components/Tooltip.svelte';
+  import Tooltip from '$lib/zarf-kit/components/ui/Tooltip.svelte';
   import { swapIn } from '$lib/motion';
   import ClaimRecord from '$lib/ClaimRecord.svelte';
   import { TESTNET, UNAUDITED_LINE, UNIT } from '$lib/network';
   import Medallion from '$lib/Medallion.svelte';
   import Note from '$lib/Note.svelte';
-  import ZenButton from '$lib/zen/components/ZenButton.svelte';
-  import ZenCheckbox from '$lib/zen/components/ZenCheckbox.svelte';
-  import ZenCard from '$lib/zen/components/ZenCard.svelte';
-  import ZenInput from '$lib/zen/components/ZenInput.svelte';
-  import { themeStore } from '$lib/zen/stores/themeStore.svelte';
+  import ZenButton from '$lib/zarf-kit/components/ui/ZenButton.svelte';
+  import ZenCheckbox from '$lib/zarf-kit/components/ui/ZenCheckbox.svelte';
+  import ZenCard from '$lib/zarf-kit/components/ui/ZenCard.svelte';
+  import PageHeader from '$lib/zarf-kit/components/ui/PageHeader.svelte';
+  import ZenInput from '$lib/zarf-kit/components/ui/ZenInput.svelte';
+  import { themeStore } from '$lib/zarf-kit/stores/themeStore.svelte';
   import { formatAmount } from '$lib/create/recipients';
   import { createImplicitAccount, keyFile, type ImplicitAccount } from '$lib/implicit';
   import { createPasskeyAccount, passkeyOffered } from '$lib/passkey';
@@ -290,8 +291,16 @@
   </div>
 {/snippet}
 
-<div class="w-full max-w-lg mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-12">
-  <ZenCard variant="elevated" class="!rounded-3xl !p-6 sm:!p-8">
+<!-- Zarf claim app frame: AppShell container (apps/claim/src/routes/+layout.svelte: w-full max-w-7xl mx-auto p-8 lg:p-12),
+     the page column (apps/claim/src/routes/+page.svelte: max-w-5xl w-full px-4 md:px-0), PageHeader, then the card as
+     LoginPrompt.svelte lays it out (section pt-8, max-w-lg mx-auto, ZenCard elevated, p-8; p-6 on phones for the form) -->
+<div class="w-full max-w-7xl mx-auto p-8 lg:p-12">
+  <div class="h-full flex flex-col relative max-w-5xl w-full px-4 md:px-0">
+    <PageHeader title="Claim Portal" description="Choose where your USDC goes, then confirm with Google." />
+    <section class="w-full pt-8">
+      <div class="max-w-lg mx-auto">
+  <ZenCard variant="elevated" class="overflow-hidden">
+    <div class="p-6 sm:p-8">
     {#if !linkOk}
       {@render terminal(Link2Off, 'muted', 'Broken Link', 'Open the full link from your message.', 'home')}
     {:else if loaded && !link && recalled}
@@ -476,5 +485,9 @@
         </div>
       </div>
     {/if}
+    </div>
   </ZenCard>
+      </div>
+    </section>
+  </div>
 </div>

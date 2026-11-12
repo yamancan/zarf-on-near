@@ -6,8 +6,8 @@
   import { UNIT } from '$lib/network';
   import { claimState, loadAttempt, parseCallback, signedIn } from '$lib/claim';
   import Medallion from '$lib/Medallion.svelte';
-  import ZenButton from '$lib/zen/components/ZenButton.svelte';
-  import ZenCard from '$lib/zen/components/ZenCard.svelte';
+  import ZenButton from '$lib/zarf-kit/components/ui/ZenButton.svelte';
+  import ZenCard from '$lib/zarf-kit/components/ui/ZenCard.svelte';
 
   let failed = $state<{ title: string; line: string; code?: string; cancelled?: boolean } | null>(null);
   // The claim this tab started: its link (salt included) is still in this tab's sessionStorage.
@@ -36,7 +36,7 @@
 <svelte:head><title>Signing in · Zarf</title></svelte:head>
 
 <div class="w-full max-w-lg mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-12">
-  <ZenCard variant="elevated" class="!rounded-3xl !p-6 sm:!p-8">
+  <ZenCard variant="elevated" padding="lg">
     <div class="flex flex-col items-center text-center gap-4 py-2">
       {#if failed}
         {#if failed.cancelled}
