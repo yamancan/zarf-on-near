@@ -17,7 +17,7 @@
   import Tooltip from '$lib/zen/components/Tooltip.svelte';
   import { swapIn } from '$lib/motion';
   import ClaimRecord from '$lib/ClaimRecord.svelte';
-  import { UNAUDITED_LINE, UNIT } from '$lib/network';
+  import { TESTNET, UNAUDITED_LINE, UNIT } from '$lib/network';
   import Medallion from '$lib/Medallion.svelte';
   import Note from '$lib/Note.svelte';
   import ZenButton from '$lib/zen/components/ZenButton.svelte';
@@ -27,6 +27,8 @@
   import { themeStore } from '$lib/zen/stores/themeStore.svelte';
   import { formatAmount } from '$lib/create/recipients';
   import { createImplicitAccount, keyFile, type ImplicitAccount } from '$lib/implicit';
+  import { createPasskeyAccount, passkeyOffered } from '$lib/passkey';
+  import PasskeyAccount from '$lib/PasskeyAccount.svelte';
 
   const campaign = page.params.campaign!;
   const commitment = page.params.commitment!;
@@ -46,6 +48,10 @@
   let busy = $state('');
   let typed = $state('');
   let implicit = $state<ImplicitAccount | null>(null);
+  // true: derived from a passkey's PRF (Face ID unlocks it again); false: that device gave no PRF, so a random key; null: key-file account.
+  let passkeyPrf = $state<boolean | null>(null);
+  // The chain's network once the link is checked; before that (a recalled claim never checks it) the contract id's, as the receipt does.
+  const passkeyOn = $derived(passkeyOffered(network || (TESTNET ? 'testnet' : ''), env.PUBLIC_IMPLICIT_ACCOUNTS, env.PUBLIC_PASSKEY_ACCOUNTS));
   let exported = $state(false);
   let confirmed = $state(false);
   let error = $state('');
@@ -116,7 +122,7 @@
   }
   const ready = $derived(
     !!link && check === 'ok' && !busy &&
-      (mode === 'chain' ? !!payout : isValidAccountId(destination) && (mode === 'existing' ? accountOk : exported && confirmed)),
+      (mode === 'chain' ? !!payout : isValidAccountId(destination) && (mode === 'existing' ? accountOk : passkeyPrf === true || (exported && confirmed))),
   );
 
   $effect(() => {
@@ -194,8 +200,21 @@
     try {
       implicit = await createImplicitAccount();
       exported = confirmed = false;
+      passkeyPrf = null;
     } catch {
       error = 'This browser cannot create a NEAR key. Use an existing account instead.';
+    }
+  }
+
+  async function createWithPasskey() {
+    error = '';
+    try {
+      const r = await createPasskeyAccount();
+      implicit = r.account;
+      passkeyPrf = r.prf;
+      exported = confirmed = false;
+    } catch {
+      error = 'Face ID was cancelled or is not available in this browser. Try again, or save a key file instead.';
     }
   }
 
@@ -243,7 +262,7 @@
         return;
       }
     }
-    saveAttempt({ campaign, commitment, ...link!, destination: to, attemptId, intents });
+    saveAttempt({ campaign, commitment, ...link!, destination: to, attemptId, intents, ...(mode === 'new' && passkeyPrf ? { passkey: true as const } : {}) });
     location.href = googleAuthUrl({
       clientId,
       redirectUri: `${location.origin}/auth/google`,
@@ -278,6 +297,7 @@
     {:else if loaded && !link && recalled}
       <div class="flex flex-col items-center text-center gap-4 py-2" in:swapIn>
         <ClaimRecord r={recalled} amount={recalled.amount} contract={env.PUBLIC_CONTRACT_ID ?? ''} {campaign} {commitment} />
+        {#if passkeyOn}<PasskeyAccount label="Claimed with Face ID? Open Your Account" />{/if}
       </div>
     {:else if loaded && !link && !recalling}
       {@render terminal(Link2Off, 'muted', 'Incomplete Link', INCOMPLETE_LINE, 'home')}
@@ -288,6 +308,7 @@
     {:else if check === 'claimed'}
       <div class="flex flex-col items-center text-center gap-4 py-2" in:swapIn>
         <ClaimRecord r={paid} amount={link!.amount} title="Already Claimed" contract={env.PUBLIC_CONTRACT_ID ?? ''} {campaign} {commitment} />
+        {#if passkeyOn}<PasskeyAccount label="Claimed with Face ID? Open Your Account" />{/if}
       </div>
     {:else if check === 'pending'}
       {@render terminal(Clock, 'muted', 'Payment in Progress', 'It usually settles within a minute.', 'recheck')}
@@ -410,11 +431,20 @@
                 {/if}
               {/if}
             </div>
+          {:else if !implicit && passkeyOn}
+            <p class="text-sm text-zen-fg-muted">We create a NEAR account that your Face ID or device passkey unlocks. Its key is never stored, here or with us.</p>
+            <ZenButton variant="secondary" class="self-center" onclick={createWithPasskey}>New Account with Face ID</ZenButton>
+            <ZenButton variant="ghost" size="sm" class="self-center" onclick={create}>Use a Key File Instead</ZenButton>
           {:else if !implicit}
             <p class="text-sm text-zen-fg-muted">We create a NEAR account in this browser. Only you get its key.</p>
             <ZenButton variant="secondary" class="self-center" onclick={create}>Create NEAR Account</ZenButton>
+          {:else if passkeyPrf}
+            <p class="text-sm text-zen-fg-muted">Your new account <span class="font-mono text-zen-fg" title={implicit.accountId}>{middle(implicit.accountId, 8)}</span></p>
+            <Note tone="info">Face ID unlocks it again on this device, or on any device that syncs your passkeys. If you delete the passkey, the funds are gone unless you keep a backup key.</Note>
+            <ZenButton variant="ghost" size="sm" class="self-start" onclick={download}>{exported ? 'Backup Key Saved' : 'Download Backup Key'}</ZenButton>
           {:else}
             <p class="text-sm text-zen-fg-muted">Your new account <span class="font-mono text-zen-fg" title={implicit.accountId}>{middle(implicit.accountId, 8)}</span></p>
+            {#if passkeyPrf === false}<Note tone="info">This device could not tie the account to Face ID, so it uses a key file instead.</Note>{/if}
             <Note tone="info">Save its key now. Without it nobody can move these funds, and we never see it.</Note>
             <ZenButton variant="secondary" class="self-start" onclick={download}>Download Key</ZenButton>
             <ZenCheckbox bind:checked={confirmed} disabled={!exported} label="I saved the key somewhere safe" />

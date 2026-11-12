@@ -148,6 +148,7 @@ export interface Attempt {
   destination: string; // for a cross-chain payout: the 1Click deposit address
   attemptId: string;
   intents?: PayoutAttempt;
+  passkey?: true; // T-021: the destination is a passkey account (Face ID reopens it)
 }
 
 /** A real 1Click quote the sign-in is bound to (its deposit address is the destination). */
@@ -232,6 +233,7 @@ export interface Receipt {
   amount: string; // USDC base units (the link's amount)
   destination: string; // the NEAR account, or for a cross-chain payout the address on that chain
   txHash: string; // the NEAR claim tx; '' when the relayer's answer was lost (the chain still said claimed)
+  passkey?: true; // T-021: the destination is a passkey account (Face ID reopens it)
   at?: number; // when this browser saw the claim land (ms)
   chainName?: string; // set for a cross-chain payout
   bridge?: BridgeOutcome; // set for a cross-chain payout

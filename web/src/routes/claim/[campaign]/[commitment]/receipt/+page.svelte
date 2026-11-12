@@ -19,6 +19,8 @@
   import ZenCard from '$lib/zen/components/ZenCard.svelte';
   import { describeStatus, getStatus, loadPayout, nextStep, notReturnedYet, savePayout, submitDeposit, type StatusView } from '$lib/intents';
   import BridgeDetails from '$lib/BridgeDetails.svelte';
+  import { passkeyOffered } from '$lib/passkey';
+  import PasskeyAccount from '$lib/PasskeyAccount.svelte';
 
   const attempt = loadAttempt();
   const idToken = signedIn.idToken;
@@ -30,6 +32,9 @@
   let failCode = $state(''); // picks the card: an expired sign-in, another Google account, a final refusal
   const contract = env.PUBLIC_CONTRACT_ID ?? '';
   const campaignId = page.params.campaign!, commitmentId = page.params.commitment!;
+  // T-021: a passkey account opens again with one Face ID (the key is re-derived, never stored).
+  const passkeyOn = passkeyOffered(TESTNET ? 'testnet' : '', env.PUBLIC_IMPLICIT_ACCOUNTS, env.PUBLIC_PASSKEY_ACCOUNTS);
+
   let txHash = $state('');
   let starterNear = $state(''); // the relayer's testnet starter NEAR, when it sent some with this claim
   const explorer = $derived(env.PUBLIC_EXPLORER_TX_URL && txHash ? `${env.PUBLIC_EXPLORER_TX_URL}${txHash}` : '');
@@ -120,7 +125,7 @@
         step = 'done';
         clearAttempt(); // salt and destination are no longer needed in this tab
         saveReceipt(contract, attempt.campaign, attempt.commitment, {
-          amount: attempt.amount, txHash, at: Date.now(), destination: attempt.intents?.recipient ?? attempt.destination,
+          amount: attempt.amount, txHash, at: Date.now(), destination: attempt.intents?.recipient ?? attempt.destination, ...(attempt.passkey ? { passkey: true as const } : {}),
           ...(attempt.intents ? { chainName: attempt.intents.chainName, bridge: 'in-transit' as const, depositAddress, refundTo: attempt.intents.refundTo } : {}),
         });
         if (attempt.intents) {
@@ -222,7 +227,7 @@
   {/if}
 {/snippet}
 
-{#snippet nearDone(amount: string, to: string, hash: string, starter: string)}
+{#snippet nearDone(amount: string, to: string, hash: string, starter: string, passkey = false)}
   <!-- Main claim app ClaimStep5Submit: header row, Amount Highlight, two-button grid (h-14 rounded-2xl) -->
   <div class="w-full text-left space-y-8" in:swapIn>
     <div class="flex items-start gap-4">
@@ -242,6 +247,7 @@
     {:else if isImplicitAccount(to)}
       <p class="text-xs text-zen-fg-subtle">To move these funds later, this account needs a little NEAR for gas.</p>
     {/if}
+    {#if passkeyOn && passkey && isImplicitAccount(to)}<PasskeyAccount expected={to} />{/if}
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
       {#if hash && env.PUBLIC_EXPLORER_TX_URL}
         <a href="{env.PUBLIC_EXPLORER_TX_URL}{hash}" target="_blank" rel="external noopener noreferrer" class="flex items-center justify-center border border-zen-border-subtle bg-zen-bg hover:bg-zen-fg/5 h-14 rounded-2xl text-[10px] uppercase tracking-widest font-bold transition-colors">
@@ -275,7 +281,7 @@
         <p class="text-sm text-zen-fg-muted max-w-xs" role="alert">NEAR is not answering right now.</p>
         <ZenButton variant="primary" class="w-full sm:w-auto" onclick={verifyRemembered}>Check Again</ZenButton>
       {:else if stored && !stored.chainName}
-        {@render nearDone(stored.amount, stored.destination, stored.txHash, '')}
+        {@render nearDone(stored.amount, stored.destination, stored.txHash, '', !!stored.passkey)}
       {:else if stored}
         <ClaimRecord r={stored} amount={stored.amount} {contract} campaign={campaignId} commitment={commitmentId} />
       {:else if !resumed && (!ok || !attempt)}
@@ -287,6 +293,7 @@
         {:else}
           <h1 class="text-xl font-bold">Nothing to Show Yet</h1>
           <p class="text-sm text-zen-fg-muted max-w-xs">This page shows your claim after you sign in with Google.</p>
+          {#if passkeyOn}<PasskeyAccount label="Claimed with Face ID? Open Your Account" />{/if}
         {/if}
         {#if canGoBack}
           {@render back()}
@@ -356,7 +363,7 @@
         {/if}
       {:else if attempt}
         {#if step === 'done'}
-          {@render nearDone(attempt.amount, attempt.destination, txHash, starterNear)}
+          {@render nearDone(attempt.amount, attempt.destination, txHash, starterNear, !!attempt.passkey)}
         {:else if working}
           <div class="w-full text-left space-y-8" in:swapIn>
             <div class="space-y-1">
