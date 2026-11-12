@@ -3,7 +3,7 @@
   import { page } from '$app/state';
   import { env } from '$env/dynamic/public';
   import {
-    classifyDestination, claimState, nearAccountReady, type AccountCheck, deadlineText, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isValidAccountId, loadAttempt, loadReceipt,
+    classifyDestination, claimState, isEthAccount, missingAccountLine, nearAccountReady, type AccountCheck, deadlineText, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isValidAccountId, loadAttempt, loadReceipt,
     middle, newAttemptId, parseLinkFragment, saveAttempt, timeLeft, type LinkSecret,
   } from '$lib/claim';
   import { rootFromProof } from '$lib/merkle';
@@ -93,7 +93,7 @@
     dest.kind === 'wrong'
       ? dest.reason
       : acct?.id === destination && acct.state === 'missing'
-        ? dest.kind === 'named' ? 'No such account. Check the spelling.' : 'Not on NEAR yet. Check every character.'
+        ? missingAccountLine(dest)
         : acct?.id === destination && acct.state === 'error'
           ? "Couldn't check. Retry in a minute."
           : null,
@@ -356,7 +356,7 @@
                   <span class="sr-only">found</span>
                   {#if accountOk}<ZenButton variant="ghost" size="xs" class="ml-auto" onclick={() => ((confirmedFor = ''), backToField())}>Change</ZenButton>{/if}
                 </p>
-              {:else if acct?.state === 'missing' && dest.kind === 'implicit'}
+              {:else if acct?.state === 'missing' && dest.kind === 'implicit' && !isEthAccount(dest.id)}
                 <ZenCheckbox bind:checked={unfundedAck} label="Only the holder of its private key can use these funds. I hold it." />
               {/if}
               {#if askConfirm}
@@ -371,7 +371,7 @@
                   </div>
                 </div>
               {/if}
-              {#if acct?.state !== 'found' && !(dest.kind === 'implicit' && acct?.state === 'missing')}
+              {#if acct?.state !== 'found' && !(dest.kind === 'implicit' && !isEthAccount(dest.id) && acct?.state === 'missing')}
                 <div class="flex flex-wrap items-center gap-2">
                   <ZenButton variant="tonal" size="xs" onclick={useWallet} disabled={walletNote === 'Opening your wallet…'}>
                     {#snippet iconLeft()}<Wallet class="w-3.5 h-3.5" />{/snippet}Use My Wallet

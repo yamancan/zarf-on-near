@@ -11,6 +11,8 @@ export const isValidAccountId = (id: string): boolean => id.length >= 2 && id.le
 
 /** A NEAR implicit account: the hex of an ed25519 public key. It exists on chain only once NEAR is sent to it. */
 export const isImplicitAccount = (id: string): boolean => /^[0-9a-f]{64}$/.test(id);
+/** NEP-518 (MetaMask) id: exists on NEAR only once it has received NEAR, which deploys its wallet contract (T-016). */
+export const isEthAccount = (id: string): boolean => /^0x[0-9a-f]{40}$/.test(id);
 
 export type Destination =
   | { kind: 'empty' }
@@ -49,8 +51,18 @@ export type AccountCheck = { id: string; state: 'checking' | 'found' | 'missing'
 export const nearAccountReady = (dest: Destination, acct: AccountCheck, unfundedAck: boolean, confirmedFor: string): boolean =>
   (dest.kind === 'named' || dest.kind === 'implicit') &&
   acct?.id === dest.id &&
-  (acct.state === 'found' || (acct.state === 'missing' && dest.kind === 'implicit' && unfundedAck)) &&
+  (acct.state === 'found' || (acct.state === 'missing' && dest.kind === 'implicit' && !isEthAccount(dest.id) && unfundedAck)) &&
   confirmedFor === dest.id;
+
+/** The line under the field when the typed account is not on chain yet. A new 0x id can't spend until it holds NEAR. */
+export const missingAccountLine = (dest: Destination): string =>
+  dest.kind !== 'named' && dest.kind !== 'implicit'
+    ? ''
+    : dest.kind === 'named'
+      ? 'No such account. Check the spelling.'
+      : isEthAccount(dest.id)
+        ? 'This MetaMask address is new on NEAR: send it a little test NEAR first, then claim.'
+        : 'Not on NEAR yet. Check every character.';
 
 export const isCampaignId = (s: string): boolean => /^(0|[1-9]\d{0,19})$/.test(s) && BigInt(s) < 1n << 64n;
 export const isHex32 = (s: string): boolean => /^[0-9a-f]{64}$/.test(s);

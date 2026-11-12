@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import vectors from '../../../spec/vectors.json';
 import {
-  classifyDestination, nearAccountReady, claimState, deadlineText, timeLeft, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isImplicitAccount, isValidAccountId, loadAttempt, newAttemptId,
+  classifyDestination, nearAccountReady, missingAccountLine, claimState, deadlineText, timeLeft, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isImplicitAccount, isValidAccountId, loadAttempt, newAttemptId,
   decodeProof, encodeProof, parseCallback, parseLinkFragment, saveAttempt, clearAttempt, saveReceipt, loadReceipt, settleReceipt, claimedAt, middle, twoDecimals, shownAmount, confirmRemembered, RECEIPT_TTL_MS,
 } from './claim';
 
@@ -344,7 +345,19 @@ describe('shared contracts and 0x ids (T-002 items 3-4)', () => {
     expect(classifyDestination(` ${eth} `, { eth: true })).toEqual({ kind: 'implicit', id: eth.toLowerCase() });
     expect(classifyDestination(eth + 'a', { eth: true }).kind).toBe('wrong');
     const d = classifyDestination(eth, { eth: true });
-    expect(nearAccountReady(d, { id: eth.toLowerCase(), state: 'missing' }, true, eth.toLowerCase())).toBe(true);
-    expect(nearAccountReady(d, { id: eth.toLowerCase(), state: 'missing' }, false, eth.toLowerCase())).toBe(false);
+    expect(nearAccountReady(d, { id: eth.toLowerCase(), state: 'found' }, false, eth.toLowerCase())).toBe(true);
+  });
+  it('a 0x id not on NEAR yet is refused with its own line, never the key-holder checkbox (T-016)', () => {
+    const d = classifyDestination(eth, { eth: true });
+    expect(nearAccountReady(d, { id: eth.toLowerCase(), state: 'missing' }, true, eth.toLowerCase())).toBe(false);
+    expect(missingAccountLine(d)).toBe('This MetaMask address is new on NEAR: send it a little test NEAR first, then claim.');
+    expect(missingAccountLine(classifyDestination('a'.repeat(64)))).toBe('Not on NEAR yet. Check every character.');
+    expect(missingAccountLine(classifyDestination('alice.testnet'))).toBe('No such account. Check the spelling.');
+  });
+  it('0x destinations are on in the testnet build only', () => {
+    const cfg = JSON.parse(readFileSync(new URL('../../wrangler.jsonc', import.meta.url), 'utf8').replace(/^\s*\/\/.*$/gm, ''));
+    expect(cfg.env.testnet.vars.PUBLIC_ETH_ACCOUNTS).toBe('on');
+    expect(cfg.env.mainnet.vars.PUBLIC_ETH_ACCOUNTS).toBe('');
+    expect(cfg.vars.PUBLIC_ETH_ACCOUNTS).toBe('');
   });
 });
