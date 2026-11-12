@@ -5,6 +5,7 @@ import { campaignIdFrom, CreateError, stubCreator, testnetCreator, type Campaign
 import { handleFaucet, type FaucetDeps } from '../src/faucet';
 import { takeQuota, type KvLike } from '../src/limits';
 import { base58Encode, encodeTx, parseNearKey } from '../src/near';
+import { usdcText } from '../src/page';
 import { verifyTurnstile } from '../src/turnstile';
 
 const memKv = (): KvLike & { m: Map<string, string> } => {
@@ -373,7 +374,7 @@ describe('worker', () => {
     const linked = await (await worker.fetch(new Request('https://f.example/try'), { CLAIM_HOST: 'https://claim.example/' } as never)).text();
     expect(linked).toContain('href="https://claim.example/privacy"');
     expect(linked).toContain('href="https://claim.example/"');
-    expect(linked).toContain('href="https://docs.near.org/getting-started/create-account"');
+    expect(linked).not.toContain('docs.near.org');
     const hostile = await (await worker.fetch(new Request('https://f.example/try'), { CLAIM_HOST: 'https://x.example/"><script>' } as never)).text();
     expect(hostile).not.toContain('x.example');
     expect(html).not.toMatch(/<script>(?!<)/);
@@ -420,5 +421,66 @@ describe('review m4', () => {
   it('campaignIdFrom checks the standard and the event name', () => {
     expect(campaignIdFrom(out(ev({}).replace('"zarf-near"', '"nep171"')), 'esc.testnet', want)).toBeNull();
     expect(campaignIdFrom(out(ev({}).replace('campaign_created', 'reclaimed')), 'esc.testnet', want)).toBeNull();
+  });
+});
+
+describe('judges page presentation', () => {
+  it('usdcText reads 6-decimal base units, and nothing else', () => {
+    expect(usdcText('500000')).toBe('0.5');
+    expect(usdcText('1000000')).toBe('1');
+    expect(usdcText('12345678')).toBe('12.345678');
+    expect(usdcText('1')).toBe('0.000001');
+    for (const bad of ['', '0', '05', '-1', '1.5', '1e6', '"><x']) expect(usdcText(bad)).toBeNull();
+  });
+
+  it('shows the configured amount, never an unvalidated one', async () => {
+    const { default: worker } = await import('../src/index');
+    const page = async (AMOUNT: string) => (await worker.fetch(new Request('https://f.example/try'), { AMOUNT } as never)).text();
+    expect(await page('500000')).toContain('<h1>Get 0.5 test USDC at your Google email.</h1>');
+    const hostile = await page('5"><script>');
+    expect(hostile).toContain('<h1>Get test USDC at your Google email.</h1>');
+    expect(hostile).not.toContain('"><script>');
+  });
+
+  it('serves the font and favicon from its own origin, under the same CSP', async () => {
+    const { default: worker } = await import('../src/index');
+    const csp = (await worker.fetch(new Request('https://f.example/try'), {} as never)).headers.get('Content-Security-Policy')!;
+    expect(csp).toContain("font-src 'self'");
+    expect(csp).toContain("img-src 'self'");
+    expect(csp.match(/https:\/\/[^\s;']+/g)!.every((o) => o === 'https://challenges.cloudflare.com')).toBe(true);
+    const font = await worker.fetch(new Request('https://f.example/saira.woff2'), {} as never);
+    expect(font.headers.get('Content-Type')).toBe('font/woff2');
+    expect(new TextDecoder().decode((await font.arrayBuffer()).slice(0, 4))).toBe('wOF2');
+    const icon = await worker.fetch(new Request('https://f.example/favicon.svg'), {} as never);
+    expect(icon.headers.get('Content-Type')).toBe('image/svg+xml');
+    expect((await worker.fetch(new Request('https://f.example/saira.woff2', { method: 'POST' }), {} as never)).status).toBe(404);
+    // The asset route is pinned to its two exact paths.
+    for (const p of ['/x.svg', '/saira-other.woff2', '/saira.woff2/', '/favicon.svg.map'])
+      expect((await worker.fetch(new Request('https://f.example' + p), {} as never)).status).toBe(404);
+  });
+
+  it('opens the account help in a new tab, at a wallet, and says this tab keeps the link', async () => {
+    const { default: worker } = await import('../src/index');
+    const html = await (await worker.fetch(new Request('https://f.example/try'), {} as never)).text();
+    const a = html.match(/<a id="wallet"[^>]*>/)![0];
+    expect(a).toContain('href="https://testnet.mynearwallet.com"');
+    expect(a).toContain('target="_blank"');
+    expect(a).toMatch(/rel="[^"]*\bnoopener\b[^"]*"/);
+    expect(html).toContain('This tab keeps your link.');
+    // Every new-tab link drops the opener.
+    for (const t of html.match(/<a [^>]*target="_blank"[^>]*>/g)!) expect(t).toMatch(/rel="noopener noreferrer"/);
+  });
+
+  it('links the footer (Send, Campaigns, Privacy) only to a safe https claim host', async () => {
+    const { default: worker } = await import('../src/index');
+    const page = async (CLAIM_HOST?: string) => (await worker.fetch(new Request('https://f.example/try'), { CLAIM_HOST } as never)).text();
+    const nav = (html: string) => html.match(/<nav aria-label="Footer">(.*?)<\/nav>/)?.[1] ?? null;
+    expect(nav(await page('https://claim.example/'))).toBe(
+      '<a href="https://claim.example/create">Send</a><a href="https://claim.example/campaigns">Campaigns</a><a href="https://claim.example/privacy">Privacy</a>');
+    for (const bad of [undefined, '', 'http://claim.example', 'javascript:alert(1)', '//claim.example', 'https://claim.example/path', 'https://x.example/"><script>']) {
+      const html = await page(bad);
+      expect(nav(html)).toBeNull(); // no footer links rather than links to this page's own 404s
+      expect(html).not.toContain('claim.example');
+    }
   });
 });
