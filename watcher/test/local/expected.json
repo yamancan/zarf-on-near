@@ -1,0 +1,10 @@
+{
+  "page": "/claim/1/0",
+  "html": "ef35e3dc38a158dfcdee95140a5b3fd7b63ed0c4dccfb49b7cecca61a8d4f870",
+  "scripts": {
+    "/_app/immutable/chunks/c.C1.js": "860d22483bafba5ad6b4e560e145fd76102816089b204ea9c53695bb2d4070de",
+    "/_app/immutable/entry/app.B1.js": "62aa2494673741d29606de55127fd3144ecdeb75311fc9a85bb2f0ae2d51b003",
+    "/_app/immutable/entry/start.A1.js": "1a3b1d3d9fb377049afeed03bc81b4a6bfad043a32ac0f783c6ed67e46a1e21e",
+    "/_app/immutable/nodes/0.D1.js": "9f926b808e8b3a181f052d491377178aba19039f881158696ab48d0e73e4e00c"
+  }
+}
