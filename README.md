@@ -18,8 +18,8 @@ Zarf link is useless without that person's Google account.
   (accounts, keys and versions: `docs/deploy/testnet.md`)
 
 > Status: live on NEAR testnet. A real Google claim has run end to end on the hosted app. The
-> cross-chain payout (NEAR Intents) is built but has not run through the bridge yet. The evidence
-> table below says what has run.
+> cross-chain payout and funding (NEAR Intents) are built but have not run with real money yet. The
+> evidence table below says what has run.
 
 **What it uses from NEAR** (each one is in the code and on testnet unless it says otherwise):
 
@@ -34,13 +34,19 @@ Zarf link is useless without that person's Google account.
 5. **Promise callbacks**: a payout that fails on the token rolls the claim back to unclaimed, so a
    claim cannot pay twice (`on_claim`).
 6. **NEAR Connect** wallet selector for senders (Meteor, Intear, Nightly; HOT on mainnet).
-7. **NEAR Intents (1Click)** payout to USDC on Base, Arbitrum or Ethereum: built, not yet run through
-   the bridge.
+7. **NEAR Intents (1Click)** both ways, built, not yet run with real money: a recipient can take the payout as
+   USDC on Base, Arbitrum or Ethereum, and a sender can fund a campaign from USDC on those chains (1Click
+   delivers it as NEAR USDC to the sender's own account; mainnet only, since 1Click has no testnet: on testnet
+   the send page shows a live dry quote and offers nothing to pay).
 8. **Any NEAR account as the destination**: named, implicit, or NEP-518 `0x` (Ethereum) accounts. A
    `0x` account received a payout and spent it with its Ethereum key on testnet
    ([payout](https://testnet.nearblocks.io/txns/2Zi796Z4k87JPLkgt8Dtsu1iZxhThtVcj4dPUCCNgRtJ),
    [spend](https://testnet.nearblocks.io/txns/FkRvT7Wt77DwWpgosZJ7EG31rfFSJbKW6voxCW4MAafe)); the claim
    form accepts `0x` when `PUBLIC_ETH_ACCOUNTS=on`.
+
+**No wallet yet?** On testnet a recipient can create a NEAR account with Face ID or Touch ID: the account's
+key is derived from a passkey (WebAuthn PRF) each time it is opened and never stored, and a key file is the
+fallback where the device gives no PRF. It is an unaudited in-browser wallet, testnet only (`web/src/lib/passkey.ts`).
 
 Google sign-in is not a NEAR feature: our verifier checks the Google token, and the contract checks
 the verifier's signature. The verifier is a server we run and you trust (Trust model, below).
@@ -118,6 +124,10 @@ Read this before using it with real money.
   claim page uses the same list only to read the recipient's account name ("Use my wallet"), never to sign,
   and the recipient confirms that name before Google sign-in. With 0x accounts switched on there it also
   offers Ethereum Wallets (MetaMask), whose code evm-on-near.dev serves unpinned; senders never get it.
+- **The Face ID account is a wallet inside the claim page** (testnet only). Its key is re-derived from the
+  passkey on each opening and held in the page's memory while it is open; code running on the claim origin
+  could read it then. Deleting the passkey loses the funds unless the key file was kept, and the passkey is
+  bound to the claim site's domain. Nobody has audited it.
 - **Circle controls USDC.** Circle can pause USDC or block an account. That would stop claims and take-backs
   (`reclaim`) until Circle lifts it, and nothing in Zarf can override it.
 - **Unaudited, and capped by the app.** Zarf on NEAR has not had a security audit. On mainnet the create app
@@ -128,8 +138,8 @@ Read this before using it with real money.
   for each claim. The unused reservation returns to the sender's free pre-pay on `reclaim`, and
   `prepay_withdraw` sends free pre-pay back to the sender.
 
-Known limit: the recipient needs an existing NEAR account. An in-browser account option is built
-but switched off in every environment, since a new account has no NEAR to move the USDC on.
+Known limit: on mainnet the recipient needs an existing NEAR account. The in-browser account (a key file,
+or the Face ID account above) is switched on on testnet only.
 On testnet only, after a paid claim, a destination that holds under 0.005 NEAR (or a new implicit or `0x`
 account) gets 0.02 test NEAR once, from a separate gas account with its own key, never the relayer's;
 at most 50 a day, and never on mainnet (`relayer/src/starter.ts`). Gas for the claim itself
@@ -224,6 +234,7 @@ includes it and rejects its tokens (`verifier/test/demo.test.ts`).
 | The contract pays a claim on testnet and refuses a repeat (contract-level evidence on 0.1.2, not a Google claim) | claim `Cmi5X9XyiQjSfhJDahWz6TvZKSjkVX5MKjFqAYS7m7Zt`; repeat `FLmmkbCQckFQWK9CEKxmxrtMrf2XLB28qR2guPnk6RFL` → `E105` |
 | A real claim end to end on testnet: a link from the judges' page, Google sign-in on the hosted app, the verifier's signature, the relayer's transaction | tx `AY7GFZSLZa5R26YTAUyUWA6uTBMJ9MAcmBaZkjnFMa2F` (`zarf-near-relayer-1111.testnet` → `zarf-near-1112.testnet` `claim`, campaign 2, 0.5 test USDC to `zarf-near-dest3-1112.testnet`, events `claim_started` and `claim_paid`). Check: `curl -s https://test.rpc.fastnear.com -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tx","params":{"tx_hash":"AY7GFZSLZa5R26YTAUyUWA6uTBMJ9MAcmBaZkjnFMa2F","sender_account_id":"zarf-near-relayer-1111.testnet"}}'` |
 | A cross-chain claim through NEAR Intents lands on Base | not run yet |
+| A sender funds a campaign from USDC on Base, Arbitrum or Ethereum through NEAR Intents | not run yet (mainnet only) |
 
 ## Prior work, baseline and libraries
 
@@ -262,6 +273,7 @@ History: [hackathon-submission](https://github.com/yamancan/zarf-on-near/tree/ha
 | relayer (tests only) | `@near-js/transactions` 2.5.1, `@near-js/crypto` 2.5.1 | reference implementation the transaction bytes are checked against |
 | web | `@sveltejs/kit`, `svelte`, `vite`, `@sveltejs/adapter-cloudflare` | apps |
 | web (claim, cross-chain step) | `@noble/hashes` 1.8.0 | keccak-256 for the EIP-55 address checksum |
+| web (send, fund from another chain) | `uqr` 0.1.3 (MIT) | the deposit address as a QR code |
 | web (send pages; claim form reads the account only) | `@hot-labs/near-connect` 0.12.0, with a pinned wallet list (Meteor, Intear, Nightly; HOT on mainnet; Ethereum Wallets on the claim form with 0x on) | sender wallet: NEAR Connect, NEAR's replacement for the deprecated wallet selector (MyNearWallet stopped accepting app connections in Nov 2026) |
 | all | `typescript`, `vitest`, `wrangler`, `svelte-check` | build and tests |
 | contract | `near-sdk` 5.26.1 (Rust 1.86.0) | the escrow; built with `cargo-near` |
