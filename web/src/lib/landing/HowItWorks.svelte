@@ -206,9 +206,8 @@
                                                         <div
                                                             class="w-7 h-7 rounded-full bg-base-content/[0.04] flex items-center justify-center"
                                                         >
-                                                            <Mail
-                                                                class="w-3.5 h-3.5 text-zen-fg-muted"
-                                                            />
+                                                            <!-- zarf-near: the Gmail mark, not an envelope (owner feedback #6) -->
+                                                            <img src="/google/gmail.svg" alt="" width="14" height="14" class="w-3.5 h-3.5" />
                                                         </div>
                                                         <div class="flex-1 space-y-1.5">
                                                             <div
