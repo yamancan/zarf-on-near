@@ -5,7 +5,7 @@
   import { CLAIMED_NO_RECORD, EXPLORER_LABEL, claimStartedHere, holdPage, claimedAt, clearAttempt, confirmRemembered, isImplicitAccount, loadAttempt, loadReceipt, middle, saveReceipt, settleReceipt, shownAmount, signedIn, type Receipt } from '$lib/claim';
   import { accountExplorerUrl, TESTNET, UNIT } from '$lib/network';
   import ClaimRecord from '$lib/ClaimRecord.svelte';
-  import { canRetry, ClaimError, describeError, errorCode, failureHeading, getClaimState, isUnmapped, relayAndSettle, requestSignature, submitClaim } from '$lib/services';
+  import { canRetry, ClaimError, describeError, errorCode, failureHeading, getClaimState, isUnmapped, relayAndSettle, requestSignature, starterLine, submitClaim } from '$lib/services';
   import { formatAmount } from '$lib/create/recipients';
   import { AlertTriangle, ArrowUpRight, Check, CheckCircle2, ChevronDown, Clock, ExternalLink, Loader2, Mail, Undo2 } from 'lucide-svelte';
   import AmountPanel from '$lib/AmountPanel.svelte';
@@ -31,6 +31,7 @@
   const contract = env.PUBLIC_CONTRACT_ID ?? '';
   const campaignId = page.params.campaign!, commitmentId = page.params.commitment!;
   let txHash = $state('');
+  let starterNear = $state(''); // the relayer's testnet starter NEAR, when it sent some with this claim
   const explorer = $derived(env.PUBLIC_EXPLORER_TX_URL && txHash ? `${env.PUBLIC_EXPLORER_TX_URL}${txHash}` : '');
   // A reload after the NEAR claim has no sign-in left, but the payout it started can still be followed.
   const resumed = ok ? null : loadPayout(contract, campaignId, commitmentId);
@@ -111,7 +112,7 @@
       step = 'paying';
       // A reverted transfer (409 E115) and other refusals throw; a lost answer follows the chain (relayAndSettle).
       const settled = await relayAndSettle(
-        () => submitClaim(env.PUBLIC_RELAYER_URL, args).then((r) => ((txHash = r.txHash), (step = 'settling'), r)),
+        () => submitClaim(env.PUBLIC_RELAYER_URL, args).then((r) => ((txHash = r.txHash), (starterNear = r.starterNear ?? ''), (step = 'settling'), r)),
         () => getClaimState(env.PUBLIC_NEAR_RPC_URL, env.PUBLIC_CONTRACT_ID, attempt.campaign, attempt.commitment),
       );
       const state = settled.state;
@@ -221,7 +222,7 @@
   {/if}
 {/snippet}
 
-{#snippet nearDone(amount: string, to: string, hash: string)}
+{#snippet nearDone(amount: string, to: string, hash: string, starter: string)}
   <!-- Main claim app ClaimStep5Submit: header row, Amount Highlight, two-button grid (h-14 rounded-2xl) -->
   <div class="w-full text-left space-y-8" in:swapIn>
     <div class="flex items-start gap-4">
@@ -236,7 +237,9 @@
       </div>
     </div>
     <AmountPanel label="You Received" value={formatAmount(BigInt(amount))} unit={UNIT} />
-    {#if isImplicitAccount(to)}
+    {#if starterLine(starter)}
+      <p class="text-xs text-zen-fg-subtle">{starterLine(starter)}</p>
+    {:else if isImplicitAccount(to)}
       <p class="text-xs text-zen-fg-subtle">To move these funds later, this account needs a little NEAR for gas.</p>
     {/if}
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -272,7 +275,7 @@
         <p class="text-sm text-zen-fg-muted max-w-xs" role="alert">NEAR is not answering right now.</p>
         <ZenButton variant="primary" class="w-full sm:w-auto" onclick={verifyRemembered}>Check Again</ZenButton>
       {:else if stored && !stored.chainName}
-        {@render nearDone(stored.amount, stored.destination, stored.txHash)}
+        {@render nearDone(stored.amount, stored.destination, stored.txHash, '')}
       {:else if stored}
         <ClaimRecord r={stored} amount={stored.amount} {contract} campaign={campaignId} commitment={commitmentId} />
       {:else if !resumed && (!ok || !attempt)}
@@ -353,7 +356,7 @@
         {/if}
       {:else if attempt}
         {#if step === 'done'}
-          {@render nearDone(attempt.amount, attempt.destination, txHash)}
+          {@render nearDone(attempt.amount, attempt.destination, txHash, starterNear)}
         {:else if working}
           <div class="w-full text-left space-y-8" in:swapIn>
             <div class="space-y-1">

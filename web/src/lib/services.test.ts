@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import vectors from '../../../spec/vectors.json';
-import { accountExists, canRetry, ClaimError, describeCheckError, describeError, errorCode, failureHeading, isUnmapped, getCampaign, getClaimState, outcomeAfterRelay, relayAndSettle, relayAnswerLost, requestSignature, settleClaim, submitClaim, type ClaimState } from './services';
+import { accountExists, canRetry, ClaimError, describeCheckError, describeError, errorCode, failureHeading, isUnmapped, getCampaign, getClaimState, outcomeAfterRelay, relayAndSettle, relayAnswerLost, requestSignature, settleClaim, starterLine, submitClaim, type ClaimState } from './services';
 
 const reply = (body: unknown, status = 200) => vi.fn(async () => new Response(JSON.stringify(body), { status }));
 afterEach(() => vi.unstubAllGlobals());
@@ -40,6 +40,17 @@ describe('verifier and relayer', () => {
     const args = vectors.claims.valid[0].call_args;
     expect(await submitClaim('https://r.test', args)).toEqual({ txHash: HASH, paid: true });
     expect((fetchMock.mock.calls[0] as unknown as [string])[0]).toBe('https://r.test/claim');
+  });
+  it('passes the testnet starter NEAR through only when the relayer sent it (T-009)', async () => {
+    vi.stubGlobal('fetch', reply({ tx_hash: HASH, status: 'paid', starter_near: '0.02', starter_tx_hash: HASH }));
+    expect(await submitClaim('https://r.test', vectors.claims.valid[0].call_args)).toEqual({ txHash: HASH, paid: true, starterNear: '0.02' });
+    vi.stubGlobal('fetch', reply({ tx_hash: HASH, status: 'paid', starter_near: '<b>lots</b>' }));
+    expect(await submitClaim('https://r.test', vectors.claims.valid[0].call_args)).toEqual({ txHash: HASH, paid: true });
+  });
+  it('the receipt line for the starter NEAR, and none without it', () => {
+    expect(starterLine('0.02')).toBe('Zarf sent you 0.02 test NEAR so you can move your USDC');
+    expect(starterLine(undefined)).toBe('');
+    expect(starterLine('')).toBe('');
   });
   it('a 202 "submitted" from the relayer still yields the hash, so the receipt polls claim_state', async () => {
     vi.stubGlobal('fetch', reply({ tx_hash: HASH, status: 'submitted' }, 202));

@@ -81,12 +81,17 @@ export const requestSignature = async (verifierUrl: string | undefined, body: Re
  * contract's claim_paid event in the executed receipt; 202 `submitted` means the outcome is not known
  * yet; 409 E115 (claim_reverted) throws.
  */
-export async function submitClaim(relayerUrl: string | undefined, args: ClaimArgs): Promise<{ txHash: string; paid: boolean }> {
-  const { tx_hash, status } = await postJson<{ tx_hash?: string; status?: string }>(`${need(relayerUrl, 'PUBLIC_RELAYER_URL')}/claim`, args);
+export async function submitClaim(relayerUrl: string | undefined, args: ClaimArgs): Promise<{ txHash: string; paid: boolean; starterNear?: string }> {
+  const { tx_hash, status, starter_near } = await postJson<{ tx_hash?: string; status?: string; starter_near?: unknown }>(`${need(relayerUrl, 'PUBLIC_RELAYER_URL')}/claim`, args);
   // A NEAR tx hash is base58 of 32 bytes; anything else would end up in the explorer link.
   if (typeof tx_hash !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(tx_hash)) throw new ClaimError('RELAYER_NO_TX');
-  return { txHash: tx_hash, paid: status === 'paid' };
+  // Testnet starter NEAR (relayer/src/starter.ts): present only when the relayer sent it with this claim.
+  const starter = typeof starter_near === 'string' && /^\d+(\.\d+)?$/.test(starter_near) ? { starterNear: starter_near } : {};
+  return { txHash: tx_hash, paid: status === 'paid', ...starter };
 }
+
+/** The receipt line for the relayer's testnet starter NEAR; empty when none was sent. */
+export const starterLine = (near: string | undefined) => (near ? `Zarf sent you ${near} test NEAR so you can move your USDC` : '');
 
 const MESSAGES: Record<string, string> = {
   COMMITMENT_MISMATCH: 'This link was sent to a different Google account. Sign in with exactly that address (Gmail dots and +aliases count). Already on the right one? The sender may have typed it differently: ask them to check the spelling and send a new link. This one goes back to them after the deadline.',
