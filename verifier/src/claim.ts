@@ -100,6 +100,14 @@ export const signClaim = async (key: CryptoKey, args: ClaimArgs): Promise<string
 const ACCOUNT_ID = /^(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/;
 export const isValidAccountId = (id: string): boolean => id.length >= 2 && id.length <= 64 && ACCOUNT_ID.test(id);
 
+/**
+ * Contracts that hold a plain `ft_transfer` but credit nobody for it: NEAR Intents takes deposits
+ * only through `ft_transfer_call`, and wNEAR is not a USDC wallet. The escrow pays with `ft_transfer`,
+ * so a claim to one of these is lost. Compared lowercased, so a mistyped case gets this error too.
+ */
+export const UNCREDITED_DESTINATIONS: ReadonlySet<string> = new Set(['intents.near', 'wrap.near', 'intents.testnet', 'wrap.testnet']);
+export const isUncreditedDestination = (id: string): boolean => UNCREDITED_DESTINATIONS.has(id.toLowerCase());
+
 export const leafHash = (commitmentHex: string, amount: string) =>
   sha256(concat(Uint8Array.of(0), unhex(commitmentHex, 32), uintLe(amount, 16)));
 

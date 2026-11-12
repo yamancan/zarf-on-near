@@ -1,7 +1,7 @@
 import type { ChainReader } from './chain';
-import { commitment, hex, isValidAccountId, leafHash, signClaim, unhex, verifyMerkleProof, type Signer } from './claim';
+import { commitment, hex, isUncreditedDestination, isValidAccountId, leafHash, signClaim, unhex, verifyMerkleProof, type Signer } from './claim';
 import { TokenError, verifyGoogleIdToken } from './googleIdToken';
-import { checkIntentsStatus, fetchIntentsStatus, IntentsError } from './intents';
+import { checkIntentsStatus, fetchIntentsStatus, IntentsError, verifyQuoteSignature } from './intents';
 import type { JwksSource } from './jwks';
 import { UpstreamError } from './upstream';
 
@@ -16,6 +16,7 @@ export interface ClaimDeps {
   signer: Signer;
   measurementId?: string; // Mode T only: this agent's approved measurement id
   intentsStatus?: (depositAddress: string) => Promise<unknown>; // 1Click GET /v0/status; tests stub it
+  quoteSigner?: string; // 1Click's quote-signing key, ed25519:<base58>; default ONECLICK_QUOTE_SIGNER, tests swap it
   nowMs?: number;
 }
 
@@ -35,6 +36,8 @@ export async function handleClaim(input: unknown, d: ClaimDeps): Promise<ClaimRe
   const b = (input ?? {}) as Record<string, unknown>;
   const { id_token, campaign_id, commitment: c, amount, proof, destination, salt } = b;
   if (typeof id_token !== 'string' || typeof destination !== 'string') return refuse(400, 'E108_INVALID_INPUT');
+  // Before the format check, so "Intents.near" gets the clear error rather than BAD_DESTINATION.
+  if (isUncreditedDestination(destination)) return refuse(400, 'DESTINATION_CREDITS_NOBODY');
   // Destination first: the nonce is only ever computed over a valid AccountId.
   if (!isValidAccountId(destination)) return refuse(400, 'BAD_DESTINATION');
   // Paying the escrow itself would lock the USDC in it for good (second audit S1).
@@ -97,6 +100,9 @@ export async function handleClaim(input: unknown, d: ClaimDeps): Promise<ClaimRe
         depositAddress: destination, amount, destinationAsset: intents.destination_asset as string, recipient: intents.recipient as string,
         campaignSender: campaign.sender, expiresAtNs: expires_at_ns,
       });
+      // After the field checks (both must pass): 1Click's own signature over the quote, so a
+      // tampered deposit address, amount or recipient is refused even if TLS were not enough.
+      await verifyQuoteSignature(status, d.quoteSigner);
     } catch (e) {
       if (e instanceof IntentsError) return refuse(409, e.code);
       throw new UpstreamError('1click'); // nothing signed; the page can retry
