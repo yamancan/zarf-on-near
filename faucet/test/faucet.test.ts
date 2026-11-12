@@ -409,7 +409,7 @@ describe('worker', () => {
     const before = seen.filter((u) => u.startsWith('https://challenges.cloudflare.com/')).length;
     const fourth = await send();
     expect(fourth.status).toBe(429);
-    expect(await fourth.json()).toEqual({ error: 'RATE_LIMITED_IP' });
+    expect(await fourth.json()).toEqual({ error: 'RATE_LIMITED_BURST' });
     expect(seen.filter((u) => u.startsWith('https://challenges.cloudflare.com/')).length).toBe(before);
   });
 

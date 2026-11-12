@@ -141,7 +141,7 @@ export default {
     if (!/^application\/json\b/i.test(req.headers.get('Content-Type') ?? '')) return json({ error: 'UNSUPPORTED_MEDIA_TYPE' }, 415);
     const ip = req.headers.get('CF-Connecting-IP') ?? 'unknown';
     // A burst from one IP stops here, before the float read, siteverify and the quota.
-    if (!(await env.PER_IP.limit({ key: ip })).success) return json({ error: 'RATE_LIMITED_IP' }, 429);
+    if (!(await env.PER_IP.limit({ key: ip })).success) return json({ error: 'RATE_LIMITED_BURST' }, 429);
     if (env.CREATOR === 'testnet') {
       // Before the human check and the quota: an empty faucet spends nobody's token or allowance.
       const f = await cachedFloat(env).catch(() => null);

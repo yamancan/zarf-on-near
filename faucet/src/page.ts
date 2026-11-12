@@ -283,6 +283,7 @@ const JS = `(() => {
     BAD_EMAIL: ['error', 'That does not look like an email address. Use plain ASCII, exactly as Google shows it.'],
     RATE_LIMITED_EMAIL: ['wait', 'This email already got a link today. Use the link you have, or try again tomorrow.'],
     RATE_LIMITED_IP: ['wait', 'Too many links from this network today. Try again tomorrow.'],
+    RATE_LIMITED_BURST: ['wait', 'Too many tries from this network in a few seconds. Wait a moment, then try again.'],
     DAILY_CAP_REACHED: ['wait', 'Today\\'s test USDC is all given out. Try again tomorrow.'],
     TURNSTILE_FAILED: ['error', 'The human check did not pass. Complete it and try again.'],
     TURNSTILE_UNAVAILABLE: ['error', 'The human check is unavailable right now. Try again in a minute.'],
