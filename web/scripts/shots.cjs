@@ -255,9 +255,9 @@ const S = {
   'auth-signing': async (p, ctx) => {
     await ctx.addInitScript(([c, k]) => sessionStorage.setItem('zarf-near:attempt', JSON.stringify({ campaign: c, commitment: k, salt: 's', amount: '10000000', proof: [], destination: 'alice.testnet', attemptId: 'x' })), [CAMP, COMMIT]);
     // "Signing you in" lasts only until the receipt route loads: delay that module and catch the frame.
-    await p.route(/receipt\/\+page\.svelte/, async (r) => { await new Promise((ok) => setTimeout(ok, 8000)); await r.continue(); });
+    await p.route(/receipt\/\+page\.svelte/, async (r) => { await new Promise((ok) => setTimeout(ok, 16000)); await r.continue(); });
     await p.goto(base + `/auth/google#id_token=h.p.s&state=${encodeURIComponent(`${CAMP}/${COMMIT}/x`)}`, { waitUntil: 'commit' });
-    await p.getByText('Signing In').waitFor({ timeout: 7000 }); return {};
+    await p.getByText('Signing In').waitFor({ timeout: 15000 }); return {};
   },
   'auth-cancelled-back': async (p, ctx) => {
     await ctx.addInitScript(([c, k]) => sessionStorage.setItem('zarf-near:attempt', JSON.stringify({ campaign: c, commitment: k, salt: 's', amount: '10000000', proof: [], destination: 'alice.testnet', attemptId: 'x' })), [CAMP, COMMIT]);
@@ -326,14 +326,14 @@ const S = {
   'create-1-dup': async (p) => { await rpc(p); await p.goto(base + '/create'); await p.waitForSelector('[aria-label="Recipient 1 email"]'); await p.waitForTimeout(1500); await pasteList(p, CSV + '\nAlice@gmail.com,5'); await p.waitForTimeout(400); return { full: true }; },
   'create-1-email': async (p) => { await rpc(p); await p.goto(base + '/create'); await p.waitForSelector('[aria-label="Recipient 1 email"]'); await p.waitForTimeout(1500); return { full: true }; },
   'create-2-date': async (p) => { await rpc(p); await toStep(p, 1); await pickDate(p); await p.waitForTimeout(300); return { full: true }; },
-  'create-2-30': async (p) => { await rpc(p); await toStep(p, 1); await p.getByText('30 days').click(); await p.getByText('Does it come back by itself?').click(); await p.waitForTimeout(300); return { full: true }; },
+  'create-2-30': async (p) => { await rpc(p); await toStep(p, 1); await p.getByRole('radio', { name: /^30 days$/i }).click(); await p.waitForTimeout(300); return { full: true }; },
   'create-3-balance-error': async (p, ctx) => { await wallet(ctx); await rpc(p, { fail: 'ft_balance_of' }); await toStep(p, 2); await p.waitForTimeout(800); return { full: true }; },
   'create-4-deposit': async (p, ctx) => { await wallet(ctx); await rpc(p, { prepay: '0' }); await toStep4(p); return { full: true }; },
   'create-4-saved': async (p, ctx) => { await wallet(ctx); await rpc(p); await toStep4(p); await saveBackup(p); await p.waitForTimeout(300); return { full: true }; },
   'create-4-terms': async (p, ctx) => { await wallet(ctx); await rpc(p, { prepay: '0' }); await toStep4(p); await p.getByRole('button', { name: /Who sees the emails/ }).focus(); await p.waitForTimeout(300); return { full: true }; },
   'create-send-chain': async (p, ctx) => { await wallet(ctx); await walletPopup(ctx, 'ok'); await rpc(p, { prepay: '0' }); await toStep4(p); await ackBackup(p); await p.getByRole('button', { name: SEND }).click(); await p.waitForTimeout(2500); return { full: true }; },
   'create-send-lost': async (p, ctx) => { await fastCreate(ctx); await wallet(ctx); await funding(ctx, { txHash: TX }); await rpc(p); await p.goto(base + '/create'); await p.getByText('Checking with NEAR').waitFor({ timeout: 20000 }); await p.waitForTimeout(300); return { full: true }; },
-  'create-done-terms': async (p, ctx) => { await funding(ctx, { txHash: 'H', campaignId: '12' }); await rpc(p, { claimBy: { ['0'.repeat(64)]: 'claimed' } }); await p.goto(base + '/create'); await p.waitForTimeout(4500); await p.getByText('What happens next').scrollIntoViewIfNeeded(); return {}; },
+  'create-done-terms': async (p, ctx) => { await funding(ctx, { txHash: 'H', campaignId: '12' }); await rpc(p, { claimBy: { ['0'.repeat(64)]: 'claimed' } }); await p.goto(base + '/create'); await p.waitForTimeout(4500); await p.evaluate(() => window.scrollTo(0, document.body.scrollHeight)); await p.waitForTimeout(300); return {}; },
   // Second pass (r6): NEAR have vs need, the sender's name, long emails.
   'create-3-near-short': async (p, ctx) => { await wallet(ctx); await rpc(p, { near: '10000000000000000000000', prepay: '0' }); await toStep(p, 2); await p.waitForTimeout(800); return { full: true }; },
   'create-3-near-error': async (p, ctx) => { await wallet(ctx); await rpc(p, { nearDown: true }); await toStep(p, 2); await p.waitForTimeout(800); return { full: true }; },
