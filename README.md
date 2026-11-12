@@ -130,7 +130,9 @@ Read this before using it with real money.
 
 Known limit: the recipient needs an existing NEAR account. An in-browser account option is built
 but switched off in every environment, since a new account has no NEAR to move the USDC on.
-Claims carry no NEAR drip. Gas for the claim itself
+On testnet only, after a paid claim, a destination that holds under 0.005 NEAR (or a new implicit or `0x`
+account) gets 0.02 test NEAR once, from a separate gas account with its own key, never the relayer's;
+at most 50 a day, and never on mainnet (`relayer/src/starter.ts`). Gas for the claim itself
 is the relayer's: the contract requires 55 Tgas attached (`required_claim_gas`), and a claim
 measured about 11.6 Tgas burnt.
 
