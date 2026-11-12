@@ -1,4 +1,4 @@
-// The judge's "try it with your Gmail" page (T10). Static, same origin as POST /faucet, no third-party anything.
+// The judges' "try it with your Google email" page (T10). Static, same origin as POST /faucet, no third-party anything.
 import { FAVICON_SVG, SAIRA_WOFF2_B64 } from './assets';
 
 // Turnstile loads its script and its challenge iframe from challenges.cloudflare.com; nothing else is third-party.
@@ -16,6 +16,9 @@ const MAIL = '<rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.
 const SUN = '<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>';
 const MOON = '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>';
 const CHEVRON = '<path d="m6 9 6 6 6-6"/>';
+const X_ICON = '<svg class="icon" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>';
+// Where a judge without an account makes one: a wallet, in a new tab, so this tab keeps the issued link (as the claim card).
+const WALLET = 'https://testnet.mynearwallet.com';
 
 /** Token base units (6 decimals) as a decimal string, e.g. "500000" -> "0.5"; null unless a positive integer. */
 export const usdcText = (amount: string): string | null => {
@@ -34,6 +37,7 @@ const CSS = `
     --bg: #0a0a0b; --bg-elevated: #131315; --fg: oklch(90% 0.01 260);
     --btn-bg: oklch(82% 0.008 260); --btn-bg-hover: oklch(92% 0.012 260); --btn-ring: oklch(92% 0.006 260); --btn-text: oklch(25% 0.008 260);
     --btn2-border: oklch(35% 0.006 260); --btn2-border-hover: oklch(55% 0.008 260); --btn2-text: oklch(72% 0.008 260); --btn2-bg-hover: oklch(25% 0.005 260);
+    --primary: oklch(90% 0.01 280);
     --success: oklch(80% 0.12 155); --success-muted: oklch(25% 0.04 155);
     --warning: oklch(85% 0.12 85); --error: oklch(85% 0.1 25);
     --shadow-elevated: 0 1px 2px 0 oklch(0% 0 0 / 0.15), 0 4px 8px -2px oklch(0% 0 0 / 0.2), 0 12px 28px -4px oklch(0% 0 0 / 0.35);
@@ -43,6 +47,7 @@ const CSS = `
     --bg: #f8f8fa; --bg-elevated: #ffffff; --fg: #211e23;
     --btn-bg: oklch(28% 0.008 290); --btn-bg-hover: oklch(18% 0.012 290); --btn-ring: oklch(18% 0.006 290); --btn-text: oklch(95% 0.003 290);
     --btn2-border: oklch(75% 0.006 290); --btn2-border-hover: oklch(45% 0.008 290); --btn2-text: oklch(45% 0.008 290); --btn2-bg-hover: oklch(92% 0.005 290);
+    --primary: oklch(15% 0.02 290);
     --success: oklch(35% 0.12 155); --success-muted: oklch(95% 0.03 155);
     --warning: oklch(35% 0.14 85); --error: oklch(40% 0.14 25);
     --shadow-elevated: 0 1px 2px 0 oklch(22% 0.01 290 / 0.02), 0 4px 8px -2px oklch(22% 0.01 290 / 0.03), 0 8px 20px -4px oklch(22% 0.01 290 / 0.06);
@@ -63,14 +68,19 @@ const CSS = `
   .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .icon { width: 16px; height: 16px; flex-shrink: 0; }
 
-  /* Navbar: ZarfNavbar structure; lockup per the brand kit (mark as tall as the "f", gap 0.4x). */
-  header { height: 64px; padding: 0 16px 0 24px; display: flex; align-items: center; justify-content: space-between;
+  /* Navbar: the web app's (ZarfNavbar): lockup left; network label, X, divider, toggle right. The label stays on phones.
+     Lockup per the brand kit: mark as tall as the "f", ink gap 0.4x the mark (measured on the render, not the box). */
+  header { height: 64px; padding: 0 24px; display: flex; align-items: center; justify-content: space-between;
     background: var(--bg); border-bottom: 0.5px solid var(--border-subtle); }
-  .left { display: flex; align-items: center; gap: 16px; }
-  .lockup { display: inline-flex; align-items: center; gap: 5px; min-height: 44px; text-decoration: none; opacity: .8; transition: opacity .2s; }
+  .right { display: flex; align-items: center; gap: 16px; }
+  .lockup { display: inline-flex; align-items: center; gap: 3.5px; min-height: 44px; text-decoration: none; opacity: .8; transition: opacity .2s; }
   .lockup:hover { opacity: 1; }
   .lockup span { font-size: 16px; font-weight: 600; letter-spacing: -0.025em; }
-  .net { font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: .15em; color: var(--fg-subtle); }
+  .net { font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: .15em; color: var(--fg-muted); white-space: nowrap; }
+  .x { display: none; align-items: center; justify-content: center; min-height: 44px; color: var(--fg-subtle); transition: color .2s; }
+  .x:hover { color: var(--fg); }
+  .divider { display: none; width: 1px; height: 16px; background: var(--border); }
+  @media (min-width: 640px) { .x { display: inline-flex; } .divider { display: block; } }
   .toggle { width: 44px; height: 44px; border: 0; border-radius: 9999px; background: transparent; color: var(--fg-muted);
     display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: background .2s, color .2s; }
   .toggle:hover { color: var(--fg); background: oklch(from var(--fg) l c h / 0.05); }
@@ -85,10 +95,9 @@ const CSS = `
   .medallion .icon { width: 32px; height: 32px; }
   .medallion.ok { background: var(--success-muted); color: var(--success); border: 0.5px solid oklch(from var(--success) l c h / 0.2); }
   h1, h2 { margin: 0; text-align: center; font-weight: 600; letter-spacing: -0.025em; }
-  h1 { font-size: 24px; line-height: 1.25; }
-  h2 { font-size: 20px; line-height: 1.3; }
+  h1, h2 { font-size: 20px; line-height: 1.3; text-wrap: balance; }
   h2:focus { outline: none; }
-  .lede { margin: 8px 0 0; text-align: center; font-size: 15px; color: var(--fg-muted); }
+  .lede { margin: 8px 0 0; text-align: center; font-size: 15px; color: var(--fg-muted); text-wrap: balance; }
 
   form { margin-top: 28px; }
   label { display: block; font-size: 14px; font-weight: 500; margin-bottom: 8px; }
@@ -112,7 +121,7 @@ const CSS = `
   .spin { animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .spin { animation: none; } * { transition: none !important; } }
-  .hint { margin: 16px 0 0; font-size: 13px; color: var(--fg-subtle); text-align: center; }
+  .hint { margin: 16px 0 0; font-size: 13px; color: var(--fg-muted); text-align: center; text-wrap: balance; }
   .hint a, .more a { text-decoration: underline; text-underline-offset: 2px; }
   .hint a:hover { color: var(--fg); }
 
@@ -120,41 +129,45 @@ const CSS = `
   #out:not(:empty) { margin-top: 16px; }
   .note { display: flex; align-items: flex-start; gap: 8px; margin: 0; font-size: 14px; font-weight: 500; }
   .note .icon { margin-top: 3px; }
-  .note p { margin: 0; }
+  .note p { margin: 0; text-wrap: pretty; }
   .note.error { color: var(--error); }
   .note.wait { color: var(--warning); }
 
-  /* "How this works": the detail, one layer down. */
-  details { margin-top: 24px; border-top: 0.5px solid var(--border); }
-  summary { display: flex; align-items: center; justify-content: space-between; min-height: 44px; padding-top: 12px; cursor: pointer; list-style: none;
-    font-size: 14px; font-weight: 500; color: var(--fg-muted); }
+  /* "How this works": the detail, one layer down; the claim card's disclosure (centred, chevron after the label). */
+  details { margin-top: 24px; padding-top: 16px; border-top: 0.5px solid var(--border-subtle); font-size: 13px; color: var(--fg-muted); }
+  summary { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; cursor: pointer; list-style: none; }
   summary::-webkit-details-marker { display: none; }
   summary:hover { color: var(--fg); }
-  summary .icon { transition: transform .2s; }
+  summary .icon { width: 14px; height: 14px; transition: transform .2s; }
   details[open] summary .icon { transform: rotate(180deg); }
-  .more { margin: 4px 0 0; padding-left: 20px; font-size: 14px; color: var(--fg-muted); }
+  .more { margin: 8px 0 0; padding-left: 20px; line-height: 1.6; }
   .more li + li { margin-top: 8px; }
 
   /* Link issued. */
   .amount { margin-top: 24px; text-align: center; }
-  .amount .label { display: block; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .3em; color: var(--fg-subtle); }
-  .amount .value { display: block; margin-top: 8px; font-size: 48px; line-height: 1; font-weight: 300; letter-spacing: -0.05em; }
-  .amount .unit { display: block; margin-top: 8px; font-size: 14px; color: var(--fg-muted); overflow-wrap: anywhere; }
-  .link { margin: 24px 0 0; padding: 12px 16px; border-radius: 12px; background: oklch(from var(--fg) l c h / 0.05);
-    font: 13px/1.4 var(--font-mono); color: var(--fg-muted); text-align: center; overflow-wrap: anywhere; }
+  /* The web app's Amount: small uppercase label, large light figure, the unit BESIDE it. */
+  .amount .label { display: block; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .3em; color: var(--fg-muted); }
+  .amount .figure { display: flex; align-items: baseline; justify-content: center; gap: 8px; margin-top: 4px; }
+  .amount .value { font-size: 48px; line-height: 1; font-weight: 300; letter-spacing: -0.05em; font-variant-numeric: tabular-nums; }
+  .amount .unit { font-size: 14px; font-weight: 500; text-transform: uppercase; letter-spacing: .1em; color: var(--primary); white-space: nowrap; }
+  .amount .for { display: block; margin-top: 8px; font-size: 14px; color: var(--fg-muted); overflow-wrap: anywhere; }
+  .link { margin: 24px 0 0; font: 13px/1.4 var(--font-mono); color: var(--fg-muted); text-align: center;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
   .actions .btn { flex: 1 1 180px; }
-  .next { margin: 16px 0 0; font-size: 14px; color: var(--fg-muted); text-align: center; }
+  .next { margin: 16px 0 0; font-size: 14px; color: var(--fg-muted); text-align: center; text-wrap: balance; }
 
-  footer { border-top: 0.5px solid var(--border-subtle); padding: 24px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
-    gap: 0 24px; font-size: 12px; color: var(--fg-muted); }
-  footer .lockup { gap: 4px; opacity: 1; }
+  /* Footer: the web app's (lockup / Send · Campaigns · Privacy / built-on line), centred column, a row from 768 px. */
+  footer { border-top: 1px solid oklch(from var(--fg) l c h / 0.05); font-size: 12px; color: var(--fg-muted); }
+  .foot { max-width: 1024px; margin: 0 auto; padding: 40px 24px; display: flex; flex-direction: column; align-items: center; justify-content: space-between; gap: 20px; }
+  @media (min-width: 768px) { .foot { flex-direction: row; } }
+  footer .lockup { gap: 2.5px; opacity: 1; }
   footer .lockup span { font-size: 12px; }
-  footer nav { display: flex; gap: 24px; }
-  footer nav a, .by a { display: inline-flex; align-items: center; min-height: 44px; text-decoration: none; }
+  footer nav { display: flex; gap: 24px; font-weight: 500; }
+  footer nav a, .by a { display: inline-flex; align-items: center; min-height: 44px; text-decoration: none; transition: color .2s; }
   footer nav a:hover, .by a:hover, footer .lockup:hover { color: var(--fg); }
   .by { display: flex; align-items: center; gap: 6px; }
-  .by .dot { color: var(--fg-subtle); }
+  .by .dot { color: oklch(from var(--fg) l c h / 0.2); }
 `;
 
 const html = (siteKey: string, claimHost: string, usdc: string | null) => `<!doctype html>
@@ -170,20 +183,22 @@ const html = (siteKey: string, claimHost: string, usdc: string | null) => `<!doc
 </head>
 <body>
 <header>
-  <div class="left">
-    <a class="lockup" href="${claimHost}/" aria-label="zarf.to home">${MARK(12)}<span>zarf.to</span></a>
+  <a class="lockup" href="${claimHost}/" aria-label="zarf.to home">${MARK(12)}<span>zarf.to</span></a>
+  <div class="right">
     <span class="net">NEAR testnet</span>
-  </div>
-  <button id="theme" class="toggle" type="button" aria-label="Switch to light theme" hidden>
+    <a class="x" href="https://x.com/zarfto" target="_blank" rel="noopener noreferrer" aria-label="Follow Zarf on X">${X_ICON}</a>
+    <div class="divider" aria-hidden="true"></div>
+    <button id="theme" class="toggle" type="button" aria-label="Switch to light theme" hidden>
     <span data-when="dark">${ICON(SUN)}</span><span data-when="light" hidden>${ICON(MOON)}</span>
-  </button>
+    </button>
+  </div>
 </header>
 <main>
   <div class="card">
     <div id="ask">
       <div class="medallion">${ICON(MAIL)}</div>
-      <h1>Send tokens to an email.</h1>
-      <p class="lede">Get a link for ${usdc ? usdc + ' ' : ''}test USDC (no real value) at your Google email.</p>
+      <h1>Get ${usdc ? usdc + ' ' : ''}test USDC at your Google email.</h1>
+      <p class="lede">Claim it with Google into a NEAR testnet account. Test tokens, no real value.</p>
       <form id="f" novalidate>
         <label for="email">Your Google email</label>
         <input id="email" name="email" type="email" autocomplete="email" inputmode="email" required spellcheck="false" autocapitalize="off" placeholder="you@gmail.com">
@@ -192,7 +207,7 @@ const html = (siteKey: string, claimHost: string, usdc: string | null) => `<!doc
       </form>
     </div>
     <div id="out" role="status" aria-live="polite"></div>
-    <p class="hint">To receive it you need a NEAR testnet account. <a href="https://docs.near.org/getting-started/create-account" rel="noopener">Create a free one</a></p>
+    <p class="hint">No NEAR testnet account? <a id="wallet" href="${WALLET}" target="_blank" rel="noopener noreferrer">Create a free one at MyNearWallet</a>. This tab keeps your link.</p>
     <details>
       <summary>How this works ${ICON(CHEVRON)}</summary>
       <ul class="more">
@@ -205,9 +220,11 @@ const html = (siteKey: string, claimHost: string, usdc: string | null) => `<!doc
   </div>
 </main>
 <footer>
-  <a class="lockup" href="${claimHost}/" aria-label="zarf.to">${MARK(9)}<span>zarf.to</span></a>
-  <nav aria-label="Footer"><a href="${claimHost}/">About Zarf on NEAR</a><a href="${claimHost}/privacy">Privacy and terms</a></nav>
-  <div class="by"><span>© 2026</span><span class="dot">·</span><span>Built on NEAR by</span><a href="https://trionlabs.dev" rel="noopener">trionlabs.dev</a></div>
+  <div class="foot">
+    <a class="lockup" href="${claimHost}/" aria-label="zarf.to home">${MARK(9)}<span>zarf.to</span></a>
+    ${claimHost ? `<nav aria-label="Footer"><a href="${claimHost}/create">Send</a><a href="${claimHost}/campaigns">Campaigns</a><a href="${claimHost}/privacy">Privacy</a></nav>` : ''}
+    <div class="by"><span>© 2026</span><span class="dot" aria-hidden="true">·</span><span>Built on NEAR by</span><a href="https://trionlabs.dev" target="_blank" rel="noopener noreferrer">trionlabs.dev</a></div>
+  </div>
 </footer>
 <script src="/try.js"></script>
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
@@ -220,7 +237,6 @@ const JS = `(() => {
   const ICONS = {
     error: '<circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/>',
     wait: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
-    check: '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>',
     spin: '<path d="M21 12a9 9 0 1 1-6.219-8.56"/>',
     copy: '<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
     copied: '<path d="M20 6 9 17l-5-5"/>',
@@ -285,8 +301,8 @@ const JS = `(() => {
     if (on) { go.setAttribute('aria-busy', 'true'); go.replaceChildren(icon('spin', 'spin'), el('span', {}, 'Creating your link…')); }
     else { go.removeAttribute('aria-busy'); go.textContent = GO_LABEL; }
   };
-  // Display only: a long link loses its middle; Open and Copy use the full link.
-  const middle = (s) => (s.length > 64 ? s.slice(0, 40) + '…' + s.slice(-16) : s);
+  // Display only, one line at 390 px: no scheme, a long link loses its middle; Open and Copy use the full link.
+  const middle = (u) => { const s = u.replace(/^https:\\/\\//, ''); return s.length > 36 ? s.slice(0, 23) + '…' + s.slice(-12) : s; };
   const until = (ms) => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }).format(new Date(ms)) + ' UTC';
   const copyButton = (url) => {
     const btn = el('button', { type: 'button', className: 'btn secondary' });
@@ -331,10 +347,12 @@ const JS = `(() => {
       const usdc = (Number(body.amount) / 1e6).toString();
       const who = f.email.value.trim();
       const medal = el('div', { className: 'medallion ok' });
-      medal.append(icon('check'));
+      medal.append(icon('copied'));
       const title = el('h2', { tabIndex: -1 }, 'Your link is ready');
       const amount = el('div', { className: 'amount' });
-      amount.append(el('span', { className: 'label' }, 'Waiting for you'), el('span', { className: 'value' }, usdc), el('span', { className: 'unit' }, 'test USDC for ' + who));
+      const figure = el('span', { className: 'figure' });
+      figure.append(el('span', { className: 'value' }, usdc), el('span', { className: 'unit' }, 'test USDC'));
+      amount.append(el('span', { className: 'label' }, 'Waiting for you'), figure, el('span', { className: 'for' }, 'for ' + who));
       const open = el('a', { className: 'btn primary', href: body.claim_url });
       open.append(el('span', {}, 'Open it and claim'), icon('arrow'));
       const actions = el('div', { className: 'actions' });

@@ -374,7 +374,7 @@ describe('worker', () => {
     const linked = await (await worker.fetch(new Request('https://f.example/try'), { CLAIM_HOST: 'https://claim.example/' } as never)).text();
     expect(linked).toContain('href="https://claim.example/privacy"');
     expect(linked).toContain('href="https://claim.example/"');
-    expect(linked).toContain('href="https://docs.near.org/getting-started/create-account"');
+    expect(linked).not.toContain('docs.near.org');
     const hostile = await (await worker.fetch(new Request('https://f.example/try'), { CLAIM_HOST: 'https://x.example/"><script>' } as never)).text();
     expect(hostile).not.toContain('x.example');
     expect(html).not.toMatch(/<script>(?!<)/);
@@ -436,9 +436,9 @@ describe('judges page presentation', () => {
   it('shows the configured amount, never an unvalidated one', async () => {
     const { default: worker } = await import('../src/index');
     const page = async (AMOUNT: string) => (await worker.fetch(new Request('https://f.example/try'), { AMOUNT } as never)).text();
-    expect(await page('500000')).toContain('Get a link for 0.5 test USDC');
+    expect(await page('500000')).toContain('<h1>Get 0.5 test USDC at your Google email.</h1>');
     const hostile = await page('5"><script>');
-    expect(hostile).toContain('Get a link for test USDC');
+    expect(hostile).toContain('<h1>Get test USDC at your Google email.</h1>');
     expect(hostile).not.toContain('"><script>');
   });
 
@@ -454,5 +454,33 @@ describe('judges page presentation', () => {
     const icon = await worker.fetch(new Request('https://f.example/favicon.svg'), {} as never);
     expect(icon.headers.get('Content-Type')).toBe('image/svg+xml');
     expect((await worker.fetch(new Request('https://f.example/saira.woff2', { method: 'POST' }), {} as never)).status).toBe(404);
+    // The asset route is pinned to its two exact paths.
+    for (const p of ['/x.svg', '/saira-other.woff2', '/saira.woff2/', '/favicon.svg.map'])
+      expect((await worker.fetch(new Request('https://f.example' + p), {} as never)).status).toBe(404);
+  });
+
+  it('opens the account help in a new tab, at a wallet, and says this tab keeps the link', async () => {
+    const { default: worker } = await import('../src/index');
+    const html = await (await worker.fetch(new Request('https://f.example/try'), {} as never)).text();
+    const a = html.match(/<a id="wallet"[^>]*>/)![0];
+    expect(a).toContain('href="https://testnet.mynearwallet.com"');
+    expect(a).toContain('target="_blank"');
+    expect(a).toMatch(/rel="[^"]*\bnoopener\b[^"]*"/);
+    expect(html).toContain('This tab keeps your link.');
+    // Every new-tab link drops the opener.
+    for (const t of html.match(/<a [^>]*target="_blank"[^>]*>/g)!) expect(t).toMatch(/rel="noopener noreferrer"/);
+  });
+
+  it('links the footer (Send, Campaigns, Privacy) only to a safe https claim host', async () => {
+    const { default: worker } = await import('../src/index');
+    const page = async (CLAIM_HOST?: string) => (await worker.fetch(new Request('https://f.example/try'), { CLAIM_HOST } as never)).text();
+    const nav = (html: string) => html.match(/<nav aria-label="Footer">(.*?)<\/nav>/)?.[1] ?? null;
+    expect(nav(await page('https://claim.example/'))).toBe(
+      '<a href="https://claim.example/create">Send</a><a href="https://claim.example/campaigns">Campaigns</a><a href="https://claim.example/privacy">Privacy</a>');
+    for (const bad of [undefined, '', 'http://claim.example', 'javascript:alert(1)', '//claim.example', 'https://claim.example/path', 'https://x.example/"><script>']) {
+      const html = await page(bad);
+      expect(nav(html)).toBeNull(); // no footer links rather than links to this page's own 404s
+      expect(html).not.toContain('claim.example');
+    }
   });
 });
