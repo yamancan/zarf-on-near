@@ -34,8 +34,10 @@ Read this before using it with real money.
   built: nothing in this deployment is attested.
 - **The contract is upgradable, only behind a public delay.** The owner proposes a code hash, which
   is visible on chain, and can apply it only after `upgrade_delay_ns`: 10 min on testnet, at most
-  1 h on mainnet (there `new` refuses a value outside 10 min to 1 h). Someone must watch for a proposal to make use
-  of that window.
+  1 h on mainnet (there `new` refuses a value outside 10 min to 1 h). The window helps only if someone watches
+  for a proposal. `watcher/` is a cron Worker that alerts within 2 min on a proposed upgrade, an owner change,
+  a verifier-key change, or a claim page that differs from what was deployed. Only a guardian can stop a
+  proposal made with a stolen owner key, so mainnet needs a guardian; the testnet escrow has none.
 - **The escrow account has no full-access key.** Every full-access key is deleted after deploy and
   `new` (`spec/claim.md`, "Upgrades and ownership"), so nobody can sign as the escrow and move its
   tokens; the only way to change the code is the delayed upgrade. On testnet `zarf-near-1112.testnet` holds no access key
@@ -130,7 +132,7 @@ access.
 
 ```sh
 make install   # optional: test and demo install what they need themselves
-make test      # verifier, relayer, web and the demo harness: tests, type checks, build; then the contract's tests
+make test      # verifier, relayer, web, the upgrade watcher and the demo harness: tests, type checks, build; then the contract's tests
 make demo      # the claim flow end to end
 ```
 
@@ -138,7 +140,7 @@ make demo      # the claim flow end to end
 something that ran failed. Expected on a machine without the Rust toolchain:
 
 ```text
-SUMMARY: verifier ✓ relayer ✓ web ✓ scripts ✓ contract NOT RUN (cargo missing)
+SUMMARY: verifier ✓ relayer ✓ web ✓ watcher ✓ scripts ✓ contract NOT RUN (cargo missing)
 ```
 
 `make test` runs the contract's tests (`contract/Makefile`: unit, then near-workspaces

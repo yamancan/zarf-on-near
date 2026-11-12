@@ -1,6 +1,6 @@
 # Clean clone -> `make test` and `make demo`. No secrets, no Google login.
 # Needs Node 24 and pnpm 10.30.3 (pinned per package); `pnpm install` needs network access.
-.PHONY: test demo demo-sandbox install verifier relayer web scripts faucet contract
+.PHONY: test demo demo-sandbox install verifier relayer web watcher scripts faucet contract
 
 PNPM_INSTALL := pnpm install --frozen-lockfile
 
@@ -8,7 +8,7 @@ PNPM_INSTALL := pnpm install --frozen-lockfile
 # Exit 1 if anything that ran failed; a contract skipped for a missing toolchain is not a failure.
 test:
 	@status=""; fail=0; \
-	for t in verifier relayer web scripts; do \
+	for t in verifier relayer web watcher scripts; do \
 	  if $(MAKE) --no-print-directory $$t; then status="$$status $$t ✓"; else status="$$status $$t ✗"; fail=1; fi; \
 	done; \
 	if [ ! -d faucet ]; then status="$$status faucet NOT RUN (no faucet/)"; \
@@ -22,6 +22,7 @@ install:
 	cd verifier && $(PNPM_INSTALL)
 	cd relayer && $(PNPM_INSTALL)
 	cd web && $(PNPM_INSTALL)
+	cd watcher && $(PNPM_INSTALL)
 
 verifier:
 	cd verifier && $(PNPM_INSTALL) && pnpm test && pnpm typecheck
@@ -31,6 +32,10 @@ relayer:
 
 web:
 	cd web && $(PNPM_INSTALL) && pnpm test && pnpm check && pnpm build
+
+# The upgrade watcher (watcher/README.md): unit tests, then one cron run per fixture under wrangler dev.
+watcher:
+	cd watcher && $(PNPM_INSTALL) && pnpm test && pnpm typecheck && pnpm local-scheduled
 
 # The judges' page (/try), once the faucet is merged into this tree.
 faucet:
