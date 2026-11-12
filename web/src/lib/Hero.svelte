@@ -1,10 +1,12 @@
 <script lang="ts">
   // Ported from the main repo's landing hero (packages/ui/lib/components/landing/Hero.svelte): the ring
-  // spotlight, the hash canvas, the 16 px blur that clears the text, the staggered reveal and the scroll cue,
+  // spotlight, the hash canvas, the 16 px blur that clears the text, the staggered reveal and the status line,
   // with the same values. Differences: the headline is the core line (no rotating word), the hashes are NEAR
-  // style (hex) instead of Stellar strkeys, the eyebrow carries no chain logo, and the CTAs are this app's.
+  // style (hex) instead of Stellar strkeys, the eyebrow carries no chain logo, the CTAs are this app's, and (design
+  // spec 3.5) the hero is its content plus py-24/32 with no 90vh minimum and no scroll cue.
   import { onMount } from 'svelte';
-  import { ArrowRight, ChevronDown } from 'lucide-svelte';
+  import { ArrowRight } from 'lucide-svelte';
+  import { TESTNET } from '$lib/network';
   import { themeStore } from '$lib/zen/stores/themeStore.svelte';
   import ZenButton from '$lib/zen/components/ZenButton.svelte';
 
@@ -155,7 +157,7 @@
   onmousemove={handleMouseMove}
   onmouseleave={handleMouseLeave}
   role="presentation"
-  class="relative w-full min-h-[90vh] flex flex-col items-center justify-center overflow-hidden bg-transparent hero-container"
+  class="relative w-full py-24 md:py-32 flex flex-col items-center justify-center overflow-hidden bg-transparent hero-container"
 >
   <!-- 1. Wave grid (spotlight) -->
   <div class="absolute inset-0 pointer-events-none z-0 wave-grid-spotlight"></div>
@@ -169,9 +171,6 @@
     class="absolute inset-0 pointer-events-none z-10"
     style="backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); mask-image: radial-gradient(circle at center, black 0%, transparent 60%); -webkit-mask-image: radial-gradient(circle at center, black 0%, transparent 60%);"
   ></div>
-
-  <!-- Grain (main repo landing-grain), hero only, faded out at the bottom edge -->
-  <div class="landing-grain absolute inset-0 pointer-events-none z-20 [mask-image:linear-gradient(to_bottom,black_70%,transparent)]" aria-hidden="true"></div>
 
   <div class="relative z-30 text-center max-w-4xl px-6 flex flex-col items-center gap-5 md:gap-6">
     <div class="transition-all duration-700 ease-out {mounted ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'}" style="transition-delay: 150ms;">
@@ -204,7 +203,7 @@
       style="transition-delay: 1200ms;"
     >
       <ZenButton href={tryUrl} variant="primary" size="lg" class="w-full sm:w-auto">
-        Try it with Google
+        Try with Google
         {#snippet iconRight()}<ArrowRight class="w-3.5 h-3.5" />{/snippet}
       </ZenButton>
       <ZenButton href="/create" variant="secondary" size="lg" class="w-full sm:w-auto">
@@ -212,16 +211,15 @@
       </ZenButton>
     </div>
 
+    <!-- Zarf's status line (landing Hero), in fg-subtle: Zarf's fg/35 fails 4.5:1 as text -->
+    <p
+      class="inline-flex items-center gap-1.5 text-[11px] font-medium tracking-[0.15em] uppercase text-zen-fg-subtle transition-opacity duration-700 ease-out {mounted ? 'opacity-100' : 'opacity-0'}"
+      style="transition-delay: 1500ms;"
+    >
+      Live on NEAR {TESTNET ? 'Testnet' : ''}
+    </p>
   </div>
 
-  <!-- Scroll indicator -->
-  <div
-    class="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1.5 text-zen-fg/15 z-40 transition-opacity duration-700 ease-out {mounted ? 'opacity-100' : 'opacity-0'}"
-    style="transition-delay: 1800ms;"
-    aria-hidden="true"
-  >
-    <ChevronDown class="w-4 h-4 animate-bounce" strokeWidth={1.5} />
-  </div>
 </div>
 
 <style>

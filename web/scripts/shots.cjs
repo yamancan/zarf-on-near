@@ -192,7 +192,7 @@ const wallet = async (ctx, id = 'sender.testnet') => {
   await stubExecutor(ctx, o);
 };
 
-const heroShown = (p) => p.waitForFunction(() => { const a = [...document.querySelectorAll('a')].find((x) => /Try it with Google/.test(x.textContent)); return a && getComputedStyle(a.parentElement).opacity === '1'; }, null, { timeout: 15000 }).then(() => p.waitForTimeout(200));
+const heroShown = (p) => p.waitForFunction(() => { const a = [...document.querySelectorAll('a')].find((x) => /Try with Google/.test(x.textContent)); return a && getComputedStyle(a.parentElement).opacity === '1'; }, null, { timeout: 15000 }).then(() => p.waitForTimeout(200));
 // Without PUBLIC_GOOGLE_CLIENT_ID (row 46): blank the value in the served env, nothing else changes.
 const noGoogle = (p) => p.route((u) => u.pathname.startsWith('/claim/') && !u.pathname.includes('.'), async (r) => {
   const res = await r.fetch(); const body = (await res.text()).replace(/"PUBLIC_GOOGLE_CLIENT_ID":\s*"[^"]*"/, '"PUBLIC_GOOGLE_CLIENT_ID":""');
@@ -204,7 +204,6 @@ const S = {
   landing: async (p) => { await rpc(p); await p.goto(base + '/'); await p.waitForSelector('h1'); await heroShown(p); return { full: true }; },
   // Reduced motion: the buttons must be there at once, no wait.
   'landing-reduced': async (p) => { await p.emulateMedia({ reducedMotion: 'reduce' }); await rpc(p); await p.goto(base + '/'); await p.waitForSelector('h1'); await p.waitForTimeout(150); return {}; },
-  'landing-detail': async (p) => { await rpc(p); await p.goto(base + '/'); await p.waitForSelector('h1'); await p.getByText('Who sees the email?').click(); await p.waitForTimeout(2800); return { full: true }; },
   'claim-near': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.fill('#dest', 'alice.testnet'); await p.waitForTimeout(1200); return { full: true }; },
   'claim-near-missing': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.fill('#dest', 'alise.testnet'); await p.waitForTimeout(1200); return { full: true }; },
   'claim-testnet-detail': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByRole('button', { name: /Who sees the email/ }).focus(); await p.waitForTimeout(400); return { full: true }; },
@@ -321,7 +320,6 @@ const S = {
     await rpc(p); await p.goto(base + '/create'); await p.waitForTimeout(4500); return {};
   },
   // Send UX round (r5): every new or changed sender state.
-  'landing-usdc': async (p) => { await rpc(p); await p.goto(base + '/'); await p.waitForSelector('h1'); await heroShown(p); await p.getByRole('button', { name: 'USDC', exact: true }).click(); await p.waitForTimeout(300); return { full: true }; },
   'create-1-ok': async (p) => { await rpc(p); await p.goto(base + '/create'); await p.waitForSelector('[aria-label="Recipient 1 email"]'); await p.waitForTimeout(1500); await pasteList(p, CSV); await p.waitForTimeout(400); return { full: true }; },
   'create-1-dup': async (p) => { await rpc(p); await p.goto(base + '/create'); await p.waitForSelector('[aria-label="Recipient 1 email"]'); await p.waitForTimeout(1500); await pasteList(p, CSV + '\nAlice@gmail.com,5'); await p.waitForTimeout(400); return { full: true }; },
   'create-1-email': async (p) => { await rpc(p); await p.goto(base + '/create'); await p.waitForSelector('[aria-label="Recipient 1 email"]'); await p.waitForTimeout(1500); return { full: true }; },

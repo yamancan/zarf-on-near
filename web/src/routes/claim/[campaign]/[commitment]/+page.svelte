@@ -17,7 +17,7 @@
   import Tooltip from '$lib/zen/components/Tooltip.svelte';
   import { swapIn } from '$lib/motion';
   import ClaimRecord from '$lib/ClaimRecord.svelte';
-  import { UNIT } from '$lib/network';
+  import { UNAUDITED_LINE, UNIT } from '$lib/network';
   import Medallion from '$lib/Medallion.svelte';
   import Note from '$lib/Note.svelte';
   import ZenButton from '$lib/zen/components/ZenButton.svelte';
@@ -411,6 +411,8 @@
             <GoogleG />Sign in with Google
           </ZenButton>
           <p class="text-xs text-zen-fg-subtle text-center">Use the email this link was sent to.</p>
+          <!-- T-001: the unaudited note stays visible on mainnet -->
+          {#if network === 'mainnet'}<p class="text-xs text-zen-fg-subtle text-center">{UNAUDITED_LINE}</p>{/if}
           {#if mode === 'chain' && network !== 'mainnet'}
             <div class="flex flex-col items-center gap-2">
               <p class="text-sm text-zen-fg-muted text-center">On testnet, claim to a NEAR account.</p>
