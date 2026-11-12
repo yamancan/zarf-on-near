@@ -17,7 +17,7 @@
   import Tooltip from '$lib/zen/components/Tooltip.svelte';
   import { swapIn } from '$lib/motion';
   import ClaimRecord from '$lib/ClaimRecord.svelte';
-  import { UNAUDITED_LINE, UNIT } from '$lib/network';
+  import { TESTNET, UNAUDITED_LINE, UNIT } from '$lib/network';
   import Medallion from '$lib/Medallion.svelte';
   import Note from '$lib/Note.svelte';
   import ZenButton from '$lib/zen/components/ZenButton.svelte';
@@ -50,7 +50,8 @@
   let implicit = $state<ImplicitAccount | null>(null);
   // true: derived from a passkey's PRF (Face ID unlocks it again); false: that device gave no PRF, so a random key; null: key-file account.
   let passkeyPrf = $state<boolean | null>(null);
-  const passkeyOn = $derived(passkeyOffered(network, env.PUBLIC_IMPLICIT_ACCOUNTS, env.PUBLIC_PASSKEY_ACCOUNTS));
+  // The chain's network once the link is checked; before that (a recalled claim never checks it) the contract id's, as the receipt does.
+  const passkeyOn = $derived(passkeyOffered(network || (TESTNET ? 'testnet' : ''), env.PUBLIC_IMPLICIT_ACCOUNTS, env.PUBLIC_PASSKEY_ACCOUNTS));
   let exported = $state(false);
   let confirmed = $state(false);
   let error = $state('');

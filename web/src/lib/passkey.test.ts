@@ -51,6 +51,8 @@ describe('accountBalances', () => {
   it('any other RPC error is an error, never 0 NEAR', async () => {
     rpc({ error: { name: 'INTERNAL_ERROR' } });
     await expect(accountBalances('https://rpc.test', 'usdc.testnet', 'ab'.repeat(32))).rejects.toThrow('RPC_ERROR');
+    rpc({ error: { name: 'INTERNAL_ERROR', cause: { name: 'INTERNAL_ERROR', info: { message: 'account does not exist in this shard' } } } });
+    await expect(accountBalances('https://rpc.test', 'usdc.testnet', 'ab'.repeat(32))).rejects.toThrow('RPC_ERROR');
     rpc({ result: {} });
     await expect(accountBalances('https://rpc.test', 'usdc.testnet', 'ab'.repeat(32))).rejects.toThrow('RPC_ERROR');
   });

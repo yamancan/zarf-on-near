@@ -80,10 +80,10 @@ export async function unlockPasskeyAccount(): Promise<ImplicitAccount> {
 
 /** NEAR (yocto) and token (base units) balances. Only UNKNOWN_ACCOUNT means "no NEAR yet"; any other RPC error throws. */
 export async function accountBalances(rpcUrl: string, tokenId: string, accountId: string): Promise<{ near: bigint; token: bigint }> {
-  const res = await postJson<{ result?: { amount?: string }; error?: unknown }>(rpcUrl, {
+  const res = await postJson<{ result?: { amount?: string }; error?: { cause?: { name?: string } } }>(rpcUrl, {
     jsonrpc: '2.0', id: 'zarf', method: 'query', params: { request_type: 'view_account', finality: 'final', account_id: accountId },
   });
-  if (res.error && !/UNKNOWN_ACCOUNT|does not exist/.test(JSON.stringify(res.error))) throw new Error('RPC_ERROR');
+  if (res.error && res.error.cause?.name !== 'UNKNOWN_ACCOUNT') throw new Error('RPC_ERROR');
   if (!res.error && typeof res.result?.amount !== 'string') throw new Error('RPC_ERROR');
   const token = await nearView<string>(rpcUrl, tokenId, 'ft_balance_of', { account_id: accountId });
   return { near: BigInt(res.result?.amount ?? 0), token: BigInt(token) };
