@@ -1,0 +1,19 @@
+diff --git a/build/SandboxedWallet/executor.js b/build/SandboxedWallet/executor.js
+index 6e8bdc24a679cecb4ca23f0421ae9d50105b24d6..7e6415c8e7eb77082f7d74fbc10eba08ed81730e 100644
+--- a/build/SandboxedWallet/executor.js
++++ b/build/SandboxedWallet/executor.js
+@@ -288,6 +288,14 @@ class SandboxExecutor {
+                 throw new Error(`Failed to load executor: ${res.status}`);
+             return res.text();
+         });
++        // Zarf patch: `integrity` (sha256 hex of the file) pins an executor that is not served from a commit URL.
++        // A changed file never runs and is never cached: the wallet fails to open instead.
++        if (executor.manifest.integrity) {
++            const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(newVersion));
++            const hex = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
++            if (hex !== executor.manifest.integrity)
++                throw new Error(`Executor code for ${executor.manifest.id} does not match its pinned hash`);
++        }
+         this.connector.logger?.log(`New version of code fetched`);
+         this.actualCode = newVersion;
+         if (newVersion === currentVersion) {
