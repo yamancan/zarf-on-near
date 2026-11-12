@@ -13,6 +13,8 @@ Zarf link is useless without that person's Google account.
 - Judges' page, a claim link for 0.5 test USDC to your Google email: https://zarf-near-faucet-testnet.sparkling-queen-5e77.workers.dev/try
 - Claim and send app: https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev
 - Escrow contract: [`zarf-near-1112.testnet`](https://testnet.nearblocks.io/address/zarf-near-1112.testnet)
+- The contract's on-chain metadata (NEP-330 `link`, upgrade `source`) records the deployment source in
+  [the testnet deployment notes](docs/deploy/testnet.md).
   (accounts, keys and versions: `docs/deploy/testnet.md`)
 
 > Status: live on NEAR testnet. A real Google claim has run end to end on the hosted app. The
