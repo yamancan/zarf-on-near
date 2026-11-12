@@ -26,6 +26,7 @@ export CLOUDFLARE_API_TOKEN=$(cat ~/.config/cloudflare/api-token)
 (cd verifier && npx wrangler whoami 2>/dev/null | grep -q f0b938c1641f5223c48199ec45751913) || die "the Cloudflare token does not see account f0b938c1…"
 (cd verifier && npx wrangler deploy --env testnet | grep -E "Version ID")
 (cd web && pnpm install --frozen-lockfile >/dev/null && pnpm build >/dev/null && npx wrangler deploy --env testnet | grep -E "Version ID")
+scripts/watcher-refresh.sh testnet # the new web build becomes the watcher's expected claim page
 sleep 5
 health=$(curl -s https://zarf-near-verifier-testnet.sparkling-queen-5e77.workers.dev/health); echo "verifier /health: $health"
 grep -q '"google_client_id_set":true' <<<"$health" || die "verifier does not report google_client_id_set true"

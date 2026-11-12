@@ -1,0 +1,33 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "zarf-near-watcher",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-01",
+  "workers_dev": false,
+  "triggers": { "crons": ["*/2 * * * *"] },
+  // ALERT_WEBHOOK_URL: a Slack or Discord incoming-webhook URL (`wrangler secret put ALERT_WEBHOOK_URL --env <net>`).
+  // Without it every finding throws, so the cron log shows failed runs, but nobody is paged.
+  "vars": { "NETWORK": "", "CONTRACT_ID": "", "NEAR_RPC_URL": "", "EXPECTED_OWNER": "", "EXPECTED_SIGNERS": "", "CLAIM_PAGE_URL": "", "MAX_SCRIPTS": "44" },
+  "env": {
+    "testnet": {
+      "name": "zarf-near-watcher-testnet",
+      "workers_dev": false,
+      "triggers": { "crons": ["*/2 * * * *"] },
+      "vars": {
+        "NETWORK": "testnet", "CONTRACT_ID": "zarf-near-1112.testnet", "NEAR_RPC_URL": "https://test.rpc.fastnear.com",
+        "EXPECTED_OWNER": "zarf-near-owner-1111.testnet",
+        "EXPECTED_SIGNERS": "2d10ebec1ec795cef82b8d357cc60d39d9119b99908741660b632fc5cf0d4e32",
+        "CLAIM_PAGE_URL": "https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev/claim/1/0",
+        "MAX_SCRIPTS": "44"
+      }
+    },
+    // Mainnet, prepared, not deployed: fill these from the mainnet deploy's printed views. Empty values alert
+    // WATCHER MISCONFIGURED on every run.
+    "mainnet": {
+      "name": "zarf-near-watcher",
+      "workers_dev": false,
+      "triggers": { "crons": ["*/2 * * * *"] },
+      "vars": { "NETWORK": "mainnet", "CONTRACT_ID": "", "NEAR_RPC_URL": "https://free.rpc.fastnear.com", "EXPECTED_OWNER": "", "EXPECTED_SIGNERS": "", "CLAIM_PAGE_URL": "", "MAX_SCRIPTS": "44" }
+    }
+  }
+}
