@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import wranglerJsonc from '../../wrangler.jsonc?raw';
 import vectors from '../../../spec/vectors.json';
 import {
   classifyDestination, nearAccountReady, missingAccountLine, claimState, deadlineText, timeLeft, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isImplicitAccount, isValidAccountId, loadAttempt, newAttemptId,
@@ -355,7 +355,7 @@ describe('shared contracts and 0x ids (T-002 items 3-4)', () => {
     expect(missingAccountLine(classifyDestination('alice.testnet'))).toBe('No such account. Check the spelling.');
   });
   it('0x destinations are on in the testnet build only', () => {
-    const cfg = JSON.parse(readFileSync(new URL('../../wrangler.jsonc', import.meta.url), 'utf8').replace(/^\s*\/\/.*$/gm, ''));
+    const cfg = JSON.parse(wranglerJsonc.replace(/^\s*\/\/.*$/gm, ''));
     expect(cfg.env.testnet.vars.PUBLIC_ETH_ACCOUNTS).toBe('on');
     expect(cfg.env.mainnet.vars.PUBLIC_ETH_ACCOUNTS).toBe('');
     expect(cfg.vars.PUBLIC_ETH_ACCOUNTS).toBe('');
