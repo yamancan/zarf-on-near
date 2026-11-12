@@ -19,6 +19,7 @@
   import ZenCard from '$lib/zen/components/ZenCard.svelte';
   import { describeStatus, getStatus, loadPayout, nextStep, notReturnedYet, savePayout, submitDeposit, type StatusView } from '$lib/intents';
   import BridgeDetails from '$lib/BridgeDetails.svelte';
+  import { accountBalances, formatNear, passkeyOffered, unlockPasskeyAccount } from '$lib/passkey';
 
   const attempt = loadAttempt();
   const idToken = signedIn.idToken;
@@ -30,6 +31,24 @@
   let failCode = $state(''); // picks the card: an expired sign-in, another Google account, a final refusal
   const contract = env.PUBLIC_CONTRACT_ID ?? '';
   const campaignId = page.params.campaign!, commitmentId = page.params.commitment!;
+  // T-021: a passkey account opens again with one Face ID (the key is re-derived, never stored).
+  const passkeyOn = passkeyOffered(TESTNET ? 'testnet' : '', env.PUBLIC_IMPLICIT_ACCOUNTS, env.PUBLIC_PASSKEY_ACCOUNTS);
+  let opened = $state<{ id: string; near: bigint; token: bigint } | null>(null);
+  let opening = $state(false);
+  let openError = $state('');
+  async function openWithFaceId(to: string) {
+    openError = '';
+    opening = true;
+    try {
+      const a = await unlockPasskeyAccount();
+      if (a.accountId !== to) openError = `That passkey opens another account (${middle(a.accountId, 8)}). Pick the one you made for this claim.`;
+      else opened = { id: a.accountId, ...(await accountBalances(env.PUBLIC_NEAR_RPC_URL ?? '', env.PUBLIC_TOKEN_ID ?? '', a.accountId)) };
+    } catch {
+      openError = 'Face ID was cancelled, or this browser cannot open the passkey. Try again.';
+    } finally {
+      opening = false;
+    }
+  }
   let txHash = $state('');
   const explorer = $derived(env.PUBLIC_EXPLORER_TX_URL && txHash ? `${env.PUBLIC_EXPLORER_TX_URL}${txHash}` : '');
   // A reload after the NEAR claim has no sign-in left, but the payout it started can still be followed.
@@ -238,6 +257,17 @@
     <AmountPanel label="You Received" value={formatAmount(BigInt(amount))} unit={UNIT} />
     {#if isImplicitAccount(to)}
       <p class="text-xs text-zen-fg-subtle">To move these funds later, this account needs a little NEAR for gas.</p>
+    {/if}
+    {#if passkeyOn && isImplicitAccount(to)}
+      {#if opened?.id === to}
+        <div class="rounded-2xl border border-zen-border-subtle p-4 text-sm space-y-1" role="status">
+          <p class="text-zen-fg-muted">Your account <span class="font-mono text-zen-fg" title={to}>{middle(to, 8)}</span></p>
+          <p class="font-medium">{formatAmount(opened.token)} {UNIT} · {formatNear(opened.near)} NEAR</p>
+        </div>
+      {:else}
+        <ZenButton variant="secondary" class="w-full" disabled={opening} onclick={() => openWithFaceId(to)}>Open My Account with Face ID</ZenButton>
+        {#if openError}<Note tone="error">{openError}</Note>{/if}
+      {/if}
     {/if}
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
       {#if hash && env.PUBLIC_EXPLORER_TX_URL}
