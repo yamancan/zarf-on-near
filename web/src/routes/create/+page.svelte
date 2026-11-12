@@ -9,6 +9,7 @@
   } from '$lib/create/funding';
   import { saveFile } from '$lib/create/publish';
   import { formatAmount, parseRecipients, sendCapError } from '$lib/create/recipients';
+  import { mayNotSignIn } from '$lib/create/googleSignIn';
   import { nearConnectWallet, type SenderWallet } from '$lib/create/wallet';
   import { deadlineText, timeLeft } from '$lib/claim';
   import { formatNear } from '$lib/create/campaigns';
@@ -33,6 +34,15 @@
 
   let csv = $state('');
   const parsed = $derived(parseRecipients(csv));
+  // Rows whose address may not sign in with Google: a calm hint, never a block. Debounced so typing a domain doesn't query each prefix.
+  let notGoogle = $state<Set<string>>(new Set());
+  $effect(() => {
+    const emails = parsed.rows.map((r) => r.email);
+    let live = true;
+    const t = setTimeout(() => mayNotSignIn(emails).then((s) => live && (notGoogle = s)), 500);
+    return () => { live = false; clearTimeout(t); };
+  });
+  const unsure = $derived(parsed.rows.filter((r) => notGoogle.has(r.email)));
   let config = $state<ContractConfig | null>(null);
   let setupError = $state('');
   let setupRetry = $state(false);
@@ -877,6 +887,12 @@
             <p class="text-sm"><span class="font-semibold tabular-nums">{formatAmount(parsed.total)} <span class="uppercase text-xs tracking-widest font-medium">{UNIT}</span></span> <span class="text-zen-fg-muted">to {people(parsed.rows.length)}</span></p>
           {/if}
           {#if capError}<Note tone="error">{capError}</Note>{/if}
+          {#if unsure.length}
+            <Note tone="info">
+              {#each unsure as r (r.line)}<span class="block break-all"><span class="font-semibold">Line {r.line}</span>, {r.email}</span>{/each}
+              <span class="block font-normal mt-1">{unsure.length === 1 ? 'This person must be able to sign in to Google with this exact address, or the share waits until the deadline.' : 'Each of these people must be able to sign in to Google with that exact address, or their share waits until the deadline.'}</span>
+            </Note>
+          {/if}
           {#if parsed.rejected.length}
             <Note tone="error">
               Fix these lines first:
