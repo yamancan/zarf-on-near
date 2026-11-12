@@ -118,6 +118,9 @@ const CSS = `
   input[aria-invalid='true'] { border-color: var(--error); }
   /* Turnstile "flexible": full width (min 300 px), clipped to the input's 12 px radius. */
   .ts { margin-top: 16px; min-height: 65px; border-radius: 12px; overflow: hidden; }
+  /* Turnstile's 300 px minimum: below 400 px the card's side padding drops to 14 px, so the content box is
+     still 300 px at a 360 px screen; narrower than that, the widget is never clipped. */
+  @media (max-width: 399px) { .card { padding-left: 14px; padding-right: 14px; } .ts { overflow: visible; } }
   /* ZenButton primary / secondary: full pill, text-sm semibold. */
   .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; padding: 12px 24px;
     font: 600 14px/1.2 var(--font-sans); letter-spacing: 0.02em; border: 0; border-radius: 9999px; cursor: pointer; text-decoration: none; transition: background .2s, box-shadow .2s, color .2s; }
