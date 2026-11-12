@@ -19,12 +19,21 @@ async function hashed(limitKey: string, kind: string, value: string): Promise<st
   return Array.from(mac.subarray(0, 16), (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-export type LimitResult = { ok: true } | { ok: false; code: 'RATE_LIMITED_IP' | 'RATE_LIMITED_EMAIL' | 'DAILY_CAP_REACHED' };
+export type LimitResult =
+  | { ok: true; commitEmail: () => Promise<void> }
+  | { ok: false; code: 'RATE_LIMITED_IP' | 'RATE_LIMITED_EMAIL' | 'DAILY_CAP_REACHED' };
+
+/** Writes that may fail (KV allows one write per second per key) without failing the request. */
+const putAll = (kv: KvLike, writes: [string, string][], ttl: { expirationTtl: number }) =>
+  Promise.allSettled(writes.map(([k, v]) => kv.put(k, v, ttl))).then(() => undefined);
 
 /**
- * Checks all three counters for the current UTC day, then increments all three.
- * shortcut: KV is not atomic, so a burst of parallel requests can overshoot a limit by a few;
- * fine for test USDC. Move the counters into a Durable Object before any mainnet use.
+ * Checks all three counters for the current UTC day. The IP and day-total counters are spent now,
+ * before the create, so failed attempts still count against abuse; the email counter is spent only
+ * through `commitEmail()` after the campaign exists, so a failed create never locks an email out.
+ * shortcut: KV is not atomic and a write can be lost (each write is best effort and never fails the
+ * request), so a burst or a dropped write can let a few extra requests through; fine for test USDC.
+ * Move the counters into a Durable Object before any mainnet use.
  */
 export async function takeQuota(
   kv: KvLike, limitKey: string, limits: Limits, ip: string, canonicalEmail: string, nowMs: number,
@@ -42,10 +51,6 @@ export async function takeQuota(
   if (emailN >= limits.perEmailPerDay) return { ok: false, code: 'RATE_LIMITED_EMAIL' };
   if (capN >= limits.dailyCap) return { ok: false, code: 'DAILY_CAP_REACHED' };
   const ttl = { expirationTtl: 2 * DAY_S };
-  await Promise.all([
-    kv.put(keys.ip, String(ipN + 1), ttl),
-    kv.put(keys.email, String(emailN + 1), ttl),
-    kv.put(keys.cap, String(capN + 1), ttl),
-  ]);
-  return { ok: true };
+  await putAll(kv, [[keys.ip, String(ipN + 1)], [keys.cap, String(capN + 1)]], ttl);
+  return { ok: true, commitEmail: () => putAll(kv, [[keys.email, String(emailN + 1)]], ttl) };
 }

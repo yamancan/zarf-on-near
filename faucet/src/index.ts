@@ -23,6 +23,12 @@ export interface Env {
   LIMIT_KEY?: string; // secret
   TURNSTILE_SECRET?: string; // secret
   FAUCET_KV: KvLike;
+  PER_IP?: RateLimiter; // Workers rate-limit binding: a burst guard in front of Turnstile and the chain
+}
+
+/** The Cloudflare rate-limit binding's interface (as in the relayer). */
+export interface RateLimiter {
+  limit(o: { key: string }): Promise<{ success: boolean }>;
 }
 
 const positive = (s: string) => (/^[1-9]\d*$/.test(s ?? '') ? Number(s) : null);
@@ -123,7 +129,7 @@ export default {
     // Test keys always pass, so off localhost they would switch the human check off.
     const testKeys = isTurnstileTestKey(env.TURNSTILE_SECRET ?? '') || isTurnstileTestKey(env.TURNSTILE_SITE_KEY ?? '');
     if (!made || !amount || !lifetimeS || !perIp || !perEmail || !cap || !env.LIMIT_KEY || !/^https:\/\//.test(env.CLAIM_HOST ?? '') ||
-        !env.TURNSTILE_SECRET || !env.TURNSTILE_SITE_KEY || (testKeys && !local)) {
+        !env.TURNSTILE_SECRET || !env.TURNSTILE_SITE_KEY || (testKeys && !local) || !env.PER_IP) {
       return json({ error: 'FAUCET_MISCONFIGURED' }, 500);
     }
     if (env.CREATOR === 'testnet') {
@@ -133,6 +139,9 @@ export default {
     }
     // A JSON content type forces a CORS preflight, so a cross-site form cannot post here.
     if (!/^application\/json\b/i.test(req.headers.get('Content-Type') ?? '')) return json({ error: 'UNSUPPORTED_MEDIA_TYPE' }, 415);
+    const ip = req.headers.get('CF-Connecting-IP') ?? 'unknown';
+    // A burst from one IP stops here, before the float read, siteverify and the quota.
+    if (!(await env.PER_IP.limit({ key: ip })).success) return json({ error: 'RATE_LIMITED_IP' }, 429);
     if (env.CREATOR === 'testnet') {
       // Before the human check and the quota: an empty faucet spends nobody's token or allowance.
       const f = await cachedFloat(env).catch(() => null);
@@ -140,7 +149,6 @@ export default {
       if (BigInt(f.float) < BigInt(amount)) return json({ error: 'FAUCET_EMPTY' }, 503);
     }
     const input = (await req.json().catch(() => null)) as { turnstile?: unknown } | null;
-    const ip = req.headers.get('CF-Connecting-IP') ?? 'unknown';
     // Before the quota: a bot without a valid token spends nobody's daily allowance.
     const human = await verifyTurnstile(input?.turnstile, env.TURNSTILE_SECRET, ip, local ? null : url.hostname);
     if (human === 'unavailable') return json({ error: 'TURNSTILE_UNAVAILABLE' }, 503);

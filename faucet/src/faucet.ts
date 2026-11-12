@@ -30,7 +30,7 @@ export async function handleFaucet(input: unknown, ip: string, d: FaucetDeps): P
   if (!canonical || !/^[^@]+@[^@]+\.[^@]+$/.test(canonical)) return { status: 400, body: { error: 'BAD_EMAIL' } };
 
   const nowMs = d.nowMs ?? Date.now();
-  // shortcut: a failed create still spends the quota (no refund path); acceptable for a testnet faucet.
+  // A failed create spends the IP and day slots but not the email's (see takeQuota).
   const quota = await takeQuota(d.kv, d.limitKey, d.limits, ip, canonical, nowMs);
   if (!quota.ok) return { status: 429, body: { error: quota.code } };
 
@@ -42,6 +42,7 @@ export async function handleFaucet(input: unknown, ip: string, d: FaucetDeps): P
   let created;
   try {
     created = await d.creator.create({ merkleRoot: root, amount: d.amount, deadlineNs });
+    await quota.commitEmail();
   } catch (e) {
     if (e instanceof CreateError) return { status: 503, body: { error: e.code } };
     console.log('faucet_create_failed'); // fixed tag: never the error, which could carry request data

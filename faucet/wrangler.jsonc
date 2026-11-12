@@ -24,5 +24,7 @@
   },
   // Secrets (wrangler secret put, or .dev.vars locally):
   // FAUCET_SENDER_KEY, LIMIT_KEY, TURNSTILE_SECRET.
+  // Burst guard per IP before Turnstile and the chain (namespace ids 2001-2003 are the relayer's and verifier's).
+  "ratelimits": [{ "name": "PER_IP", "namespace_id": "2004", "simple": { "limit": 3, "period": 10 } }],
   "kv_namespaces": [{ "binding": "FAUCET_KV", "id": "4c8e6091866e45239c9de5144c334a3f" }]
 }

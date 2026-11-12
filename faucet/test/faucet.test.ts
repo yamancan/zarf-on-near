@@ -40,7 +40,9 @@ describe('takeQuota', () => {
   const now = Date.UTC(2026, 10, 11, 12);
   it('limits per email, per IP and per day, and resets the next UTC day', async () => {
     const kv = memKv();
-    const t = (ip: string, e: string, ms = now) => takeQuota(kv, 'k', limits, ip, e, ms).then((r) => (r.ok ? 'ok' : r.code));
+    // Each 'ok' stands for a request whose create succeeded, so its email slot is committed too.
+    const t = (ip: string, e: string, ms = now) =>
+      takeQuota(kv, 'k', limits, ip, e, ms).then(async (r) => (r.ok ? (await r.commitEmail(), 'ok') : r.code));
     expect(await t('1.1.1.1', 'a@x.io')).toBe('ok');
     expect(await t('2.2.2.2', 'a@x.io')).toBe('RATE_LIMITED_EMAIL');
     expect(await t('1.1.1.1', 'b@x.io')).toBe('ok');
@@ -51,14 +53,33 @@ describe('takeQuota', () => {
   });
   it('a refused request spends nothing', async () => {
     const kv = memKv();
-    await takeQuota(kv, 'k', limits, 'ip', 'a@x.io', now);
+    const first = await takeQuota(kv, 'k', limits, 'ip', 'a@x.io', now);
+    if (first.ok) await first.commitEmail(); // the create succeeded
     const before = new Map(kv.m);
     await takeQuota(kv, 'k', limits, 'ip2', 'a@x.io', now);
     expect(kv.m).toEqual(before);
   });
+  it('spends IP and day slots before the create, the email slot only on commit', async () => {
+    const kv = memKv();
+    const first = await takeQuota(kv, 'k', limits, '1.1.1.1', 'a@x.io', now);
+    expect(first.ok).toBe(true);
+    expect([...kv.m.keys()].filter((k) => k.startsWith('email:'))).toHaveLength(0);
+    expect((await takeQuota(kv, 'k', limits, '2.2.2.2', 'a@x.io', now)).ok).toBe(true); // no commit: email still free
+    if (first.ok) await first.commitEmail();
+    expect(await takeQuota(kv, 'k', limits, '3.3.3.3', 'a@x.io', now)).toEqual({ ok: false, code: 'RATE_LIMITED_EMAIL' });
+  });
+  it('a failed KV write does not fail the request', async () => {
+    const kv = memKv();
+    let throws = 2;
+    const flaky: KvLike = { get: kv.get, put: async (k, v, o) => { if (throws-- > 0) throw new Error('429 one write per second'); return kv.put(k, v, o); } };
+    const r = await takeQuota(flaky, 'k', limits, '1.1.1.1', 'a@x.io', now);
+    expect(r.ok).toBe(true);
+    if (r.ok) await expect(r.commitEmail()).resolves.toBeUndefined();
+  });
   it('never stores an email or IP in the clear', async () => {
     const kv = memKv();
-    await takeQuota(kv, 'k', limits, '203.0.113.9', 'alice@example.com', now);
+    const r = await takeQuota(kv, 'k', limits, '203.0.113.9', 'alice@example.com', now);
+    if (r.ok) await r.commitEmail();
     const dump = JSON.stringify([...kv.m]);
     expect(dump).not.toContain('alice');
     expect(dump).not.toContain('203.0.113.9');
@@ -104,6 +125,20 @@ describe('handleFaucet', () => {
       expect((d.kv as ReturnType<typeof memKv>).m.size).toBe(0);
     },
   );
+
+  it('after a failed create the same email can ask again', async () => {
+    const kv = memKv();
+    let putThrows = 1; // KV rejects one write (one write per second per key)
+    const flaky: KvLike = { get: kv.get, put: async (k, v, o) => { if (putThrows-- > 0) throw new Error('429'); return kv.put(k, v, o); } };
+    const failing: CampaignCreator = { live: true, create: async () => { throw new CreateError('CREATE_FAILED'); } };
+    expect(await handleFaucet({ email: 'judge@gmail.com' }, 'ip', deps({ kv: flaky, creator: failing })))
+      .toEqual({ status: 503, body: { error: 'CREATE_FAILED' } });
+    const again = await handleFaucet({ email: 'judge@gmail.com' }, 'ip', deps({ kv: flaky }));
+    expect(again.status).toBe(200);
+    // Now the email is spent.
+    expect(await handleFaucet({ email: 'judge@gmail.com' }, 'ip2', deps({ kv: flaky })))
+      .toEqual({ status: 429, body: { error: 'RATE_LIMITED_EMAIL' } });
+  });
 
   it('429s on the second request for the same email', async () => {
     const d = deps();
@@ -183,8 +218,13 @@ describe('worker', () => {
     NETWORK: 'testnet', CREATOR: 'testnet', CLAIM_HOST: 'https://claim.example', CONTRACT_ID: 'esc.testnet', TOKEN_ID: 'usdc.testnet',
     NEAR_RPC_URL: `https://rpc${rpcUrl++}.example`, FAUCET_SENDER_ID: 'faucet.testnet', AMOUNT: '1000000', LIFETIME_S: '600',
     PER_IP_PER_DAY: '3', PER_EMAIL_PER_DAY: '1', DAILY_CAP: '10', TURNSTILE_SITE_KEY: '0x4AAAAAAAsitekey',
-    FAUCET_SENDER_KEY: KEY, LIMIT_KEY: 'k', TURNSTILE_SECRET: 'secret', FAUCET_KV: memKv(),
+    FAUCET_SENDER_KEY: KEY, LIMIT_KEY: 'k', TURNSTILE_SECRET: 'secret', FAUCET_KV: memKv(), PER_IP: perIp(1000),
   });
+  // Fake of the Workers rate-limit binding: `limit` calls per key, forever (the window is the test).
+  const perIp = (limit: number) => {
+    const n = new Map<string, number>();
+    return { limit: async ({ key }: { key: string }) => { n.set(key, (n.get(key) ?? 0) + 1); return { success: n.get(key)! <= limit }; } };
+  };
   // Routes outbound fetches: NEAR `status`, and Turnstile siteverify.
   const net = (o: { chainId?: string; turnstile?: 'ok' | 'failed' | 'down'; tsHost?: string; float?: string; viewsDown?: boolean } = {}) => {
     const seen: string[] = [];
@@ -223,7 +263,7 @@ describe('worker', () => {
   });
 
   it.each(['NETWORK', 'CREATOR', 'CLAIM_HOST', 'CONTRACT_ID', 'TOKEN_ID', 'NEAR_RPC_URL', 'FAUCET_SENDER_ID', 'AMOUNT', 'LIFETIME_S',
-    'PER_IP_PER_DAY', 'PER_EMAIL_PER_DAY', 'DAILY_CAP', 'TURNSTILE_SITE_KEY', 'FAUCET_SENDER_KEY', 'LIMIT_KEY', 'TURNSTILE_SECRET'])(
+    'PER_IP_PER_DAY', 'PER_EMAIL_PER_DAY', 'DAILY_CAP', 'TURNSTILE_SITE_KEY', 'FAUCET_SENDER_KEY', 'LIMIT_KEY', 'TURNSTILE_SECRET', 'PER_IP'])(
     'without %s it is FAUCET_MISCONFIGURED', async (k) => {
       net();
       const env = fullEnv();
@@ -355,6 +395,22 @@ describe('worker', () => {
     for (const s of [env.FAUCET_SENDER_KEY, env.LIMIT_KEY, env.TURNSTILE_SECRET] as string[]) expect(dump).not.toContain(s);
     net({ viewsDown: true });
     expect((await worker.fetch(new Request('https://f.example/health'), fullEnv() as never)).status).toBe(503); // fresh env: no cached value
+  });
+
+  it('the 4th request from one IP inside 10 s gets 429 before siteverify', async () => {
+    const seen = net();
+    const env = { ...fullEnv(), PER_IP: perIp(3) };
+    const body = { email: 'a@x.io', turnstile: 't' };
+    const { default: worker } = await import('../src/index');
+    const send = () => worker.fetch(new Request('https://f.example/faucet', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.7' }, body: JSON.stringify(body),
+    }), env as never);
+    for (let i = 0; i < 3; i++) expect((await send()).status).not.toBe(429);
+    const before = seen.filter((u) => u.startsWith('https://challenges.cloudflare.com/')).length;
+    const fourth = await send();
+    expect(fourth.status).toBe(429);
+    expect(await fourth.json()).toEqual({ error: 'RATE_LIMITED_IP' });
+    expect(seen.filter((u) => u.startsWith('https://challenges.cloudflare.com/')).length).toBe(before);
   });
 
   it('a missing token never reaches siteverify', async () => {
