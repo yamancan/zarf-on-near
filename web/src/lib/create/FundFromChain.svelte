@@ -114,7 +114,6 @@
   /** Only offered when nothing more can arrive at the address (mayStartOver): the record is then dropped. */
   function startOver() {
     if (!canStartOver) return;
-    poller++;
     if (saved && unresolved(status?.status)) {
       // expired and unpaid as far as 1Click knows: kept as a reference, or the active record stays
       if (!archiveFunding(contract, account, saved)) {
@@ -123,6 +122,7 @@
       }
       earlier = earlierFundings(contract, account);
     }
+    poller++; // only now: a record kept after a failed archive keeps being followed
     saveFunding(contract, account, null);
     saved = quote = status = null;
     fresh = stalled = false;
