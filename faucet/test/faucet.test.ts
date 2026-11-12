@@ -110,10 +110,9 @@ describe('handleFaucet', () => {
     expect(seen).toEqual([vectors.campaigns.single.merkle_root]);
   });
 
-  it('uses a fresh salt per request', async () => {
-    const d = deps({ randomSalt: undefined, limits: { perIpPerDay: 5, perEmailPerDay: 5, dailyCap: 10 } });
-    const a = await handleFaucet({ email: 'a@x.io' }, 'ip', d);
-    const b = await handleFaucet({ email: 'a@x.io' }, 'ip', d);
+  it('uses a fresh salt per new link', async () => {
+    const a = await handleFaucet({ email: 'a@x.io' }, 'ip', deps({ randomSalt: undefined }));
+    const b = await handleFaucet({ email: 'a@x.io' }, 'ip', deps({ randomSalt: undefined })); // another day's store
     expect(a.body.commitment).not.toBe(b.body.commitment);
   });
 
@@ -135,15 +134,48 @@ describe('handleFaucet', () => {
       .toEqual({ status: 503, body: { error: 'CREATE_FAILED' } });
     const again = await handleFaucet({ email: 'judge@gmail.com' }, 'ip', deps({ kv: flaky }));
     expect(again.status).toBe(200);
-    // Now the email is spent.
-    expect(await handleFaucet({ email: 'judge@gmail.com' }, 'ip2', deps({ kv: flaky })))
-      .toEqual({ status: 429, body: { error: 'RATE_LIMITED_EMAIL' } });
+    // Now the email has its link: asking again shows that same link.
+    expect((await handleFaucet({ email: 'judge@gmail.com' }, 'ip2', deps({ kv: flaky }))).body).toEqual({ ...again.body, reshown: true });
   });
 
-  it('429s on the second request for the same email', async () => {
+  it('asking again with the same email shows the same link, and spends no funds or quota', async () => {
+    let creates = 0;
+    const creator: CampaignCreator = { live: true, create: async () => (creates++, { campaignId: '8', txHash: 'tx' }) };
+    const d = deps({ creator });
+    const first = await handleFaucet({ email: 'judge@gmail.com' }, 'ip', d);
+    const kv = d.kv as ReturnType<typeof memKv>;
+    const before = new Map(kv.m);
+    for (const [email, ip] of [['judge@gmail.com', 'ip'], [' Judge@Gmail.com ', 'other-ip']]) {
+      const again = await handleFaucet({ email }, ip, d);
+      expect(again).toEqual({ status: 200, body: { ...first.body, reshown: true } });
+    }
+    expect(creates).toBe(1);
+    expect(kv.m).toEqual(before); // no counter moved
+  });
+
+  it('never shows one email\'s link to another email, nor under another key, nor on another day', async () => {
+    const d = deps({ randomSalt: undefined });
+    const a = await handleFaucet({ email: 'a@x.io' }, 'ip', d);
+    const b = await handleFaucet({ email: 'b@x.io' }, 'ip', d);
+    expect(b.body.reshown).toBeUndefined();
+    expect(b.body.claim_url).not.toBe(a.body.claim_url);
+    // Another LIMIT_KEY cannot open the sealed link: no re-show; the email counter (also keyed) is fresh too.
+    expect((await handleFaucet({ email: 'a@x.io' }, 'ip', { ...d, limitKey: 'other' })).body.reshown).toBeUndefined();
+    expect((await handleFaucet({ email: 'a@x.io' }, 'ip', { ...d, nowMs: d.nowMs! + 86_400_000 })).body.reshown).toBeUndefined();
+  });
+
+  it('stores the link sealed: no email, link, salt or commitment in KV', async () => {
     const d = deps();
-    await handleFaucet({ email: 'a@x.io' }, 'ip', d);
-    expect(await handleFaucet({ email: 'A@x.io' }, 'ip2', d)).toEqual({ status: 429, body: { error: 'RATE_LIMITED_EMAIL' } });
+    const r = await handleFaucet({ email: 'solo@example.com' }, 'ip', d);
+    const dump = JSON.stringify([...(d.kv as ReturnType<typeof memKv>).m]);
+    for (const secret of ['solo', 'example.com', String(r.body.claim_url), String(r.body.commitment), solo.salt, 'claim.example']) expect(dump).not.toContain(secret);
+  });
+
+  it('if the link write was lost, a repeat still gets RATE_LIMITED_EMAIL (as before), never a second campaign', async () => {
+    const kv = memKv();
+    const lossy: KvLike = { get: kv.get, put: async (k, v, o) => (k.startsWith('link:') ? undefined : kv.put(k, v, o)) };
+    await handleFaucet({ email: 'a@x.io' }, 'ip', deps({ kv: lossy }));
+    expect(await handleFaucet({ email: 'A@x.io' }, 'ip2', deps({ kv: lossy }))).toEqual({ status: 429, body: { error: 'RATE_LIMITED_EMAIL' } });
   });
 
   it('503s with the creator code, and on unknown errors', async () => {
@@ -331,6 +363,18 @@ describe('worker', () => {
     expect((await post(env, { email: 'a@x.io', turnstile: 't' }, { host: '127.0.0.1:8787' })).body).toMatchObject({ stub: true });
   });
 
+  it('a repeat shows the same link only after Turnstile passes', async () => {
+    const env = { ...fullEnv(), CREATOR: 'stub', TURNSTILE_SECRET: '1x0000000000000000000000000000000AA' };
+    const local = { host: '127.0.0.1:8787' };
+    net();
+    const first = await post(env, { email: 'judge@gmail.com', turnstile: 't' }, local);
+    expect(first.status).toBe(200);
+    net({ turnstile: 'failed' });
+    expect(await post(env, { email: 'judge@gmail.com', turnstile: 'forged' }, local)).toEqual({ status: 403, body: { error: 'TURNSTILE_FAILED' } });
+    net();
+    expect((await post(env, { email: 'judge@gmail.com', turnstile: 't' }, local)).body).toEqual({ ...first.body, reshown: true });
+  });
+
   it('refuses a token issued for another hostname', async () => {
     net({ tsHost: 'evil.example' });
     expect(await post(fullEnv(), { email: 'a@x.io', turnstile: 't' })).toEqual({ status: 403, body: { error: 'TURNSTILE_FAILED' } });
@@ -504,10 +548,30 @@ describe('judges page presentation', () => {
   it('shows the configured amount, never an unvalidated one', async () => {
     const { default: worker } = await import('../src/index');
     const page = async (AMOUNT: string) => (await worker.fetch(new Request('https://f.example/try'), { AMOUNT } as never)).text();
-    expect(await page('500000')).toContain('<h1>Get 0.5 test USDC at your Google email.</h1>');
+    expect(await page('500000')).toContain('<span class="label">Claim Amount</span><span class="figure"><span class="value">0.5</span><span class="unit">test USDC</span>');
     const hostile = await page('5"><script>');
-    expect(hostile).toContain('<h1>Get test USDC at your Google email.</h1>');
+    expect(hostile).not.toContain('class="amount"');
     expect(hostile).not.toContain('"><script>');
+  });
+
+  it('first screen: the amount block, "Zarf pays the gas", the gallery link, and a full-width human check', async () => {
+    const { default: worker } = await import('../src/index');
+    const html = await (await worker.fetch(new Request('https://f.example/try'), { AMOUNT: '500000' } as never)).text();
+    expect(html).toContain('<h1>Try Zarf</h1>');
+    expect(html).toContain('Claiming is free: Zarf pays the NEAR gas.');
+    expect(html).toMatch(/<a href="https:\/\/zarf-near-claim-preview\.[^"]+\/gallery\/" target="_blank" rel="noopener noreferrer">See every screen<\/a>/);
+    expect(html).toContain('<div class="ts"><div class="cf-turnstile" data-sitekey="" data-size="flexible"');
+  });
+
+  it('the result: same link again, a new tab for the claim, and no green success in demo mode', async () => {
+    const { default: worker } = await import('../src/index');
+    const js = await (await worker.fetch(new Request('https://f.example/try.js'), {} as never)).text();
+    expect(js).toContain("body.reshown ? 'Your link from earlier' : 'Your link is ready'");
+    expect(js).toContain("href: body.claim_url, target: '_blank', rel: 'noopener'");
+    expect(js).toContain("'Demo only: no link was created'");
+    // In demo mode the script returns before the medallion and "ready" title are built.
+    expect(js.indexOf('if (body.stub)')).toBeLessThan(js.indexOf("className: 'medallion ok'"));
+    expect(js).not.toContain('Demo mode: this campaign was not created on chain.');
   });
 
   it('serves the font and favicon from its own origin, under the same CSP', async () => {

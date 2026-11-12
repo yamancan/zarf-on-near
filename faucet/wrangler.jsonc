@@ -17,9 +17,9 @@
     "CREATOR": "testnet", // "stub" only answers on localhost/127.0.0.1 (local dev)
     "AMOUNT": "500000", // 0.5 test USDC (6 decimals): the float lasts twice as many runs
     "LIFETIME_S": "604800", // claim window: 7 days
-    "PER_IP_PER_DAY": "3",
+    "PER_IP_PER_DAY": "6", // owner A-cap 2026-11-13
     "PER_EMAIL_PER_DAY": "1",
-    "DAILY_CAP": "10", // links per UTC day (0.5 test USDC each)
+    "DAILY_CAP": "25", // links per UTC day (0.5 test USDC each); owner A-cap 2026-11-13
     "TURNSTILE_SITE_KEY": "0x4AAAAAAF9RhGrCD61mJkz3" // widget zarf-near-faucet-testnet, domain = this worker's workers.dev host
   },
   // Secrets (wrangler secret put, or .dev.vars locally):
