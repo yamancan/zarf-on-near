@@ -22,7 +22,7 @@
   const kind = $derived(!rec ? 'unknown' : rec.chainName ? (rec.bridge ?? 'in-transit') : 'paid');
   const shown = $derived(shownAmount(rec ?? {}, formatAmount(BigInt(amount)), UNIT));
   const heading = $derived(
-    title ?? (kind === 'paid' ? (rec?.chainName ? `Arrived on ${rec.chainName}` : 'Arrived') : kind === 'in-transit' ? `On its way to ${rec?.chainName}` : kind === 'failed' ? 'Payout failed' : 'Not delivered'),
+    title ?? (kind === 'paid' ? (rec?.chainName ? `Arrived on ${rec.chainName}` : 'Arrived') : kind === 'in-transit' ? `On Its Way to ${rec?.chainName}` : kind === 'failed' ? 'Payout Failed' : 'Not Delivered'),
   );
 
   onMount(() => {
@@ -52,7 +52,7 @@
 {:else}<Medallion icon={Check} tone="muted" />{/if}
 <h1 class="text-xl font-semibold tracking-tight">{heading}</h1>
 <Amount
-  label={kind === 'unknown' ? 'This link held' : kind === 'paid' ? 'Paid out' : kind === 'in-transit' ? 'On its way' : kind === 'refunded' ? 'Returned to the sender' : kind === 'refunding' ? 'Going back to the sender' : 'Not delivered'}
+  label={kind === 'unknown' ? 'This Link Held' : kind === 'paid' ? 'Paid Out' : kind === 'in-transit' ? 'On Its Way' : kind === 'refunded' ? 'Returned to the Sender' : kind === 'refunding' ? 'Going Back to the Sender' : 'Not Delivered'}
   value={shown.value}
   unit={shown.unit}
   struck={kind === 'refunded'}

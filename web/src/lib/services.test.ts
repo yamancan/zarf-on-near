@@ -179,10 +179,10 @@ describe('describeCheckError (claim page, before any claim)', () => {
 });
 
 describe('failureHeading (receipt title agrees with its sentence, critic r3 M6)', () => {
-  it('maps already claimed and already being paid; everything else is Not claimed', () => {
-    expect(failureHeading('E105_ALREADY_CLAIMED')).toEqual({ title: 'Already claimed', muted: true });
-    expect(failureHeading('E123_CLAIM_PENDING')).toEqual({ title: 'Already being paid', muted: true });
-    for (const c of ['RPC_ERROR', 'E125_CAMPAIGN_ENDED', 'UNEXPECTED', '']) expect(failureHeading(c)).toEqual({ title: 'Not claimed', muted: false });
+  it('maps already claimed and already being paid; everything else is Not Claimed', () => {
+    expect(failureHeading('E105_ALREADY_CLAIMED')).toEqual({ title: 'Already Claimed', muted: true });
+    expect(failureHeading('E123_CLAIM_PENDING')).toEqual({ title: 'Already Being Paid', muted: true });
+    for (const c of ['RPC_ERROR', 'E125_CAMPAIGN_ENDED', 'UNEXPECTED', '']) expect(failureHeading(c)).toEqual({ title: 'Not Claimed', muted: false });
   });
 });
 

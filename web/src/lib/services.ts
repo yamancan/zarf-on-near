@@ -139,9 +139,9 @@ export function describeError(e: unknown): string {
  * claimed is not "Not claimed", and a claim another tab is paying is not a failure. `muted`: no red.
  */
 export function failureHeading(code: string): { title: string; muted: boolean } {
-  if (code === 'E105_ALREADY_CLAIMED') return { title: 'Already claimed', muted: true };
-  if (code === 'E123_CLAIM_PENDING') return { title: 'Already being paid', muted: true };
-  return { title: 'Not claimed', muted: false };
+  if (code === 'E105_ALREADY_CLAIMED') return { title: 'Already Claimed', muted: true };
+  if (code === 'E123_CLAIM_PENDING') return { title: 'Already Being Paid', muted: true };
+  return { title: 'Not Claimed', muted: false };
 }
 
 /** True when describeError fell back to a generic sentence, so the code is worth showing as a detail. */

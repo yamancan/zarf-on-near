@@ -8,6 +8,8 @@ const v = require('../../spec/vectors.json');
 const tokens = require('../src/lib/fixtures/1click-tokens.json');
 const [base, out, filter] = process.argv.slice(2);
 const enc = (o) => [...Buffer.from(JSON.stringify(o))];
+// T-002: the NEAR path asks "Is this your account?" before Google; answer it when it shows (no-op elsewhere).
+const yes = async (p) => { const b = p.getByRole('button', { name: "Yes, It's Mine" }); try { await b.waitFor({ timeout: 3000 }); await b.click(); } catch {} };
 const LINK = v.links.main[0];
 const [, , CAMP, COMMIT] = LINK.split('#')[0].split('/');
 const DEP = 'd'.repeat(64);
@@ -120,7 +122,7 @@ const nearClaim = async (p, o = {}) => {
   await rpc(p, o.rpc); await signinFlow(p, o);
   await p.goto(base + LINK); await p.fill('#dest', o.dest ?? 'alice.testnet'); await p.waitForTimeout(1200);
   if (o.ack) await p.getByText(/I hold it/).click();
-  await p.locator('button.google').click(); await p.waitForURL(/receipt/); await p.waitForTimeout(o.wait ?? 1500);
+  await yes(p); await p.locator('button.google').click(); await p.waitForURL(/receipt/); await p.waitForTimeout(o.wait ?? 1500);
   return { full: true };
 };
 // Cross-chain (mainnet) up to the quote; `go` signs in.
@@ -131,13 +133,13 @@ const chainClaim = async (p, o = {}) => {
     if (o.verifierError) return r.fulfill({ status: 400, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ error: o.verifierError }) });
     r.fulfill({ contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ ...v.claims.valid[0].call_args, destination: DEP }) });
   });
-  await p.goto(base + LINK); await p.getByText('Another chain', { exact: true }).click();
+  await p.goto(base + LINK); await p.getByText('Another Chain', { exact: true }).click();
   if (o.stopAt === 'picker') { await p.waitForTimeout(o.wait ?? 1200); return { full: true }; }
   await p.fill('#addr', o.addr ?? EVM);
   if (o.stopAt === 'quote') { await p.waitForTimeout(o.wait ?? 1500); return { full: true }; }
   await p.waitForSelector('.quote');
   if (o.stopAt === 'quoted') { await p.waitForTimeout(300); return { full: true }; }
-  await p.locator('button.google').click();
+  await yes(p); await p.locator('button.google').click();
   if (o.stopAt === 'signin') { await p.waitForTimeout(o.wait ?? 1200); return { full: true }; }
   await p.waitForURL(/receipt/); await p.waitForTimeout(o.wait ?? 3000); return { full: true };
 };
@@ -196,15 +198,15 @@ const S = {
   'landing-detail': async (p) => { await rpc(p); await p.goto(base + '/'); await p.waitForSelector('h1'); await p.getByText('Who sees the email?').click(); await p.waitForTimeout(2800); return { full: true }; },
   'claim-near': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.fill('#dest', 'alice.testnet'); await p.waitForTimeout(1200); return { full: true }; },
   'claim-near-missing': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.fill('#dest', 'alise.testnet'); await p.waitForTimeout(1200); return { full: true }; },
-  'claim-testnet-detail': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText('Who sees the email?').click(); await p.waitForTimeout(400); return { full: true }; },
-  'claim-chain-mainnet': async (p) => { await rpc(p, { network: 'mainnet', camp: { sender: 'sender.near' } }); await oneclick(p, 'SUCCESS'); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText('Another chain', { exact: true }).click(); await p.waitForSelector('#chain'); await p.fill('#addr', EVM); await p.waitForSelector('.quote'); await p.waitForTimeout(300); return { full: true }; },
+  'claim-testnet-detail': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByRole('button', { name: /Who sees the email/ }).focus(); await p.waitForTimeout(400); return { full: true }; },
+  'claim-chain-mainnet': async (p) => { await rpc(p, { network: 'mainnet', camp: { sender: 'sender.near' } }); await oneclick(p, 'SUCCESS'); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText('Another Chain', { exact: true }).click(); await p.waitForSelector('#chain'); await p.fill('#addr', EVM); await p.waitForSelector('.quote'); await p.waitForTimeout(300); return { full: true }; },
   // RPC never answers: wait for the app's own checking card, not the boot mark (critic r2 coverage row 23).
   'claim-checking': async (p) => { await p.route(/fastnear|rpc/, () => {}); await p.goto(base + LINK); await p.getByRole('heading', { name: 'Checking your claim…' }).waitFor({ timeout: 20000 }); await p.waitForTimeout(300); return {}; },
   // The app's script never arrives: the first paint the recipient sees on a slow phone.
   'boot-opening': async (p) => { await p.route(/\/(src|node_modules|@vite|@fs|\.svelte-kit|@id)\//, (r) => r.abort()); await p.goto(base + LINK, { waitUntil: 'commit' }); await p.waitForSelector('#boot-line'); await p.waitForTimeout(800); return {}; },
-  'claim-no-google': async (p) => { await noGoogle(p); await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.fill('#dest', 'alice.testnet'); await p.getByText('found').waitFor(); await p.locator('button.google').click(); await p.waitForTimeout(400); return { full: true }; },
-  'claim-no-account': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText('No NEAR account?').click(); await p.waitForTimeout(400); return { full: true }; },
-  'claim-chain-testnet': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText('Another chain', { exact: true }).click(); await p.waitForTimeout(400); return { full: true }; },
+  'claim-no-google': async (p) => { await noGoogle(p); await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.fill('#dest', 'alice.testnet'); await yes(p); await yes(p); await p.locator('button.google').click(); await p.waitForTimeout(400); return { full: true }; },
+  'claim-no-account': async (p) => { await rpc(p); await p.context().route(/meteorwallet/, (r) => r.abort()); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.context().on('page', (pg) => pg.close().catch(() => {})); await p.getByText('Get a NEAR Account').click(); await p.bringToFront(); await p.waitForTimeout(400); return { full: true }; },
+  'claim-chain-testnet': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText('Another Chain', { exact: true }).click(); await p.waitForTimeout(400); return { full: true }; },
   'term-unknown': async (p) => { await rpc(p, { campaign: null }); await p.goto(base + LINK); await p.waitForSelector('h1'); return {}; },
   'term-mismatch': async (p) => { await rpc(p, { camp: { merkle_root: 'f'.repeat(64) } }); await p.goto(base + LINK); await p.waitForSelector('h1'); return {}; },
   'term-claimed': async (p) => { await rpc(p, { claimState: 'claimed' }); await p.goto(base + LINK); await p.waitForSelector('h1'); return {}; },
@@ -213,16 +215,16 @@ const S = {
   'term-incomplete': async (p) => { await rpc(p); await p.goto(base + LINK.split('#')[0]); await p.waitForSelector('h1'); return {}; },
   'term-broken': async (p) => { await rpc(p); await p.goto(base + '/claim/x/zz'); await p.waitForSelector('h1'); return {}; },
   'term-error': async (p) => { await rpc(p, { rpcDown: true }); await p.goto(base + LINK); await p.waitForSelector('h1'); return {}; },
-  'receipt-near': async (p) => { await rpc(p); await signinFlow(p); await p.goto(base + LINK); await p.fill('#dest', 'alice.testnet'); await p.waitForTimeout(1200); await p.locator('button.google').click(); await p.waitForURL(/receipt/); await p.waitForTimeout(1500); return { full: true }; },
+  'receipt-near': async (p) => { await rpc(p); await signinFlow(p); await p.goto(base + LINK); await p.fill('#dest', 'alice.testnet'); await p.waitForTimeout(1200); await yes(p); await p.locator('button.google').click(); await p.waitForURL(/receipt/); await p.waitForTimeout(1500); return { full: true }; },
   // The judge's own card: the faucet's 0.5 test USDC link (critic r3 P1-8).
-  'claim-judge': async (p) => { await rpc(p, { camp: { sender: 'zarf-near-faucet-1112.testnet', merkle_root: JUDGE_ROOT } }); await p.goto(base + JUDGE_LINK); await p.waitForSelector('#dest'); await p.fill('#dest', 'alice.testnet'); await p.getByText('found').waitFor(); await p.waitForTimeout(300); return { full: true }; },
+  'claim-judge': async (p) => { await rpc(p, { camp: { sender: 'zarf-near-faucet-1112.testnet', merkle_root: JUDGE_ROOT } }); await p.goto(base + JUDGE_LINK); await p.waitForSelector('#dest'); await p.fill('#dest', 'alice.testnet'); await yes(p); await p.waitForTimeout(300); return { full: true }; },
   // The general failure: the verifier could not reach NEAR (canvas N4-02), not another Google account.
-  'receipt-failed': async (p) => { await rpc(p); await signinFlow(p, { verifierError: 'RPC_ERROR' }); await p.goto(base + LINK); await p.fill('#dest', 'alice.testnet'); await p.waitForTimeout(1200); await p.locator('button.google').click(); await p.waitForURL(/receipt/); await p.waitForTimeout(1500); return { full: true }; },
+  'receipt-failed': async (p) => { await rpc(p); await signinFlow(p, { verifierError: 'RPC_ERROR' }); await p.goto(base + LINK); await p.fill('#dest', 'alice.testnet'); await p.waitForTimeout(1200); await yes(p); await p.locator('button.google').click(); await p.waitForURL(/receipt/); await p.waitForTimeout(1500); return { full: true }; },
   ...Object.fromEntries(['SUCCESS', 'REFUNDED', 'PROCESSING'].map((f) => [`receipt-chain-${f.toLowerCase()}`, async (p) => {
     await rpc(p, { network: 'mainnet', camp: { sender: 'sender.near' } }); await oneclick(p, f); await signinFlow(p);
     await p.route(/verifier.*\/claim$/, async (r) => r.fulfill({ contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ ...v.claims.valid[0].call_args, destination: DEP }) }));
-    await p.goto(base + LINK); await p.getByText('Another chain', { exact: true }).click(); await p.fill('#addr', EVM); await p.waitForSelector('.quote');
-    await p.locator('button.google').click(); await p.waitForURL(/receipt/); await p.waitForTimeout(f === 'PROCESSING' ? 2500 : 3000); return { full: true };
+    await p.goto(base + LINK); await p.getByText('Another Chain', { exact: true }).click(); await p.fill('#addr', EVM); await p.waitForSelector('.quote');
+    await yes(p); await p.locator('button.google').click(); await p.waitForURL(/receipt/); await p.waitForTimeout(f === 'PROCESSING' ? 2500 : 3000); return { full: true };
   }])),
   boot: async (p) => { await p.goto(base + LINK); return {}; },
   'claim-empty': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.waitForTimeout(400); return { full: true }; },
@@ -377,8 +379,8 @@ const S = {
   privacy: async (p) => { await p.goto(base + '/privacy'); await p.waitForSelector('h1'); return { full: true }; },
   error500: async (p) => { await p.route(/routes\/privacy\/\+page\.svelte/, (r) => r.abort()); await p.goto(base + '/privacy'); await p.waitForTimeout(2500); return {}; },
   // These two need a server started with PUBLIC_IMPLICIT_ACCOUNTS=on (PORT=… for a second one).
-  'implicit-start': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText('New account', { exact: true }).click(); await p.waitForTimeout(400); return { full: true }; },
-  'implicit-key': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText('New account', { exact: true }).click(); await p.getByRole('button', { name: 'Create my NEAR account' }).click(); await p.waitForTimeout(600); await p.getByRole('button', { name: 'Download key' }).click(); await p.waitForTimeout(400); return { full: true }; },
+  'implicit-start': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText('New Account', { exact: true }).click(); await p.waitForTimeout(400); return { full: true }; },
+  'implicit-key': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText('New Account', { exact: true }).click(); await p.getByRole('button', { name: 'Create NEAR Account' }).click(); await p.waitForTimeout(600); await p.getByRole('button', { name: 'Download key' }).click(); await p.waitForTimeout(400); return { full: true }; },
   notfound: async (p) => { await p.goto(base + '/nope'); await p.waitForSelector('h1'); return {}; },
 };
 
