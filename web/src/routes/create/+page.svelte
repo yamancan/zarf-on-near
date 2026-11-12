@@ -907,7 +907,8 @@
             onOpenBackup={openBackup}
             onDismissSkipped={() => (skipped = [])}
           />
-          {#if cleared}
+          <!-- Undo restores a snapshot, so it goes away once anything is typed. -->
+          {#if cleared && !gridRows.some((r) => !isBlankRow(r))}
             <div role="status" class="flex items-center justify-between gap-3 rounded-xl bg-zen-fg/[0.03] px-3 py-2 text-sm text-zen-fg-muted">
               <span>List cleared.</span>
               <ZenButton variant="ghost" size="sm" onclick={() => ((gridRows = cleared!), (cleared = null))}>Undo</ZenButton>
