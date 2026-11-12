@@ -1,6 +1,7 @@
 import { isNearSecretKey, parseNearKey, type NearKey } from './near';
 import { handleHealth, handleRelay, type RateLimiter } from './relay';
 import { httpRpc } from './rpc';
+import { sendStarter, starterAllowed, STARTER_TEXT, type KvLike } from './starter';
 
 interface Env {
   NETWORK: string;
@@ -12,10 +13,16 @@ interface Env {
   RELAYER_KEY: string; // secret: a function-call key limited to <CONTRACT_ID>.claim
   PER_IP: RateLimiter;
   PER_COMMITMENT: RateLimiter;
+  // Testnet starter NEAR (starter.ts). Off unless STARTER_NEAR=on; never on mainnet.
+  STARTER_NEAR?: string;
+  GAS_ACCOUNT_ID?: string;
+  GAS_KEY?: string; // secret: full-access key of GAS_ACCOUNT_ID only, never the relayer key
+  STARTER_KV?: KvLike;
 }
 
 let key: Promise<NearKey> | undefined;
 let keySecret: string | undefined; // the secret `key` was parsed from
+let gasKey: { secret: string; key: Promise<NearKey> } | undefined;
 const list = (s: string | undefined) => (s ?? '').split(',').map((x) => x.trim()).filter(Boolean);
 
 function cors(req: Request, env: Env): Record<string, string> {
@@ -65,6 +72,24 @@ export default {
       rpc, network: env.NETWORK, contractId: env.CONTRACT_ID, relayerAccountId: env.RELAYER_ACCOUNT_ID,
       key: k, verifierSigners: list(env.VERIFIER_SIGNERS), perIp: env.PER_IP, perCommitment: env.PER_COMMITMENT,
     });
+    if (status === 200 && out.status === 'paid') {
+      const starter = { enabled: env.STARTER_NEAR, network: env.NETWORK, contractId: env.CONTRACT_ID, gasAccountId: env.GAS_ACCOUNT_ID,
+        gasKeySecret: env.GAS_KEY, relayerKeySecret: env.RELAYER_KEY, kv: env.STARTER_KV };
+      if (starterAllowed(starter)) {
+        // The claim is already paid: nothing here may change that answer, so every failure is only logged.
+        try {
+          let cached = gasKey;
+          if (!cached || cached.secret !== env.GAS_KEY) cached = gasKey = { secret: env.GAS_KEY!, key: parseNearKey(env.GAS_KEY!) };
+          const k = await cached.key;
+          const r = await sendStarter((body as { destination: string }).destination, { rpc, gasAccountId: env.GAS_ACCOUNT_ID!, gasKey: k, kv: env.STARTER_KV! });
+          console.log(`starter_${r.result}`);
+          if (r.result === 'sent') return json({ ...out, starter_near: STARTER_TEXT, starter_tx_hash: r.tx_hash }, status);
+        } catch {
+          gasKey = undefined;
+          console.log('starter_failed');
+        }
+      }
+    }
     return json(out, status);
   },
 };
