@@ -17,6 +17,8 @@
   // RELAYER_KEY: `ed25519:<base58>` of a FUNCTION-CALL access key limited to <CONTRACT_ID> / ["claim"].
   // The relayer checks the key's permission on chain and refuses to sign with anything broader.
   "secrets": { "required": ["RELAYER_KEY"] },
+  // StarterGate (src/starter.ts) is exported in every env; only testnet binds it.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["StarterGate"] }],
   "ratelimits": [
     { "name": "PER_IP", "namespace_id": "2001", "simple": { "limit": 10, "period": 60 } },
     { "name": "PER_COMMITMENT", "namespace_id": "2002", "simple": { "limit": 3, "period": 60 } }
@@ -38,14 +40,14 @@
         "VERIFIER_SIGNERS": "2d10ebec1ec795cef82b8d357cc60d39d9119b99908741660b632fc5cf0d4e32",
         "CLAIM_ORIGINS": "https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev",
         // Testnet starter NEAR (src/starter.ts): "on" sends 0.02 test NEAR once to a paid destination that holds
-        // almost none. Needs the GAS_KEY secret (full-access key of GAS_ACCOUNT_ID, never RELAYER_KEY) and STARTER_KV.
+        // almost none. Needs the GAS_KEY secret (full-access key of GAS_ACCOUNT_ID, never RELAYER_KEY) and STARTER.
         // Local `wrangler dev` passes only the secrets listed in "required" below: add GAS_KEY there to try it locally.
         "STARTER_NEAR": "",
         "GAS_ACCOUNT_ID": "zarf-near-gas-1112.testnet"
       },
-      // Once-per-destination marks and the daily count of starter sends. Wrangler creates the namespace on the
-      // first deploy (no id here yet); afterwards the id it prints goes here.
-      "kv_namespaces": [{ "binding": "STARTER_KV" }],
+      // StarterGate: one Durable Object that runs every starter send in turn and keeps the once-per-destination
+      // marks, the daily count and the gas account's nonce (created by the migration below on first deploy).
+      "durable_objects": { "bindings": [{ "name": "STARTER", "class_name": "StarterGate" }] },
       "ratelimits": [
         { "name": "PER_IP", "namespace_id": "2001", "simple": { "limit": 10, "period": 60 } },
         { "name": "PER_COMMITMENT", "namespace_id": "2002", "simple": { "limit": 3, "period": 60 } }

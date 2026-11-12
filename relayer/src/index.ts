@@ -1,7 +1,9 @@
 import { isNearSecretKey, parseNearKey, type NearKey } from './near';
 import { handleHealth, handleRelay, type RateLimiter } from './relay';
 import { httpRpc } from './rpc';
-import { sendStarter, starterAllowed, STARTER_TEXT, type KvLike } from './starter';
+import { starterAllowed, STARTER_TEXT, STARTER_WAIT_MS, type StarterOutcome } from './starter';
+
+export { StarterGate } from './starter';
 
 interface Env {
   NETWORK: string;
@@ -17,12 +19,11 @@ interface Env {
   STARTER_NEAR?: string;
   GAS_ACCOUNT_ID?: string;
   GAS_KEY?: string; // secret: full-access key of GAS_ACCOUNT_ID only, never the relayer key
-  STARTER_KV?: KvLike;
+  STARTER?: { idFromName(name: string): unknown; get(id: unknown): { fetch(req: Request): Promise<Response> } }; // StarterGate
 }
 
 let key: Promise<NearKey> | undefined;
 let keySecret: string | undefined; // the secret `key` was parsed from
-let gasKey: { secret: string; key: Promise<NearKey> } | undefined;
 const list = (s: string | undefined) => (s ?? '').split(',').map((x) => x.trim()).filter(Boolean);
 
 function cors(req: Request, env: Env): Record<string, string> {
@@ -31,7 +32,7 @@ function cors(req: Request, env: Env): Record<string, string> {
 }
 
 export default {
-  async fetch(req: Request, env: Env): Promise<Response> {
+  async fetch(req: Request, env: Env, ctx?: { waitUntil(p: Promise<unknown>): void }): Promise<Response> {
     const headers = cors(req, env);
     const json = (body: unknown, status: number) => Response.json(body, { status, headers });
     const path = new URL(req.url).pathname;
@@ -73,21 +74,23 @@ export default {
       key: k, verifierSigners: list(env.VERIFIER_SIGNERS), perIp: env.PER_IP, perCommitment: env.PER_COMMITMENT,
     });
     if (status === 200 && out.status === 'paid') {
-      const starter = { enabled: env.STARTER_NEAR, network: env.NETWORK, contractId: env.CONTRACT_ID, gasAccountId: env.GAS_ACCOUNT_ID,
-        gasKeySecret: env.GAS_KEY, relayerKeySecret: env.RELAYER_KEY, kv: env.STARTER_KV };
-      if (starterAllowed(starter)) {
-        // The claim is already paid: nothing here may change that answer, so every failure is only logged.
-        try {
-          let cached = gasKey;
-          if (!cached || cached.secret !== env.GAS_KEY) cached = gasKey = { secret: env.GAS_KEY!, key: parseNearKey(env.GAS_KEY!) };
-          const k = await cached.key;
-          const r = await sendStarter((body as { destination: string }).destination, { rpc, gasAccountId: env.GAS_ACCOUNT_ID!, gasKey: k, kv: env.STARTER_KV! });
-          console.log(`starter_${r.result}`);
-          if (r.result === 'sent') return json({ ...out, starter_near: STARTER_TEXT, starter_tx_hash: r.tx_hash }, status);
-        } catch {
-          gasKey = undefined;
-          console.log('starter_failed');
+      // The claim is already paid: nothing here may change or hold up that answer, so every failure is only logged.
+      try {
+        const starter = { enabled: env.STARTER_NEAR, network: env.NETWORK, contractId: env.CONTRACT_ID, gasAccountId: env.GAS_ACCOUNT_ID,
+          gasKeySecret: env.GAS_KEY, relayerAccountId: env.RELAYER_ACCOUNT_ID, relayerKeySecret: env.RELAYER_KEY, gate: env.STARTER };
+        if (starterAllowed(starter)) {
+          const gate = env.STARTER!.get(env.STARTER!.idFromName('gas'));
+          const sending = gate.fetch(new Request(`https://starter/?d=${encodeURIComponent((body as { destination: string }).destination)}`))
+            .then((r) => r.json() as Promise<StarterOutcome>);
+          ctx?.waitUntil(sending.catch(() => {}));
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          const r = await Promise.race([sending, new Promise<null>((ok) => (timer = setTimeout(() => ok(null), STARTER_WAIT_MS)))]);
+          clearTimeout(timer);
+          console.log(`starter_${r?.result ?? 'pending'}`);
+          if (r?.result === 'sent') return json({ ...out, starter_near: STARTER_TEXT, starter_tx_hash: r.tx_hash }, status);
         }
+      } catch {
+        console.log('starter_failed');
       }
     }
     return json(out, status);
