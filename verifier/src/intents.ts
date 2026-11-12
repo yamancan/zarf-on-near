@@ -2,7 +2,7 @@
 // destination is a 1Click deposit address, the verifier re-reads that quote and checks it
 // agrees with what the recipient asked for. The real bindings are elsewhere: the Google nonce
 // binds the deposit address, and the merkle leaf binds the amount. 1Click's quote `signature`
-// is not verified (no published key); this check trusts TLS to 1click.chaindefuser.com.
+// is verified too (`verifyQuoteSignature`), so the fields it covers do not rest on TLS alone.
 //
 // One quote per claim: a deposit address must receive exactly one EXACT_INPUT deposit. A second
 // claim paid to the same address is not part of the swap and ends up refunded to the campaign
@@ -174,3 +174,92 @@ export function checkIntentsStatus(status: unknown, claim: IntentsClaim): void {
   const exp = BigInt(claim.expiresAtNs);
   if (isoToNs(q.deadline) <= exp || isoToNs(qr.deadline) <= exp) fail('INTENTS_QUOTE_EXPIRES_FIRST');
 }
+
+/**
+ * 1Click's quote-signing key, as pinned by @defuse-protocol/one-click-sdk-typescript 0.1.26
+ * (`ONE_CLICK_MANAGER_PUB_KEY`); docs: docs.near-intents.org …/1click-api/verify-quote-signature.
+ * If 1Click rotates it, every cross-chain claim fails closed with INTENTS_BAD_SIGNATURE until this is updated.
+ */
+export const ONECLICK_QUOTE_SIGNER = 'ed25519:reYaWhvwu8Jzo3WUM3zhn6VrhuMEF4eADL17qtRVifc';
+
+const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+function b58encode(bytes: Uint8Array): string {
+  let n = 0n;
+  for (const b of bytes) n = (n << 8n) | BigInt(b);
+  let out = '';
+  for (; n > 0n; n /= 58n) out = B58[Number(n % 58n)] + out;
+  for (const b of bytes) { if (b) break; out = '1' + out; }
+  return out;
+}
+function b58decode(s: string): Uint8Array<ArrayBuffer> {
+  let n = 0n;
+  for (const ch of s) {
+    const i = B58.indexOf(ch);
+    if (i < 0) fail('INTENTS_BAD_SIGNATURE');
+    n = n * 58n + BigInt(i);
+  }
+  const body: number[] = [];
+  for (; n > 0n; n >>= 8n) body.unshift(Number(n & 0xffn));
+  const lead = s.length - s.replace(/^1+/, '').length;
+  return Uint8Array.from([...new Array<number>(lead).fill(0), ...body]);
+}
+
+/** json-stable-stringify 1.3: keys sorted, `undefined` members dropped, no whitespace. */
+function stableStringify(v: unknown): string {
+  if (v === null || typeof v !== 'object') return JSON.stringify(v);
+  if (Array.isArray(v)) return `[${v.map((x) => (x === undefined ? 'null' : stableStringify(x))).join(',')}]`;
+  const o = v as Record<string, unknown>;
+  return `{${Object.keys(o).sort().filter((k) => o[k] !== undefined).map((k) => `${JSON.stringify(k)}:${stableStringify(o[k])}`).join(',')}}`;
+}
+
+// The SDK's field selection (buildSignedQuoteRequest / buildSignedQuote, 0.1.26). Falsy optional
+// fields become undefined and drop out, exactly as there. appFees, depositMode and confidentiality
+// are not signed; checkIntentsStatus bounds them.
+const orU = (v: unknown) => v || undefined;
+function signedQuoteMessage(qr: Record<string, unknown>, q: Record<string, unknown>, timestamp: unknown): string {
+  const req = {
+    dry: qr.dry, swapType: qr.swapType, slippageTolerance: qr.slippageTolerance, originAsset: qr.originAsset,
+    depositType: qr.depositType, destinationAsset: qr.destinationAsset, amount: qr.amount, refundTo: qr.refundTo,
+    refundType: qr.refundType, recipient: qr.recipient, recipientType: qr.recipientType, deadline: qr.deadline,
+    quoteWaitingTimeMs: orU(qr.quoteWaitingTimeMs), referral: orU(qr.referral), virtualChainRecipient: orU(qr.virtualChainRecipient),
+    virtualChainRefundRecipient: orU(qr.virtualChainRefundRecipient), customRecipientMsg: orU(qr.customRecipientMsg),
+  };
+  const priced = {
+    amountIn: q.amountIn, amountInFormatted: q.amountInFormatted, amountInUsd: q.amountInUsd, minAmountIn: q.minAmountIn,
+    amountOut: q.amountOut, amountOutFormatted: q.amountOutFormatted, amountOutUsd: q.amountOutUsd, minAmountOut: q.minAmountOut,
+  };
+  const quote = qr.dry
+    ? priced
+    : {
+        ...priced, depositAddress: orU(q.depositAddress), depositMemo: orU(q.depositMemo), deadline: orU(q.deadline),
+        timeWhenInactive: orU(q.timeWhenInactive), timeEstimate: orU(q.timeEstimate), refundFee: orU(q.refundFee), withdrawFee: orU(q.withdrawFee),
+      };
+  return stableStringify({ ...req, ...quote, timestamp });
+}
+
+/**
+ * Throws `IntentsError` unless `status.quoteResponse` carries 1Click's ed25519 signature over
+ * base58(sha256(stable JSON of the signed request + quote fields + timestamp)), by `signer`.
+ * No signature or timestamp: INTENTS_QUOTE_UNSIGNED. Any other mismatch: INTENTS_BAD_SIGNATURE.
+ */
+export async function verifyQuoteSignature(status: unknown, signer: string = ONECLICK_QUOTE_SIGNER): Promise<void> {
+  const resp = obj(obj(status).quoteResponse);
+  const { signature, timestamp } = resp;
+  if (typeof signature !== 'string' || !signature || typeof timestamp !== 'string' || !timestamp) fail('INTENTS_QUOTE_UNSIGNED');
+  const sig = b58decode((signature as string).replace(/^ed25519:/, ''));
+  const pub = b58decode(signer.replace(/^ed25519:/, ''));
+  if (sig.length !== 64 || pub.length !== 32) fail('INTENTS_BAD_SIGNATURE');
+  const key = await crypto.subtle.importKey('raw', pub, 'Ed25519', false, ['verify']);
+  if (!(await crypto.subtle.verify('Ed25519', key, sig, await quoteSignedBytes(status)))) fail('INTENTS_BAD_SIGNATURE');
+}
+
+/** The exact bytes 1Click signs for `status.quoteResponse` (exported for tests that re-sign a quote). */
+export async function quoteSignedBytes(status: unknown): Promise<Uint8Array<ArrayBuffer>> {
+  const resp = obj(obj(status).quoteResponse);
+  const message = signedQuoteMessage(obj(resp.quoteRequest), obj(resp.quote), resp.timestamp);
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(message)));
+  return new TextEncoder().encode(b58encode(digest));
+}
+
+/** Base58 with an `ed25519:` prefix, the format 1Click uses for keys and signatures (tests sign with it). */
+export const ed25519B58 = (bytes: Uint8Array): string => `ed25519:${b58encode(bytes)}`;

@@ -56,9 +56,22 @@ export async function verifyGoogleIdToken(token: string, opts: VerifyOptions): P
   if (typeof payload.email !== 'string') fail('NO_EMAIL');
   if (payload.nonce !== (await destinationNonce(opts.destination))) fail('BAD_NONCE');
 
+  let email: string;
   try {
-    return { email: canonicalizeEmail(payload.email as string) };
+    email = canonicalizeEmail(payload.email as string);
   } catch {
     return fail('BAD_EMAIL'); // non-ASCII: no allocation can exist for it (spec v2)
   }
+  // Google vouches for the address only for Gmail and for its own Workspace domain (`hd`). Any other
+  // address on a Google account may since have changed hands (a former employee, a lapsed domain).
+  if (!isGoogleAuthoritative(email, payload.hd)) fail('EMAIL_NOT_GOOGLE_AUTHORITATIVE');
+  return { email };
+}
+
+const GMAIL_DOMAINS = new Set(['gmail.com', 'googlemail.com']);
+/** `email` is canonical (trimmed, lowercased); `hd` is the token's hosted-domain claim, if any. */
+export function isGoogleAuthoritative(email: string, hd: unknown): boolean {
+  const domain = email.slice(email.lastIndexOf('@') + 1);
+  if (GMAIL_DOMAINS.has(domain)) return true;
+  return typeof hd === 'string' && hd.toLowerCase() === domain;
 }

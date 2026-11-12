@@ -23,6 +23,8 @@ export async function mintDemoToken(o: { email: string; destination: string; aud
   const payload = b64url(JSON.stringify({
     iss: DEMO_ISSUER, aud: o.audience, sub: 'demo', iat: now, exp: now + 600,
     email: o.email, email_verified: true, nonce: await destinationNonce(o.destination),
+    // Like a Google Workspace account on the email's own domain, so the spec vectors' @example.* addresses pass.
+    hd: o.email.trim().toLowerCase().split('@').pop(),
   }));
   const sig = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', (await demoKeys()).privateKey, new TextEncoder().encode(`${header}.${payload}`));
   return `${header}.${payload}.${b64url(new Uint8Array(sig))}`;

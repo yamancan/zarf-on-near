@@ -15,6 +15,7 @@ beforeAll(async () => {
   claims = {
     iss: 'https://accounts.google.com', aud: CLIENT_ID, sub: '1', exp: NOW / 1000 + 600, iat: NOW / 1000,
     email: 'Alice@Example.com', email_verified: true, nonce: await destinationNonce(DEST),
+    hd: 'example.com', // a Workspace account on the email's own domain: Google is authoritative for it
   };
 });
 
@@ -25,6 +26,14 @@ const code = (p: Promise<unknown>) => p.then(() => 'OK', (e) => (e instanceof To
 describe('verifyGoogleIdToken', () => {
   it('accepts a valid token and returns the canonical email', async () => {
     expect(await verify(await sign(google, claims))).toEqual({ email: 'alice@example.com' });
+  });
+
+  it.each([
+    ['Gmail with no hd', { email: 'Bob.Smith@Gmail.com', hd: undefined }, 'bob.smith@gmail.com'],
+    ['googlemail.com with no hd', { email: 'bob@googlemail.com', hd: undefined }, 'bob@googlemail.com'],
+    ['Workspace: hd equals the email domain, any case', { email: 'Pay@Acme.COM', hd: 'ACME.com' }, 'pay@acme.com'],
+  ])('accepts an address Google is authoritative for: %s', async (_, over, email) => {
+    expect(await verify(await sign(google, { ...claims, ...over }))).toEqual({ email });
   });
 
   it('accepts both Google issuer forms', async () => {
@@ -67,6 +76,11 @@ describe('verifyGoogleIdToken', () => {
     ['BAD_NONCE', 'nonce for another destination', async () => sign(google, { ...claims, nonce: await destinationNonce('bob.testnet') })],
     ['BAD_NONCE', 'uppercase nonce', async () => sign(google, { ...claims, nonce: (await destinationNonce(DEST)).toUpperCase() })],
     ['BAD_NONCE', 'nonce missing', () => sign(google, { ...claims, nonce: undefined })],
+    ['EMAIL_NOT_GOOGLE_AUTHORITATIVE', 'a non-Gmail address with no hd', () => sign(google, { ...claims, hd: undefined })],
+    ['EMAIL_NOT_GOOGLE_AUTHORITATIVE', 'hd of another domain', () => sign(google, { ...claims, hd: 'acme.com' })],
+    ['EMAIL_NOT_GOOGLE_AUTHORITATIVE', 'hd of a parent domain only', () => sign(google, { ...claims, email: 'a@mail.example.com', hd: 'example.com' })],
+    ['EMAIL_NOT_GOOGLE_AUTHORITATIVE', 'hd not a string', () => sign(google, { ...claims, hd: ['example.com'] })],
+    ['EMAIL_NOT_GOOGLE_AUTHORITATIVE', 'a gmail look-alike domain', () => sign(google, { ...claims, email: 'a@gmail.com.example.com', hd: undefined })],
   ])('rejects %s: %s', async (expected, _, make) => {
     expect(await code(verify(await make()))).toBe(expected);
   });
