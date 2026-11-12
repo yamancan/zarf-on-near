@@ -18,11 +18,11 @@
 </script>
 
 <details class="group w-full text-xs text-zen-fg-muted">
-  <summary class="inline-flex items-center gap-1.5 min-h-11 cursor-pointer list-none hover:text-zen-fg">Details <ChevronDown class="w-3.5 h-3.5 transition-transform group-open:rotate-180" aria-hidden="true" /></summary>
+  <summary class="inline-flex items-center gap-1.5 py-1 cursor-pointer list-none hover:text-zen-fg">Details <ChevronDown class="w-3.5 h-3.5 transition-transform group-open:rotate-180" aria-hidden="true" /></summary>
   <div class="flex flex-col items-center gap-1">
     {#each lines.filter(Boolean) as line}<p class="break-words max-w-xs">{line}</p>{/each}
     <p>Bridge deposit address</p>
     <p class="font-mono break-all select-all text-zen-fg">{depositAddress}</p>
-    <ZenButton variant="ghost" size="sm" class="rounded-full min-h-11 !text-zen-fg" onclick={copy} aria-live="polite">{copied ? 'Copied' : 'Copy address'}</ZenButton>
+    <ZenButton variant="ghost" size="sm" onclick={copy} aria-live="polite">{copied ? 'Copied' : 'Copy Address'}</ZenButton>
   </div>
 </details>

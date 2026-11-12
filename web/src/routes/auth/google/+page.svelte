@@ -22,10 +22,10 @@
     const waiting = attempt && /^[1-9]\d{0,38}$/.test(attempt.amount) ? `Your ${formatAmount(BigInt(attempt.amount))} ${UNIT} is still waiting.` : 'Your claim is still waiting.';
     if ('error' in cb) {
       failed = cb.error === 'access_denied'
-        ? { title: 'Sign-in cancelled', line: back ? `${waiting} Sign in again when you are ready.` : 'Open your claim link again to sign in.', cancelled: true }
-        : { title: 'Google sign-in did not finish', line: 'Google could not sign you in this time. Try again.', code: cb.error };
+        ? { title: 'Sign-In Cancelled', line: back ? `${waiting} Sign in again when you are ready.` : 'Open your claim link again to sign in.', cancelled: true }
+        : { title: 'Sign-In Did Not Finish', line: 'Google could not sign you in this time. Try again.', code: cb.error };
     } else if (!attempt?.destination || !attempt.attemptId || claimState(attempt.campaign, attempt.commitment, attempt.attemptId) !== cb.state) {
-      failed = { title: 'This sign-in belongs to another tab', line: 'Start the sign-in again from your claim.' };
+      failed = { title: 'Sign-In From Another Tab', line: 'Start the sign-in again from your claim.' };
     } else {
       signedIn.idToken = cb.idToken;
       goto(`/claim/${attempt.campaign}/${attempt.commitment}/receipt`, { replaceState: true });
@@ -35,8 +35,8 @@
 
 <svelte:head><title>Signing in · Zarf</title></svelte:head>
 
-<div class="w-full max-w-lg mx-auto px-4 py-8 sm:py-14">
-  <ZenCard variant="elevated" class="!p-6 sm:!p-8">
+<div class="w-full max-w-lg mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-12">
+  <ZenCard variant="elevated" class="!rounded-3xl !p-6 sm:!p-8">
     <div class="flex flex-col items-center text-center gap-4 py-2">
       {#if failed}
         {#if failed.cancelled}
@@ -44,23 +44,23 @@
         {:else}
           <Medallion icon={AlertTriangle} tone="error" />
         {/if}
-        <h1 class="text-xl font-semibold tracking-tight">{failed.title}</h1>
+        <h1 class="text-xl font-bold">{failed.title}</h1>
         <p class="text-sm text-zen-fg-muted max-w-xs" role={failed.cancelled ? 'status' : 'alert'}>{failed.line}</p>
         {#if back}
-          <ZenButton href={back} variant="primary" class="rounded-full min-h-11 mt-2 w-full sm:w-auto">Back to your claim</ZenButton>
+          <ZenButton href={back} variant="primary" class="w-full sm:w-auto">Back to Claim</ZenButton>
         {:else}
           {#if !failed.cancelled}<p class="text-xs text-zen-fg-muted max-w-xs">Open your claim link again to try once more.</p>{/if}
-          <ZenButton href="/" variant="secondary" class="rounded-full min-h-11 mt-2">What is Zarf?</ZenButton>
+          <ZenButton href="/" variant="secondary">What Is Zarf?</ZenButton>
         {/if}
         {#if failed.code}
           <details class="group text-xs text-zen-fg-muted">
-            <summary class="inline-flex items-center gap-1.5 min-h-11 cursor-pointer list-none hover:text-zen-fg">Details <ChevronDown class="w-3.5 h-3.5 transition-transform group-open:rotate-180" aria-hidden="true" /></summary>
+            <summary class="inline-flex items-center gap-1.5 py-1 cursor-pointer list-none hover:text-zen-fg">Details <ChevronDown class="w-3.5 h-3.5 transition-transform group-open:rotate-180" aria-hidden="true" /></summary>
             <p>Code <span class="font-mono">{failed.code}</span></p>
           </details>
         {/if}
       {:else}
         <Medallion icon={Loader2} tone="muted" spin />
-        <h1 class="text-xl font-semibold tracking-tight" role="status">Signing you in…</h1>
+        <h1 class="text-xl font-bold" role="status">Signing In…</h1>
       {/if}
     </div>
   </ZenCard>
