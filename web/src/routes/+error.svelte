@@ -26,7 +26,7 @@
           <p class="text-sm text-zen-fg-muted max-w-xs">Try again in a minute.</p>
         </div>
       {/if}
-      <ZenButton href="/" variant="secondary">What Is Zarf?</ZenButton>
+      <a href="/" class="inline-block"><ZenButton tabindex={-1} variant="secondary">What Is Zarf?</ZenButton></a>
     </div>
   </ZenCard>
 </div>

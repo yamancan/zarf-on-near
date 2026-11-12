@@ -202,13 +202,13 @@
       class="flex flex-col sm:flex-row items-center gap-4 mt-6 w-full sm:w-auto transition-all duration-700 ease-out {mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-5'}"
       style="transition-delay: 1200ms;"
     >
-      <ZenButton href={tryUrl} variant="primary" size="lg" class="w-full sm:w-auto">
+      <a href={tryUrl} class="block w-full sm:w-auto"><ZenButton tabindex={-1} variant="primary" size="lg" class="w-full sm:w-auto">
         Try with Google
         {#snippet iconRight()}<ArrowRight class="w-3.5 h-3.5" />{/snippet}
-      </ZenButton>
-      <ZenButton href="/create" variant="secondary" size="lg" class="w-full sm:w-auto">
+      </ZenButton></a>
+      <a href="/create" class="block w-full sm:w-auto"><ZenButton tabindex={-1} variant="secondary" size="lg" class="w-full sm:w-auto">
         Send USDC
-      </ZenButton>
+      </ZenButton></a>
     </div>
 
     <!-- Zarf's status line (landing Hero), in fg-subtle: Zarf's fg/35 fails 4.5:1 as text -->
@@ -223,12 +223,6 @@
 </div>
 
 <style>
-  /* Reduced motion: the reveal shows at once (no fade, no 1.2 s wait for the buttons). */
-  @media (prefers-reduced-motion: reduce) {
-    .hero-container :global(*) {
-      transition: none !important;
-    }
-  }
   /* Wave grid (spotlight), main repo values */
   .wave-grid-spotlight {
     background-image: repeating-radial-gradient(

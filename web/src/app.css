@@ -5,27 +5,13 @@
 /* As in the main repo's landing (apps/landing/src/app.css): font-sans is Saira. */
 @theme {
   --font-sans: 'Saira', ui-sans-serif, system-ui, sans-serif;
-  /*
-   * Typeface of every screen but the landing (claim, receipt, send, campaigns, privacy, errors). Saira by
-   * decision; claim.zarf.to and create.zarf.to fall back to the system stack. To match them, this ONE line
-   * becomes: --font-app: ui-sans-serif, system-ui, sans-serif;
-   */
-  --font-app: 'Saira', ui-sans-serif, system-ui, sans-serif;
 }
 
-/*
- * Chromium on Linux (FreeType) places small hinted Saira glyphs on whole pixels when it draws LCD text on an
- * opaque fill, which opens gaps such as "Rec laim" / "Disconne ct" in buttons. geometricPrecision turns hinting
- * off and keeps fractional advances; other desktop platforms already lay text out this way. Unlayered, so it beats
- * Zen base.css's optimizeLegibility (the one Zen value this overrides).
- */
-html { text-rendering: geometricPrecision; }
 /*
  * Overscroll: pulled past the top or bottom, the browser shows the root's own ground. Both html and body paint the page
  * ground and the rubber band is off, so no other layer or texture shows through (T-023, owner 14 Nov).
  */
 html, body { background-color: var(--zen-bg); overscroll-behavior-y: none; }
-button, input, select, textarea { text-rendering: inherit; } /* form controls reset it to auto */
 
 /* The claim app's deeper fume ground (main repo apps/claim/src/app.css). */
 [data-theme='glass-porcelain'],
@@ -96,38 +82,8 @@ button, input, select, textarea { text-rendering: inherit; } /* form controls re
 
 /* Base layer: Tailwind utilities and Zen components win over it. */
 @layer base {
-  :focus-visible { outline: 2px solid var(--zen-fg); outline-offset: 2px; }
   code { word-break: break-all; font-family: ui-monospace, monospace; font-size: 0.9em; }
   summary::-webkit-details-marker { display: none; }
-  /* No orphans: titles balance their lines, sentences avoid a lone last word (critic r2 P1-9). */
-  h1, h2, h3 { text-wrap: balance; }
-  p, li, dd { text-wrap: pretty; }
-}
-
-/*
- * Form controls: the Zen border (12% fg) is about 1.5:1 on the ground. Controls here keep the lowest
- * Zarf-like border that still meets 3:1 (WCAG 1.4.11): 40% fg on dark (3:1 needs 39%), 50% on light (48%).
- * Focus thickens the border itself in fg (ZenInput sets focus:outline-none), so there is one frame.
- */
-:root,
-[data-theme='paper-porcelain'],
-[data-theme='light'] {
-  --zarf-control-border: oklch(from var(--zen-fg) l c h / 0.5);
-}
-[data-theme='glass-porcelain'],
-[data-theme='dark'] {
-  --zarf-control-border: oklch(from var(--zen-fg) l c h / 0.4);
-}
-.control-border {
-  border: 1px solid var(--zarf-control-border) !important;
-}
-.control-border:focus-visible {
-  outline: none !important;
-  border-color: var(--zen-fg) !important;
-  box-shadow: inset 0 0 0 1px var(--zen-fg);
-}
-.control-border[aria-invalid='true'] {
-  border-color: var(--zen-error) !important;
 }
 
 /* The native date picker's glyph is black; on the dark ground it would vanish. */

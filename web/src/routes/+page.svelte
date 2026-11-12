@@ -31,9 +31,9 @@
       </p>
       <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
         {#if TESTNET}
-          <ZenButton href={TRY_URL} variant="primary" size="lg" class="rounded-full !bg-base-content !text-base-100 hover:shadow-lg hover:shadow-base-content/10 w-full sm:w-auto">Try with Google</ZenButton>
+          <a href={TRY_URL} class="block w-full sm:w-auto"><ZenButton tabindex={-1} variant="primary" size="lg" class="rounded-full !bg-base-content !text-base-100 hover:shadow-lg hover:shadow-base-content/10 w-full sm:w-auto">Try with Google</ZenButton></a>
         {/if}
-        <ZenButton href="/create" variant="secondary" size="lg" class="rounded-full w-full sm:w-auto">Send USDC</ZenButton>
+        <a href="/create" class="block w-full sm:w-auto"><ZenButton tabindex={-1} variant="secondary" size="lg" class="rounded-full w-full sm:w-auto">Send USDC</ZenButton></a>
       </div>
       <!-- T-001: the unaudited note stays visible on mainnet -->
       {#if !TESTNET}<p class="mt-10 text-xs text-zen-fg-muted max-w-md mx-auto">{UNAUDITED_LINE}</p>{/if}

@@ -153,9 +153,9 @@
           <ZenButton variant="ghost" size="sm" disabled={!!busy} onclick={async () => { await wallet?.signOut(); account = null; rows = null; }}>Disconnect</ZenButton>
         </span>
       {/if}
-    <ZenButton href="/create" variant="primary" size="lg">
+    <a href="/create" class="inline-block"><ZenButton tabindex={-1} variant="primary" size="lg">
       {#snippet iconLeft()}<Plus class="w-4 h-4" />{/snippet}New Send
-    </ZenButton>
+    </ZenButton></a>
     </div>
   </div>
 
@@ -190,7 +190,7 @@
           <h2 class="text-xl font-bold">No Campaigns Yet</h2>
           <p class="text-sm text-zen-fg-muted">Nothing sent from <span class="font-mono">{account}</span> so far.</p>
         </div>
-        <ZenButton href="/create" variant="primary">Send USDC</ZenButton>
+        <a href="/create" class="inline-block"><ZenButton tabindex={-1} variant="primary">Send USDC</ZenButton></a>
       </div>
     </ZenCard>
   {:else}

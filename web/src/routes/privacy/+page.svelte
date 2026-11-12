@@ -46,12 +46,12 @@
 </article>
 
 <style>
-  .prose-zarf :global(h2) {
+  .prose-zarf h2 {
     font-size: 1rem;
     font-weight: 600;
     margin: 2.5rem 0 0.75rem;
   }
-  .prose-zarf :global(p) {
+  .prose-zarf p {
     font-size: 0.9375rem;
     line-height: 1.7;
     color: var(--zen-fg-muted);

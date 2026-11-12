@@ -286,7 +286,7 @@
     {#if action === 'recheck'}
       <ZenButton variant="primary" class="w-full sm:w-auto" onclick={() => link && checkLink(link)}>Check Again</ZenButton>
     {:else if action === 'home'}
-      <ZenButton href="/" variant="secondary">What Is Zarf?</ZenButton>
+      <a href="/" class="inline-block"><ZenButton tabindex={-1} variant="secondary">What Is Zarf?</ZenButton></a>
     {/if}
   </div>
 {/snippet}
@@ -386,7 +386,6 @@
             <ZenInput
               id="dest"
               label="NEAR Account"
-              class="control-border"
               bind:value={typed}
               placeholder={network === 'mainnet' ? 'alice.near' : 'alice.testnet'}
               autocomplete="off"

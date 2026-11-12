@@ -110,13 +110,13 @@
   <p class="text-xs text-zen-fg-subtle">Very small payouts may be refused when the bridge's cost is above 2%. Claiming to a NEAR account has no such limit.</p>
   <span id="chain-l" class="block pl-1 text-xs font-bold uppercase tracking-widest text-zen-fg-subtle">Chain</span>
   <div id="chain" role="group" aria-labelledby="chain-l">
-    <ZenSelect bind:value={key} options={assets.map((a) => ({ value: a.chain.key, label: `USDC on ${a.chain.name}` }))} aria-label="Chain" class="w-full [&>button]:w-full [&>button]:min-h-11 [&>button]:!border [&>button]:!border-[var(--zarf-control-border)]" />
+    <ZenSelect bind:value={key} options={assets.map((a) => ({ value: a.chain.key, label: `USDC on ${a.chain.name}` }))} aria-label="Chain" class="w-full" />
   </div>
   {#if asset}
     <ZenInput
       id="addr"
       label="{asset.chain.name} Address"
-      class="control-border font-mono"
+      class="font-mono"
       bind:value={address}
       placeholder={asset.chain.placeholder}
       autocomplete="off"

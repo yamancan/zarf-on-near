@@ -45,7 +45,7 @@
 
 {#if !landing}<div class="ripple-bg" aria-hidden="true"></div>{/if}
 
-<div class="min-h-screen {landing ? 'font-sans bg-zen-bg' : 'font-app relative z-[1] overflow-x-clip'} text-zen-fg flex flex-col">
+<div class="min-h-screen {landing ? 'bg-zen-bg' : 'relative z-[1] overflow-x-clip'} text-zen-fg flex flex-col">
   <!-- ZarfNavbar (main repo): logo and nav on the left, actions on the right, solid ground, one hairline -->
   <!-- Landing: Zarf's landing header (transparent, blur and hairline once scrolled); elsewhere ZarfNavbar's solid bar -->
   {#if landing}

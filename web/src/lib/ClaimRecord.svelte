@@ -81,10 +81,10 @@
   {#if !rec.txHash}
     <!-- the relayer's answer was lost: the chain says claimed, but this browser never got the hash -->
   {:else if env.PUBLIC_EXPLORER_TX_URL}
-    <ZenButton href="{env.PUBLIC_EXPLORER_TX_URL}{rec.txHash}" target="_blank" rel="noopener noreferrer" variant="secondary">
+    <a href="{env.PUBLIC_EXPLORER_TX_URL}{rec.txHash}" target="_blank" rel="noopener noreferrer" class="inline-block"><ZenButton tabindex={-1} variant="secondary">
       View Transaction
       {#snippet iconRight()}<ArrowUpRight class="w-3.5 h-3.5" />{/snippet}
-    </ZenButton>
+    </ZenButton></a>
   {:else}
     <p class="text-xs text-zen-fg-muted">Transaction <span class="font-mono">{middle(rec.txHash, 8)}</span></p>
   {/if}

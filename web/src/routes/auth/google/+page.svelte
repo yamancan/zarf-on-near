@@ -47,10 +47,10 @@
         <h1 class="text-xl font-bold">{failed.title}</h1>
         <p class="text-sm text-zen-fg-muted max-w-xs" role={failed.cancelled ? 'status' : 'alert'}>{failed.line}</p>
         {#if back}
-          <ZenButton href={back} variant="primary" class="w-full sm:w-auto">Back to Claim</ZenButton>
+          <a href={back} class="block w-full sm:w-auto"><ZenButton tabindex={-1} variant="primary" class="w-full sm:w-auto">Back to Claim</ZenButton></a>
         {:else}
           {#if !failed.cancelled}<p class="text-xs text-zen-fg-muted max-w-xs">Open your claim link again to try once more.</p>{/if}
-          <ZenButton href="/" variant="secondary">What Is Zarf?</ZenButton>
+          <a href="/" class="inline-block"><ZenButton tabindex={-1} variant="secondary">What Is Zarf?</ZenButton></a>
         {/if}
         {#if failed.code}
           <details class="group text-xs text-zen-fg-muted">

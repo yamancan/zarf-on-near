@@ -157,19 +157,19 @@
 
 {#snippet back()}
   {#if final}
-    <ZenButton href="/" variant="secondary">What Is Zarf?</ZenButton>
+    <a href="/" class="inline-block"><ZenButton tabindex={-1} variant="secondary">What Is Zarf?</ZenButton></a>
   {:else if canGoBack}
-    <ZenButton href={claimHref} variant="primary" class="w-full sm:w-auto">Back to Claim</ZenButton>
+    <a href={claimHref} class="block w-full sm:w-auto"><ZenButton tabindex={-1} variant="primary" class="w-full sm:w-auto">Back to Claim</ZenButton></a>
   {:else}
     <p class="text-xs text-zen-fg-muted">Open your claim link again to try once more.</p>
   {/if}
 {/snippet}
 
 {#snippet explorerButton(href: string, text: string)}
-  <ZenButton {href} target="_blank" rel="noopener noreferrer" variant="secondary">
+  <a {href} target="_blank" rel="noopener noreferrer" class="inline-block"><ZenButton tabindex={-1} variant="secondary">
     {text}
     {#snippet iconRight()}<ArrowUpRight class="w-3.5 h-3.5" />{/snippet}
-  </ZenButton>
+  </ZenButton></a>
 {/snippet}
 
 {#snippet details(text: string, value: string, more = '')}
@@ -260,7 +260,7 @@
         </a>
       {/if}
       {#if TESTNET}
-        <ZenButton href="/create" variant="primary" class="h-14 rounded-2xl text-[10px] uppercase tracking-widest font-bold">Send Your Own</ZenButton>
+        <a href="/create" class="grid"><ZenButton tabindex={-1} variant="primary" class="h-14 rounded-2xl text-[10px] uppercase tracking-widest font-bold shadow-[var(--zen-shadow-sm)] shadow-zen-primary/10 hover:shadow-zen-primary/20 transition-all">Send Your Own</ZenButton></a>
       {/if}
     </div>
     {#if hash && !env.PUBLIC_EXPLORER_TX_URL}<p class="text-xs text-zen-fg-subtle">Transaction <span class="font-mono">{middle(hash, 8)}</span></p>{/if}
@@ -307,7 +307,7 @@
         {#if canGoBack}
           {@render back()}
         {:else}
-          <ZenButton href="/" variant="secondary">What Is Zarf?</ZenButton>
+          <a href="/" class="inline-block"><ZenButton tabindex={-1} variant="secondary">What Is Zarf?</ZenButton></a>
         {/if}
       {:else if payout}
         {@const outcome = bridgeView?.outcome ?? 'in-transit'}
