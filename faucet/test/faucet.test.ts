@@ -442,7 +442,7 @@ describe('worker', () => {
     const linked = await (await worker.fetch(new Request('https://f.example/try'), { CLAIM_HOST: 'https://claim.example/' } as never)).text();
     expect(linked).toContain('href="https://claim.example/privacy"');
     expect(linked).toContain('href="https://claim.example/"');
-    expect(linked).not.toContain('docs.near.org');
+    expect(linked.match(/docs\.near\.org/g)).toHaveLength(1); // only the account-help link
     const hostile = await (await worker.fetch(new Request('https://f.example/try'), { CLAIM_HOST: 'https://x.example/"><script>' } as never)).text();
     expect(hostile).not.toContain('x.example');
     expect(html).not.toMatch(/<script>(?!<)/);
@@ -531,7 +531,8 @@ describe('judges page presentation', () => {
     const { default: worker } = await import('../src/index');
     const html = await (await worker.fetch(new Request('https://f.example/try'), {} as never)).text();
     const a = html.match(/<a id="wallet"[^>]*>/)![0];
-    expect(a).toContain('href="https://testnet.mynearwallet.com"');
+    expect(a).toContain('href="https://docs.near.org/getting-started/create-account"');
+    expect(a).not.toContain('mynearwallet');
     expect(a).toContain('target="_blank"');
     expect(a).toMatch(/rel="[^"]*\bnoopener\b[^"]*"/);
     expect(html).toContain('This tab keeps your link.');

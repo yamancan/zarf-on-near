@@ -18,7 +18,8 @@ const MOON = '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>';
 const CHEVRON = '<path d="m6 9 6 6 6-6"/>';
 const X_ICON = '<svg class="icon" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>';
 // Where a judge without an account makes one: a wallet, in a new tab, so this tab keeps the issued link (as the claim card).
-const WALLET = 'https://testnet.mynearwallet.com';
+// NEAR's own guide: MyNearWallet ended account creation, and the guide names the wallets that still create testnet accounts.
+const WALLET = 'https://docs.near.org/getting-started/create-account';
 
 /** Token base units (6 decimals) as a decimal string, e.g. "500000" -> "0.5"; null unless a positive integer. */
 export const usdcText = (amount: string): string | null => {
@@ -214,7 +215,7 @@ const html = (siteKey: string, claimHost: string, usdc: string | null) => `<!doc
       </form>
     </div>
     <div id="out" role="status" aria-live="polite"></div>
-    <p class="hint">No NEAR testnet account? <a id="wallet" href="${WALLET}" target="_blank" rel="noopener noreferrer">Create a free one at MyNearWallet</a>. This tab keeps your link.</p>
+    <p class="hint">No NEAR testnet account? <a id="wallet" href="${WALLET}" target="_blank" rel="noopener noreferrer">Create a free account in a NEAR wallet</a>, such as Meteor (choose testnet). This tab keeps your link.</p>
     <details>
       <summary>How this works ${ICON(CHEVRON)}</summary>
       <ul class="more">
