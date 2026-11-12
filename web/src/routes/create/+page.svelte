@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { env } from '$env/dynamic/public';
   import { buildDraft, claimLink, LONG_LINKS_ABOVE, mailtoHref, messageText, readRecoveryFile, recoveryFile, type Draft } from '$lib/create/campaign';
   import { getAccount, getCampaignByRoot, getCampaignView, getConfig, getGasPrice, getPrepayBalance, getStorageCosts, txOutcome, type ContractConfig } from '$lib/create/chain';
@@ -17,17 +17,24 @@
   import { deadlineText, timeLeft } from '$lib/claim';
   import { formatNear } from '$lib/create/campaigns';
   import { getClaimState, nearView, type ClaimState } from '$lib/services';
-  import { CIRCLE_LINE, TESTNET, UNIT, USDC_LINES } from '$lib/network';
-  import { ArrowRight, ArrowUpRight, Check, ChevronDown, Clock, Info, Loader2, Mail } from 'lucide-svelte';
-  import Amount from '$lib/Amount.svelte';
-  import Medallion from '$lib/Medallion.svelte';
+  import { CIRCLE_LINE, TESTNET, UNIT } from '$lib/network';
+  import { ArrowRight, ArrowUpRight, Check, CheckCircle2, ChevronDown, Copy, Download, ExternalLink, Eye, Info, Lock, Mail, Plus, RefreshCw } from 'lucide-svelte';
+  import AmountPanel from '$lib/AmountPanel.svelte';
+  import Avatar from '$lib/Avatar.svelte';
+  import CopyButton from '$lib/CopyButton.svelte';
+  import EmailMark from '$lib/EmailMark.svelte';
+  import GoogleG from '$lib/GoogleG.svelte';
+  import Steps from '$lib/Steps.svelte';
+  import MicroStepProgress from '$lib/create/MicroStepProgress.svelte';
+  import Tooltip from '$lib/zen/components/Tooltip.svelte';
+  import ZenBadge from '$lib/zen/components/ZenBadge.svelte';
+  import ZenInput from '$lib/zen/components/ZenInput.svelte';
+  import { markIn, swapIn } from '$lib/motion';
   import Note from '$lib/Note.svelte';
-  import Term from '$lib/Term.svelte';
   import ZenAlert from '$lib/zen/components/ZenAlert.svelte';
   import ZenButton from '$lib/zen/components/ZenButton.svelte';
   import ZenCard from '$lib/zen/components/ZenCard.svelte';
   import ZenCheckbox from '$lib/zen/components/ZenCheckbox.svelte';
-  import { themeStore } from '$lib/zen/stores/themeStore.svelte';
 
   const rpc = env.PUBLIC_NEAR_RPC_URL;
   // NEAR's own page for free testnet NEAR (the sender needs a little for storage and fees).
@@ -64,7 +71,9 @@
     return () => { live = false; clearTimeout(t); };
   });
   const unsure = $derived(parsed.rows.filter((r) => notGoogle.has(r.email)));
-  const unsureRow = (i: number) => parsed.rows.some((r) => r.line === i + 1 && notGoogle.has(r.email));
+  // One set per keystroke, not a scan per grid row (T-010 review minor 1: O(n²) on a pasted 5k list).
+  const unsureLines = $derived(new Set(unsure.map((r) => r.line)));
+  const unsureRow = (i: number) => unsureLines.has(i + 1);
   let config = $state<ContractConfig | null>(null);
   let setupError = $state('');
   let setupRetry = $state(false);
@@ -81,7 +90,6 @@
   let errorCode = $state(''); // a proven refund's contract code: E119/E127 offer "Change the deadline"
   let result = $state<{ campaignId: string; txHash: string } | null>(null);
   let copied = $state(false);
-  let usdcOpen = $state(false);
   // A funding tx that was sent: while set, Create stays off until its outcome is known.
   let sentTx = $state<string | null>(null);
   let txState = $state<'checking' | 'settling' | 'unclear' | 'mismatch' | null>(null);
@@ -172,6 +180,14 @@
   const short = $derived(fundsShort(balance, parsed.total));
   /** NEAR rounded up to the 5 decimals shown: a figure that is needed is never understated. */
   const nearUp = (y: bigint) => formatNear((y + 10n ** 19n - 1n).toString());
+  /** Display only (design spec G6f): NEAR to 3 significant digits, 4.99818 → 5.00, 0.01434 → 0.0143; `up` never shows less than a need. */
+  const sig3 = (y: bigint, up = false) => {
+    const v = Number(y) / 1e24;
+    if (v === 0) return '0';
+    if (v >= 1000) return Math.round(v).toLocaleString('en-US');
+    const step = 10 ** (Math.floor(Math.log10(v)) - 2);
+    return ((up ? Math.ceil(v / step - 1e-9) : Math.round(v / step)) * step).toPrecision(3);
+  };
   // Read again when the window regains focus or on "Check again": a sender who tops up is not stuck until a reload.
   let balanceTick = $state(0);
   let balanceFor: string | null = null;
@@ -512,8 +528,7 @@
   }
 
   // Wizard: the first three steps are local; Send and the links follow the draft and the result.
-  const STEPS = ['Recipients', 'Deadline', 'Wallet', 'Send'];
-  const QUESTIONS = ['Recipients', 'Until when can they claim?', 'Which wallet pays?', 'Check and send'];
+  const STEPS = ['Recipients', 'Deadline', 'Wallet', 'Review'];
   let uiStep = $state(0);
   const step = $derived(result && draft ? 4 : draft ? 3 : uiStep);
   const capError = $derived(sendCapError(parsed.total, TESTNET));
@@ -540,7 +555,16 @@
   // 2 weeks, 30 days; mainnet, 30-day minimum: 30, 60, 90 days). An hour of slack keeps a pick valid until it lands.
   const DAY = 86_400_000;
   const picks = $derived(config ? [7, 14, 30, 60, 90].filter((d) => d * DAY >= Number(BigInt(config!.min_lifetime_ns) / 1_000_000n)).slice(0, 3) : []);
-  const pickLabel = (d: number) => (d === 7 ? '1 week' : d === 14 ? '2 weeks' : `${d} days`);
+  const pickLabel = (d: number) => (d === 7 ? '1 Week' : d === 14 ? '2 Weeks' : `${d} Days`);
+  // Radiogroup keys on the deadline pills: arrows move the choice and the focus, as native radios do.
+  function pickKey(e: KeyboardEvent) {
+    const d = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
+    if (!d) return;
+    e.preventDefault();
+    const all = [...picks, 'date' as const];
+    choose(all[(all.indexOf(pick) + d + all.length) % all.length]);
+    tick().then(() => (document.querySelector(`[data-pick="${pick}"]`) as HTMLElement | null)?.focus());
+  }
   let pick = $state<number | 'date'>('date');
   function choose(p: number | 'date') {
     pick = p;
@@ -554,7 +578,7 @@
   /** The sending pipeline's current row: 1 the wallet, 2 the chain. 0: not sending. */
   const phase = $derived(busy === WAITING ? 1 : busy || sentTx || txState === 'checking' || txState === 'settling' ? 2 : 0);
   const sendBlocker = $derived(
-    wrongAccount ? ' ' /* the wrong-account warning says it; one message */ : !recoverySaved ? 'Save the backup file first.' : !recoveryAck ? "Tick the box once it's saved." : !sendable.ok ? sendable.reason : '',
+    wrongAccount ? ' ' /* the wrong-account warning says it; one message */ : !recoverySaved ? 'Download the backup first.' : !recoveryAck ? "Tick the box once it's saved." : !sendable.ok ? sendable.reason : '',
   );
   const deadlineFix = $derived(!!error && (errorCode.startsWith('E119') || errorCode.startsWith('E127')));
   const explorerAccount = env.PUBLIC_EXPLORER_TX_URL?.includes('/txns/') ? env.PUBLIC_EXPLORER_TX_URL.replace('/txns/', '/address/') : '';
@@ -615,8 +639,8 @@
   <ZenAlert variant="warning">
     This send was started from <span class="font-mono">{sentFrom}</span>. Reconnect {sentFrom} to finish it.
     {#snippet actions()}
-      {#if account}<ZenButton variant="secondary" size="sm" class="rounded-full min-h-11" onclick={disconnect} disabled={!!busy}>Disconnect</ZenButton>
-      {:else}<ZenButton variant="secondary" size="sm" class="rounded-full min-h-11" onclick={connect} disabled={!walletReady}>Connect a NEAR wallet</ZenButton>{/if}
+      {#if account}<ZenButton variant="secondary" size="sm" onclick={disconnect} disabled={!!busy}>Disconnect</ZenButton>
+      {:else}<ZenButton variant="secondary" size="sm" onclick={connect} disabled={!walletReady}>Connect Wallet</ZenButton>{/if}
     {/snippet}
   </ZenAlert>
 {/snippet}
@@ -624,46 +648,40 @@
 {#snippet accountRow()}
   {#if wrongAccount}{@render wrongAccountAlert()}{/if}
   {#if account}
-    <div class="flex items-center justify-between gap-3 min-h-11 border-y-[0.5px] border-zen-border-subtle">
-      <span class="min-w-0 truncate text-sm"><span class="text-zen-fg-muted">From</span> <span class="font-mono">{account}</span></span>
-      {#if !pinned}<ZenButton variant="ghost" size="sm" class="rounded-full min-h-11 !text-zen-fg" onclick={disconnect} disabled={!!busy}>Disconnect</ZenButton>{/if}
+    <div class="flex items-center justify-between gap-3 py-2 border-y border-zen-border-subtle">
+      <span class="min-w-0 flex items-center gap-2 text-sm"><span class="text-zen-fg-subtle">From</span><Avatar name={account} /><span class="font-mono truncate">{account}</span></span>
+      {#if !pinned}<ZenButton variant="ghost" size="sm" onclick={disconnect} disabled={!!busy}>Disconnect</ZenButton>{/if}
     </div>
   {/if}
 {/snippet}
 
 {#snippet usdcChip()}
-  <!-- Zarf's token chip (create wizard): the money has a face, on every step. One token, so no "Change"; ⓘ opens the USDC sentence -->
-  <button type="button" class="group/chip inline-flex items-center min-h-11 cursor-pointer" aria-expanded={usdcOpen} aria-controls="usdc-what" onclick={() => (usdcOpen = !usdcOpen)}>
-    <span class="inline-flex items-center gap-2 bg-zen-fg/5 rounded-full pl-1.5 pr-2 py-1 border border-zen-border-subtle group-hover/chip:border-zen-border transition-colors">
-      <img src="/tokens/usdc.svg" alt="" class="w-4 h-4 rounded-full" />
-      <span class="text-xs font-semibold uppercase">{UNIT}</span>
-      <span class="text-xs text-zen-fg-muted">· {TESTNET ? 'NEAR testnet' : 'NEAR'}</span>
-      <Info class="w-3.5 h-3.5 text-zen-fg-muted" aria-hidden="true" />
-      <span class="sr-only">What is {UNIT}?</span>
-    </span>
-  </button>
+  <!-- Zarf's token chip (create wizard step-1:230-250): one token, so no "Change" -->
+  <span class="inline-flex items-center gap-2 bg-zen-fg/5 rounded-full pl-1.5 pr-3 py-1 border border-zen-border-subtle">
+    <img src="/tokens/usdc.svg" alt="" class="w-4 h-4 rounded-full" />
+    <span class="text-xs font-semibold uppercase">{UNIT}</span>
+  </span>
 {/snippet}
 
-{#snippet usdcWhat()}
-  {#if usdcOpen}
-    <div id="usdc-what" class="flex flex-col gap-1 text-sm text-zen-fg-muted">
-      {#each USDC_LINES as l (l)}<p>{l}</p>{/each}
-      {#if !TESTNET}<p>{CIRCLE_LINE}</p>{/if}
-      {#if token}
-        <p class="text-xs">
-          Token on NEAR:
-          {#if explorerAccount}<a href="{explorerAccount}{token}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-0.5 font-mono underline underline-offset-2 hover:text-zen-fg">{token.slice(0, 6)}…{token.slice(-4)}<ArrowUpRight class="w-3 h-3" aria-hidden="true" /></a>{:else}<span class="font-mono">{token.slice(0, 6)}…{token.slice(-4)}</span>{/if}
-        </p>
-      {/if}
+{#snippet stepHeader(title: string, helper: string)}
+  <!-- Zarf create step-1:218-253: title and one helper left; token chip and step chips right -->
+  <header class="flex flex-wrap items-start justify-between gap-x-6 gap-y-4">
+    <div class="space-y-2">
+      <h1 id="step-h" bind:this={stepHeading} tabindex="-1" class="text-2xl md:text-3xl font-light tracking-tight text-zen-fg outline-hidden">{title}</h1>
+      {#if helper}<p class="text-sm md:text-base text-zen-fg-muted font-light leading-relaxed">{helper}</p>{/if}
     </div>
-  {/if}
+    <div class="flex flex-wrap items-center gap-3">
+      {@render usdcChip()}
+      <MicroStepProgress segments={STEPS.map((label) => ({ label }))} current={step} />
+    </div>
+  </header>
 {/snippet}
 
-{#snippet figure(label: string, value: string, unit: string, dim = false)}
-  <!-- The amount block, small: label, figure, the unit beside it (canonical choice 4) -->
+{#snippet figure(label: string, value: string, unit: string, dim = false, exact = '')}
+  <!-- The amount block, small: label, figure, the unit beside it; the exact value on hover (spec G6f) -->
   <div class="flex flex-col gap-1 min-w-0">
-    <span class="text-[10px] uppercase tracking-[0.3em] text-zen-fg-muted font-bold">{label}</span>
-    <span class="flex flex-wrap items-baseline gap-x-2 {dim ? 'text-zen-fg-muted' : ''}">
+    <span class="text-[10px] uppercase tracking-[0.3em] text-zen-fg-subtle font-bold">{label}</span>
+    <span class="flex flex-wrap items-baseline gap-x-2 {dim ? 'text-zen-fg-muted' : ''}" title={exact ? `${exact} ${unit}` : undefined}>
       <span class="text-3xl font-light tracking-tighter tabular-nums">{value}</span>
       <span class="text-xs font-medium uppercase tracking-widest text-zen-primary whitespace-nowrap">{unit}</span>
     </span>
@@ -671,107 +689,76 @@
 {/snippet}
 
 {#snippet actions(back: boolean, label: string, enabled: boolean, go: () => void, reason = '')}
-  <div class="mt-4 pt-6 border-t-[0.5px] border-zen-border-subtle flex flex-col gap-2">
+  <!-- Zarf's action bar (create step-1:293) -->
+  <div class="mt-12 pt-6 border-t border-zen-border-subtle flex flex-col gap-2">
     <div class="flex items-center {back ? 'justify-between' : 'justify-end'} gap-3">
-      {#if back}<ZenButton variant="ghost" class="rounded-full min-h-11 !text-zen-fg -ml-6" onclick={() => (uiStep -= 1)}>Back</ZenButton>{/if}
-      <ZenButton variant="primary" class="rounded-full min-h-11" disabled={!enabled} onclick={go}>
+      {#if back}<ZenButton variant="ghost" onclick={() => (uiStep -= 1)}>Back</ZenButton>{/if}
+      <ZenButton variant="primary" size="lg" class="px-8" disabled={!enabled} onclick={go}>
         {label}
         {#snippet iconRight()}<ArrowRight class="w-4 h-4" />{/snippet}
       </ZenButton>
     </div>
-    <!-- Why the button is grey, or what it does next (Zarf's launchBlocker spot), under the button only -->
     {#if reason}<p class="text-xs text-zen-fg-muted text-right ml-auto max-w-60">{reason}</p>{/if}
   </div>
 {/snippet}
 
 {#snippet explorerLink(hash: string)}
   {#if env.PUBLIC_EXPLORER_TX_URL && hash}
-    <a href="{env.PUBLIC_EXPLORER_TX_URL}{hash}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 min-h-11 text-sm underline underline-offset-2 hover:text-zen-fg">View the transaction<ArrowUpRight class="w-3.5 h-3.5" aria-hidden="true" /></a>
+    <a href="{env.PUBLIC_EXPLORER_TX_URL}{hash}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-sm underline underline-offset-2 hover:text-zen-fg">View Transaction<ArrowUpRight class="w-3.5 h-3.5" aria-hidden="true" /></a>
   {/if}
 {/snippet}
 
 {#snippet nameField()}
-  <label class="flex flex-col gap-1 mb-4">
-    <span class="text-sm font-medium">Your name <span class="font-normal text-zen-fg-muted">(optional, signs the message)</span></span>
-    <input bind:value={senderName} maxlength="60" autocomplete="name" placeholder="Your name" class="control-border w-full min-h-11 rounded-[var(--zen-radius-input)] bg-transparent px-4 text-sm" />
-    <span class="text-xs text-zen-fg-muted">Kept in this browser only. Never sent on chain or to any server.</span>
-  </label>
+  <ZenInput label="Your Name (Optional)" class="control-border" bind:value={senderName} maxlength={60} autocomplete="name" placeholder="Your name" hint="Signs the message. Stays in this browser." />
 {/snippet}
 
-{#snippet messageCard(email: string, m: { subject: string; body: string }, note: string)}
+{#snippet messageCard(email: string, m: { subject: string; body: string })}
   <!-- The ready-made message, shaped like an email: an object, so it gets a frame -->
   <ZenCard variant="elevated" padding="md">
     <div class="flex flex-col gap-3 text-sm">
-      <div class="flex flex-col gap-0.5 pb-3 border-b-[0.5px] border-zen-border-subtle">
-        <span class="truncate"><span class="text-zen-fg-muted">To</span> {email}</span>
-        <span class="truncate"><span class="text-zen-fg-muted">Subject</span> {m.subject}</span>
+      <div class="flex flex-col gap-0.5 pb-3 border-b border-zen-border-subtle">
+        <span class="flex items-center gap-2 min-w-0"><span class="text-zen-fg-subtle">To</span><EmailMark {email} /><span class="truncate">{email}</span></span>
+        <span class="truncate"><span class="text-zen-fg-subtle">Subject</span> {m.subject}</span>
       </div>
-      <p class="whitespace-pre-line break-words text-zen-fg/90">{m.body}</p>
+      <p class="text-sm whitespace-pre-line break-words text-zen-fg/90">{m.body}</p>
     </div>
   </ZenCard>
-  {#if note}<p class="mt-3 ml-1 text-xs text-zen-fg-muted">{note}</p>{/if}
 {/snippet}
 
 {#snippet pipeline()}
   {@const idle = !busy && txState === 'checking'}
-  <!-- Zarf's DeploymentPipeline: numbered rows, the current one marked; hairline connector, no boxes -->
-  <ol class="flex flex-col" aria-label="Sending">
-    {#each ['Approve in your wallet', 'Confirming on NEAR', 'Links ready'] as label, i (label)}
-      {@const st = i + 1 < phase ? 'done' : i + 1 === phase ? 'active' : 'pending'}
-      <li class="relative flex gap-4 pb-5 last:pb-0 {st === 'pending' ? 'opacity-40' : ''}" aria-current={st === 'active' ? 'step' : undefined}>
-        {#if i < 2}<span class="absolute left-4 top-9 bottom-1 w-px bg-zen-border" aria-hidden="true"></span>{/if}
-        <span class="w-8 h-8 shrink-0 rounded-full border-[0.5px] flex items-center justify-center text-xs font-medium
-          {st === 'done' ? 'bg-zen-fg text-zen-bg border-zen-fg' : st === 'active' ? 'border-zen-border text-zen-fg' : 'border-zen-border-subtle text-zen-fg-muted'}">
-          {#if st === 'done'}<Check class="w-4 h-4" aria-hidden="true" />{:else if st === 'active' && idle}<Clock class="w-4 h-4" aria-hidden="true" />{:else if st === 'active'}<Loader2 class="w-4 h-4 animate-spin" aria-hidden="true" />{:else}{i + 1}{/if}
-        </span>
-        <div class="flex flex-col min-w-0 pt-1.5">
-          <span class="text-sm font-medium {st === 'active' ? 'text-zen-fg' : 'text-zen-fg-muted'}">{label}</span>
-          {#if i === 0 && txCount === 2 && st !== 'done'}
-            <span class="text-sm text-zen-fg-muted">Approve 2 transactions: storage, then {UNIT}.</span>
-          {/if}
-          {#if st === 'active' && i === 0}
-            <span class="text-sm text-zen-fg-muted" role="status">Waiting for you in the wallet window.</span>
-          {:else if st === 'active' && i === 1}
-            <span class="text-sm text-zen-fg-muted" role="status">{idle ? 'Not confirmed yet.' : sentTx ? 'Sent. Checking it went through.' : 'Checking whether it went through.'}</span>
-            {#if sentTx}<span class="text-zen-fg-muted">{@render explorerLink(sentTx)}</span>{/if}
-          {/if}
-        </div>
-      </li>
-    {/each}
-  </ol>
-  <p class="text-xs text-zen-fg-muted">Keep this tab open until the links appear.</p>
+  <Steps
+    label="Sending"
+    rows={['Approve in Wallet', 'Confirming on NEAR', 'Links Ready'].map((label, i) => ({ label, state: i + 1 < phase ? 'done' : i + 1 === phase ? 'active' : 'pending', idle }))}
+  >
+    {#snippet detail(i, row)}
+      {#if i === 0 && txCount === 2 && row.state !== 'done'}
+        <span class="text-sm text-zen-fg-muted">Approve 2 transactions: storage, then {UNIT}.</span>
+      {/if}
+      {#if row.state === 'active' && i === 0}
+        <span class="text-sm text-zen-fg-muted" role="status">Waiting for you in the wallet window.</span>
+      {:else if row.state === 'active' && i === 1}
+        <span class="text-sm text-zen-fg-muted" role="status">{idle ? 'Not confirmed yet.' : sentTx ? 'Sent. Checking it went through.' : 'Checking whether it went through.'}</span>
+        {#if sentTx}<span class="text-zen-fg-muted">{@render explorerLink(sentTx)}</span>{/if}
+      {/if}
+    {/snippet}
+  </Steps>
+  <p class="text-xs text-zen-fg-subtle">Keep this tab open until the links appear.</p>
 {/snippet}
 
-{#snippet emailsNote()}
-  <details class="group mt-6 text-sm text-zen-fg-muted lg:max-w-xl">
-    <summary class="flex items-center gap-2 min-h-11 cursor-pointer list-none hover:text-zen-fg">
-      Who sees the emails?
-      <ChevronDown class="w-4 h-4 transition-transform group-open:rotate-180" aria-hidden="true" />
-    </summary>
-    <p class="mt-1">
-      Emails never go on chain. When someone claims, our verifier, operated by Trion Labs, sees their email once to
-      check it matches the claim.
-    </p>
-  </details>
-{/snippet}
-
-{#if step < 4}
-  <!-- WizardSteps (main repo create app): one thin bar and the step name -->
-  <div class="w-full border-b border-zen-border-subtle bg-zen-bg">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2 flex items-center gap-4">
-      <div class="flex-1 h-1 bg-zen-fg/10 rounded-full overflow-hidden" role="progressbar" aria-valuemin={1} aria-valuemax={STEPS.length} aria-valuenow={step + 1} aria-valuetext="Step {step + 1} of {STEPS.length}: {STEPS[step]}">
-        <div class="h-full bg-zen-fg rounded-full transition-all duration-500 ease-out" style="width: {((step + 1) / STEPS.length) * 100}%"></div>
-      </div>
-      <div class="text-xs text-zen-fg-muted whitespace-nowrap">Step {step + 1} of {STEPS.length} · <span class="text-zen-fg font-medium">{STEPS[step]}</span></div>
-    </div>
+{#snippet ledgerRow(label: string, value: string, exact = '')}
+  <!-- DeploymentSummary row: small uppercase label left, value right -->
+  <div class="flex items-baseline justify-between gap-4">
+    <div class="text-[10px] text-zen-fg-subtle uppercase shrink-0">{label}</div>
+    <div class="font-medium text-sm text-right tabular-nums" title={exact || undefined}>{value}</div>
   </div>
-{/if}
+{/snippet}
 
 <div class="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-12">
   {#if otherTab && !draft}
     <ZenAlert variant="warning" class="mb-6">
       Another tab has a send from <span class="font-mono">{otherTab.sender}</span> that has not resolved yet. Finish it there first, or the same money could be sent twice.
-      {#snippet actions()}<ZenButton variant="secondary" size="sm" class="rounded-full min-h-11" onclick={checkOtherTab} disabled={!config}>Check it</ZenButton>{/snippet}
+      {#snippet actions()}<ZenButton variant="secondary" size="sm" onclick={checkOtherTab} disabled={!config}>Check</ZenButton>{/snippet}
     </ZenAlert>
   {/if}
   {#if otherTabNote}<p class="mb-6 text-sm text-zen-fg-muted" role="status">{otherTabNote}</p>{/if}
@@ -779,227 +766,200 @@
   {#if setupError}
     <ZenAlert variant="error">
       {setupError}
-      {#snippet actions()}{#if setupRetry}<ZenButton variant="secondary" size="sm" class="rounded-full min-h-11" onclick={() => location.reload()}>Try again</ZenButton>{/if}{/snippet}
+      {#snippet actions()}{#if setupRetry}<ZenButton variant="secondary" size="sm" onclick={() => location.reload()}>Try Again</ZenButton>{/if}{/snippet}
     </ZenAlert>
   {:else if result && draft}
-    <!-- Done: the links are the product of this page -->
+    <!-- Done (design spec 3.4): the links are the product of this page -->
     {@const shown = linkRows[previewRow] ?? linkRows[0]}
-    <div class="flex flex-col lg:flex-row lg:items-start gap-10 lg:gap-12">
-      <section class="w-full lg:max-w-xl lg:shrink-0 flex flex-col gap-6" aria-labelledby="done-h">
-        <div class="flex flex-col items-start gap-4">
-          <div class="[&>div]:mx-0"><Medallion icon={Check} tone="success" /></div>
-          <div class="space-y-1">
-            <!-- True for all of it: the contract holds it for them. Nobody has received anything until they claim; who has comes from the chain, below. -->
-            <h1 id="done-h" bind:this={stepHeading} tabindex="-1" class="text-2xl md:text-3xl font-light tracking-tight outline-hidden">
-              <span class="tabular-nums">{formatAmount(BigInt(draft.total))}</span>&nbsp;<span class="text-sm font-medium uppercase tracking-widest text-zen-primary whitespace-nowrap align-[0.2em]">{UNIT}</span> held for {people(draft.recipients.length).replace(' ', ' ')}
-            </h1>
+    <div class="flex flex-col lg:flex-row lg:items-start gap-10 lg:gap-8 xl:gap-12" in:swapIn>
+      <section class="w-full lg:max-w-xl lg:shrink-0 space-y-8" aria-labelledby="done-h">
+        <div class="flex items-start gap-4">
+          <div class="w-12 h-12 rounded-full bg-zen-success/10 text-zen-success flex items-center justify-center shrink-0" in:markIn aria-hidden="true"><CheckCircle2 class="w-6 h-6" /></div>
+          <div class="space-y-2 min-w-0">
+            <h1 id="done-h" bind:this={stepHeading} tabindex="-1" class="text-2xl md:text-3xl font-light tracking-tight outline-hidden">Your Campaign Is Live</h1>
+            <p class="text-sm text-zen-fg-muted tabular-nums">
+              Campaign {result.campaignId} · {formatAmount(BigInt(draft.total))} {UNIT} to {people(draft.recipients.length)}
+              {#if env.PUBLIC_EXPLORER_TX_URL && result.txHash}<a href="{env.PUBLIC_EXPLORER_TX_URL}{result.txHash}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center align-middle ml-1 text-zen-fg-subtle hover:text-zen-fg" aria-label="View Transaction"><ExternalLink class="w-3.5 h-3.5" aria-hidden="true" /></a>{/if}
+            </p>
             {#if claimCounts}
-              <p class="text-sm" role="status">
-                {[claimCounts.claimed ? `${claimCounts.claimed} claimed` : '', claimCounts.paying ? `${claimCounts.paying} being paid` : '', claimCounts.open ? `${claimCounts.open} not claimed yet` : ''].filter(Boolean).join(' · ')}{linkRows.length > STATUS_ROWS ? ` (first ${STATUS_ROWS})` : ''}
-              </p>
+              <div class="flex flex-wrap gap-2" role="status">
+                {#if claimCounts.claimed}<ZenBadge variant="success" size="sm">{claimCounts.claimed} Claimed</ZenBadge>{/if}
+                {#if claimCounts.paying}<ZenBadge variant="info" size="sm">{claimCounts.paying} Paying</ZenBadge>{/if}
+                {#if claimCounts.open}<ZenBadge variant="default" size="sm">{claimCounts.open} Waiting</ZenBadge>{/if}
+                {#if linkRows.length > STATUS_ROWS}<span class="text-xs text-zen-fg-subtle">first {STATUS_ROWS}</span>{/if}
+              </div>
             {/if}
-            <p class="text-sm text-zen-fg-muted">Listed as Campaign {result.campaignId} in <a href="/campaigns" class="underline underline-offset-2 hover:text-zen-fg">Campaigns</a>{#if env.PUBLIC_EXPLORER_TX_URL && result.txHash}{' · '}<a href="{env.PUBLIC_EXPLORER_TX_URL}{result.txHash}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-0.5 underline underline-offset-2 hover:text-zen-fg">View the transaction<ArrowUpRight class="w-3 h-3" aria-hidden="true" /></a>{/if}</p>
           </div>
-          {@render usdcChip()}
-          {@render usdcWhat()}
         </div>
 
-        <div class="flex flex-col gap-1">
-          <h2 class="text-base font-semibold tracking-tight">Send each person their link</h2>
-          <p class="text-sm text-zen-fg-muted">From your own email or chat. Zarf doesn't email anyone.</p>
-        </div>
         {#if linkRows.length > LONG_LINKS_ABOVE}
           <ZenAlert variant="warning">These links are long; some apps cut them. Send them by email, or copy them carefully.</ZenAlert>
         {/if}
 
-        <div class="flex flex-col gap-1">
-          <ul class="links flex flex-col border-y-[0.5px] border-zen-border-subtle">
+        <div class="space-y-3">
+          <div class="flex items-center justify-between gap-3">
+            <span class="zen-section-label !text-zen-fg-subtle !mb-0 inline-flex items-center gap-1.5">
+              Links
+              <Tooltip text="Each link is the only copy its recipient needs. Send it only to them." position="bottom">
+                <button type="button" class="inline-flex items-center justify-center w-6 h-6 rounded-full text-zen-fg-subtle hover:text-zen-fg normal-case" aria-label="Keep each link private: each link is the only copy its recipient needs. Send it only to them."><Lock class="w-3.5 h-3.5" aria-hidden="true" /></button>
+              </Tooltip>
+            </span>
+            {#if claimsAt !== null || claimsBusy}
+              <span class="flex items-center gap-1 text-xs text-zen-fg-subtle tabular-nums">
+                {claimsBusy ? 'Checking…' : `Checked ${new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' }).format(claimsAt!)}`}
+                <ZenButton variant="ghost" size="xs" onclick={readClaims} disabled={claimsBusy}>
+                  {#snippet iconLeft()}<RefreshCw class="w-3.5 h-3.5" />{/snippet}Refresh
+                </ZenButton>
+              </span>
+            {/if}
+          </div>
+          <ul class="links divide-y divide-zen-border-subtle border-y border-zen-border-subtle">
             {#each linkRows as { r, link }, i (r.commitment)}
               {@const c = claims[i]}
-              <li class="flex items-center gap-1 min-h-12 border-b-[0.5px] border-zen-border-subtle last:border-b-0">
-                <span class="flex-1 min-w-0 flex flex-col py-1.5 text-sm">
-                  <span class="truncate" title={r.email}>{r.email}</span>
-                  <span class="flex flex-wrap items-center gap-x-1.5 text-xs text-zen-fg-muted tabular-nums">
-                    <span class="whitespace-nowrap">{formatAmount(BigInt(r.amount))} <span class="text-[10px] uppercase tracking-widest">{UNIT}</span></span>
-                    {#if c === 'claimed'}
-                      <span class="inline-flex items-center gap-1 whitespace-nowrap text-zen-success">· <Check class="w-3 h-3" aria-hidden="true" />Claimed</span>
-                    {:else if c === 'pending'}
-                      <span class="inline-flex items-center gap-1 whitespace-nowrap">· <Clock class="w-3 h-3" aria-hidden="true" />Being paid</span>
-                    {:else if c === 'unclaimed'}
-                      <span class="whitespace-nowrap">· Not claimed yet</span>
-                    {/if}
-                  </span>
-                </span>
-                <ZenButton variant="ghost" size="sm" class="rounded-full min-h-11 !text-zen-fg" onclick={() => copyOne(i)}>{copiedRow === i ? 'Copied' : 'Copy message'}</ZenButton>
-                <ZenButton href={mailtoHref(r, message(r, link))} variant="ghost" size="sm" class="rounded-full min-h-11 !text-zen-fg">Email</ZenButton>
+              <li class="flex items-center gap-2 py-2.5">
+                <EmailMark email={r.email} />
+                <span class="flex-1 min-w-0 truncate text-sm" title={r.email}>{r.email}</span>
+                <span class="shrink-0 whitespace-nowrap text-sm tabular-nums">{formatAmount(BigInt(r.amount))}</span>
+                {#if c === 'claimed'}<ZenBadge variant="success" size="sm">Claimed</ZenBadge>
+                {:else if c === 'pending'}<ZenBadge variant="info" size="sm">Paying</ZenBadge>
+                {:else if c === 'unclaimed'}<ZenBadge variant="default" size="sm">Waiting</ZenBadge>{/if}
+                <Tooltip text={copiedRow === i ? 'Copied' : 'Copy Message'} position="top">
+                  <button type="button" class="inline-flex items-center justify-center w-8 h-8 rounded-full text-zen-fg-subtle hover:text-zen-fg hover:bg-zen-fg/5" aria-label={copiedRow === i ? 'Copied' : 'Copy Message'} onclick={() => copyOne(i)}>
+                    {#if copiedRow === i}<Check class="w-3.5 h-3.5" aria-hidden="true" />{:else}<Copy class="w-3.5 h-3.5" aria-hidden="true" />{/if}
+                  </button>
+                </Tooltip>
+                <Tooltip text="Email" position="top">
+                  <a href={mailtoHref(r, message(r, link))} class="inline-flex items-center justify-center w-8 h-8 rounded-full text-zen-fg-subtle hover:text-zen-fg hover:bg-zen-fg/5" aria-label="Email"><Mail class="w-3.5 h-3.5" aria-hidden="true" /></a>
+                </Tooltip>
               </li>
             {/each}
           </ul>
-          {#if claimsAt !== null || claimsBusy}
-            <div class="flex items-center justify-between gap-3 text-xs text-zen-fg-muted">
-              <span>{claimsBusy ? 'Checking who has claimed…' : `Checked ${new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' }).format(claimsAt!)}`}</span>
-              <ZenButton variant="ghost" size="sm" class="rounded-full min-h-11 !text-zen-fg" onclick={readClaims} disabled={claimsBusy}>Check again</ZenButton>
-            </div>
-          {/if}
-        </div>
-
-        <!-- The per-row "Copy message" is the job; these two take the whole list elsewhere -->
-        <div class="flex flex-col gap-2">
-          <div class="flex flex-wrap gap-3">
-            <ZenButton variant="secondary" class="rounded-full min-h-11" onclick={copyAll}>{copied ? 'Copied' : 'Copy the list'}</ZenButton>
-            <ZenButton variant="secondary" class="rounded-full min-h-11" onclick={() => saveFile(`zarf-links-${result!.campaignId}.csv`, `email,amount,link\n${links.join('\n')}\n`, 'text/csv')}>Download as CSV</ZenButton>
+          <div class="flex flex-wrap gap-2">
+            <ZenButton variant="secondary" size="sm" onclick={copyAll}>
+              {#snippet iconLeft()}{#if copied}<Check class="w-3.5 h-3.5" />{:else}<Copy class="w-3.5 h-3.5" />{/if}{/snippet}{copied ? 'Copied' : 'Copy All Links'}
+            </ZenButton>
+            <ZenButton variant="secondary" size="sm" onclick={() => saveFile(`zarf-links-${result!.campaignId}.csv`, `email,amount,link\n${links.join('\n')}\n`, 'text/csv')}>
+              {#snippet iconLeft()}<Download class="w-3.5 h-3.5" />{/snippet}Download CSV
+            </ZenButton>
           </div>
-          <p class="text-xs text-zen-fg-muted">Each line: email, amount, link. For a spreadsheet or a mail merge.</p>
         </div>
 
-        <section class="flex flex-col gap-3 pt-6 border-t-[0.5px] border-zen-border-subtle" aria-labelledby="next-h">
-          <h2 id="next-h" class="text-[11px] font-medium uppercase tracking-[0.15em] text-zen-fg-muted">What happens next</h2>
-          <ol class="flex flex-col gap-2 text-sm">
-            <li class="flex gap-3"><span class="font-mono text-[11px] text-zen-fg-muted pt-0.5">01</span>They open the link and choose the {TESTNET ? 'NEAR account' : 'account'} it goes to.</li>
-            <li class="flex gap-3"><span class="font-mono text-[11px] text-zen-fg-muted pt-0.5">02</span>They sign in with Google as that email, and the {UNIT} arrives.</li>
-            <li class="flex gap-3"><span class="font-mono text-[11px] text-zen-fg-muted pt-0.5">03</span><span>After {shortWhen(deadlineMs)} you can take back what's left, in <a href="/campaigns" class="underline underline-offset-2 hover:text-zen-fg">Campaigns</a>.</span></li>
-          </ol>
-          <p class="text-xs text-zen-fg-muted">Your backup file <span class="font-mono">zarf-recovery-{draft.merkleRoot.slice(0, 8)}.json</span> rebuilds these links.</p>
-          <button type="button" class="self-start min-h-11 text-sm underline underline-offset-2 text-zen-fg-muted hover:text-zen-fg cursor-pointer" onclick={startOver}>Start a new send</button>
-        </section>
-
-        <details class="group text-sm text-zen-fg-muted">
-          <summary class="inline-flex items-center gap-2 min-h-11 cursor-pointer list-none hover:text-zen-fg">
-            Keep each link private
-            <ChevronDown class="w-4 h-4 shrink-0 transition-transform group-open:rotate-180" aria-hidden="true" />
-          </summary>
-          <p class="mt-1">
-            Each link is the only copy of what its recipient needs to claim. Anyone holding a link can test whether it matches
-            an email they guess, so send it only to its recipient. Lost them? Your backup file rebuilds them; after the deadline
-            you can take back what is left.
-          </p>
-        </details>
+        <div class="space-y-4 pt-6 border-t border-zen-border-subtle">
+          <p class="text-sm text-zen-fg-muted">After {shortWhen(deadlineMs)}, take back the rest in <a href="/campaigns" class="underline underline-offset-2 hover:text-zen-fg">Campaigns</a>.</p>
+          <div class="flex flex-wrap gap-2">
+            <ZenButton variant="ghost" size="sm" onclick={startOver}>{#snippet iconLeft()}<Plus class="w-3.5 h-3.5" />{/snippet}New Send</ZenButton>
+            <ZenButton variant="ghost" size="sm" onclick={saveRecovery}>{#snippet iconLeft()}<Download class="w-3.5 h-3.5" />{/snippet}Download Backup</ZenButton>
+          </div>
+        </div>
       </section>
 
       {#if shown}
-        <aside class="w-full lg:flex-1 lg:sticky lg:top-24 min-w-0" aria-label="The message for {shown.r.email}">
+        <aside class="w-full min-w-0 lg:flex-1 lg:max-w-2xl lg:sticky lg:top-24 space-y-6" aria-label="The message for {shown.r.email}">
           {@render nameField()}
-          <p class="mb-4 ml-1 text-[11px] font-medium uppercase tracking-[0.15em] text-zen-fg-muted truncate">The message for <span class="normal-case tracking-normal text-xs">{shown.r.email}</span></p>
-          {@render messageCard(shown.r.email, message(shown.r, `${claimHost}/claim/${result.campaignId}/${shown.r.commitment.slice(0, 8)}…`), '"Copy message" copies it with the full link.')}
+          <div>
+            <div class="flex items-center gap-2 mb-4 text-xs font-semibold uppercase tracking-wider text-zen-fg-subtle ml-1"><Eye class="w-3.5 h-3.5" aria-hidden="true" /> Message</div>
+            {@render messageCard(shown.r.email, message(shown.r, `${claimHost}/claim/${result.campaignId}/${shown.r.commitment.slice(0, 8)}…`))}
+          </div>
         </aside>
       {/if}
     </div>
   {:else}
-    <div class="relative isolate flex flex-col lg:flex-row lg:items-start gap-10 lg:gap-12">
-      <!-- Form: the step question is the page title -->
-      <section class="w-full lg:max-w-xl lg:shrink-0 flex flex-col gap-4" aria-labelledby="step-h">
-        <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 mb-2">
-          <h1 id="step-h" bind:this={stepHeading} tabindex="-1" class="text-2xl md:text-3xl font-light tracking-tight outline-hidden">{QUESTIONS[step]}</h1>
-          {@render usdcChip()}
-        </div>
-        {#if usdcOpen}<div class="-mt-4">{@render usdcWhat()}</div>{/if}
-
+    <div class="flex flex-col lg:flex-row lg:items-start gap-10 lg:gap-8 xl:gap-12">
+      <section class="w-full lg:max-w-xl lg:shrink-0 flex flex-col gap-8" aria-labelledby="step-h">
         {#if step === 0}
-          <p class="-mt-4 text-xs text-zen-fg-subtle">Their Google sign-in email and amount.</p>
-          <RecipientImportControls
-            hasRows={gridRows.some((r) => !isBlankRow(r))}
-            backupDisabled={!config || !!busy}
-            {skipped}
-            onAddRow={() => grid?.addRow()}
-            onClear={clearRows}
-            onPaste={addPasted}
-            onImportFile={async (f) => addPasted(await f.text())}
-            onOpenBackup={openBackup}
-            onDismissSkipped={() => (skipped = [])}
-          />
-          <!-- Undo restores a snapshot, so it goes away once anything is typed. -->
-          {#if cleared && !gridRows.some((r) => !isBlankRow(r))}
-            <div role="status" class="flex items-center justify-between gap-3 rounded-xl bg-zen-fg/[0.03] px-3 py-2 text-sm text-zen-fg-muted">
-              <span>List cleared.</span>
-              <ZenButton variant="ghost" size="sm" onclick={() => ((gridRows = cleared!), (cleared = null))}>Undo</ZenButton>
-            </div>
-          {/if}
-          <RecipientGrid bind:this={grid} bind:rows={gridRows} problems={parsed.problems} notGoogle={unsureRow} total={parsed.total} count={parsed.rows.length} unit={UNIT} />
-          {#if unsure.length}<p class="text-xs text-zen-fg-subtle">{unsure.length === 1 ? 'This person must be able to sign in to Google with this exact address, or the share waits until the deadline.' : 'Each person marked must be able to sign in to Google with that exact address, or their share waits until the deadline.'}</p>{/if}
-          {#if capError}<Note tone="error">{capError}</Note>{/if}
+          {@render stepHeader('Recipients', 'Their Google sign-in email and amount.')}
+          <div class="flex flex-col gap-3">
+            <RecipientImportControls
+              hasRows={gridRows.some((r) => !isBlankRow(r))}
+              backupDisabled={!config || !!busy}
+              {skipped}
+              onAddRow={() => grid?.addRow()}
+              onClear={clearRows}
+              onPaste={addPasted}
+              onImportFile={async (f) => addPasted(await f.text())}
+              onOpenBackup={openBackup}
+              onDismissSkipped={() => (skipped = [])}
+            />
+            <!-- Undo restores a snapshot, so it goes away once anything is typed. -->
+            {#if cleared && !gridRows.some((r) => !isBlankRow(r))}
+              <div role="status" class="flex items-center justify-between gap-3 rounded-xl bg-zen-fg/[0.03] px-3 py-2 text-sm text-zen-fg-muted">
+                <span>List cleared.</span>
+                <ZenButton variant="ghost" size="sm" onclick={() => ((gridRows = cleared!), (cleared = null))}>Undo</ZenButton>
+              </div>
+            {/if}
+            <RecipientGrid bind:this={grid} bind:rows={gridRows} problems={parsed.problems} notGoogle={unsureRow} total={parsed.total} count={parsed.rows.length} unit={UNIT} />
+            {#if unsure.length}<p class="text-xs text-zen-fg-subtle">{unsure.length === 1 ? 'This person must be able to sign in to Google with this exact address, or the share waits until the deadline.' : 'Each person marked must be able to sign in to Google with that exact address, or their share waits until the deadline.'}</p>{/if}
+            {#if capError}<Note tone="error">{capError}</Note>{/if}
+          </div>
           {@render actions(false, 'Continue', recipientsOk, () => (uiStep = 1), recipientsOk ? '' : capError ? 'Up to 100 USDC per send.' : parsed.rejected.length ? `Fix row ${parsed.rejected[0].line} first.` : '')}
         {:else if step === 1}
-          <div class="control-border grid gap-1 p-1 rounded-full" style="grid-template-columns: repeat({picks.length + 1}, minmax(0, 1fr))" role="radiogroup" aria-label="Claim deadline">
-            {#each [...picks, 'date' as const] as p (p)}
-              <label
-                class="flex items-center justify-center min-h-10 whitespace-nowrap text-sm font-medium rounded-full px-2 cursor-pointer transition-colors has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-zen-fg
-                  {pick === p ? 'bg-zen-fg text-zen-bg' : 'text-zen-fg-muted hover:text-zen-fg'}"
-              >
-                <input class="sr-only" type="radio" name="pick" value={p} checked={pick === p} onchange={() => choose(p)} />{#if p === 'date'}<span class="sm:hidden">Date</span><span class="hidden sm:inline">Pick a date</span>{:else}{pickLabel(p)}{/if}
-              </label>
-            {/each}
-          </div>
-          {#if pick === 'date'}
-            <label for="deadline" class="sr-only">Claim deadline</label>
-            <input id="deadline" type="datetime-local" bind:value={deadline} disabled={!!draft} aria-describedby="deadline-note" class="control-border w-full sm:w-auto min-h-11 rounded-[var(--zen-radius-input)] bg-transparent px-4 py-3 text-sm" />
-          {/if}
-          <div id="deadline-note">
-            {#if minMs !== null && deadline && !deadlineOk}
-              <Note tone="error">Pick a time after {shortWhen(minMs)}.</Note>
-            {:else if Number.isFinite(deadlineMs)}
-              <!-- What happens: a two-line timeline on a hairline rule -->
-              <ol class="flex flex-col gap-2 pl-4 border-l-[0.5px] border-zen-border text-sm">
-                <li><span class="font-medium">Until {shortWhen(deadlineMs)}:</span> <span class="text-zen-fg-muted">only the people on your list can claim.</span></li>
-                <li><span class="font-medium">After that:</span> <span class="text-zen-fg-muted">you can take back what's left, from Campaigns.</span></li>
-              </ol>
-              <p class="mt-3 text-xs text-zen-fg-muted">Your time zone ({zoneName(deadlineMs)}){previewLeft ? ` · ${previewLeft}` : ''}. Fixed once you send.</p>
+          {@render stepHeader('Deadline', 'Until then, only your list can claim.')}
+          <div class="flex flex-col gap-3">
+            <!-- Zarf pills (create VestingDurationPicker), radiogroup keys kept -->
+            <div class="flex flex-wrap items-center gap-2" role="radiogroup" aria-label="Claim deadline" tabindex="-1" onkeydown={pickKey}>
+              {#each [...picks, 'date' as const] as p (p)}
+                <ZenButton
+                  variant={pick === p ? 'primary' : 'ghost'}
+                  size="sm"
+                  class="px-3 rounded-full text-xs font-medium"
+                  role="radio"
+                  aria-checked={pick === p}
+                  tabindex={pick === p ? 0 : -1}
+                  data-pick={p}
+                  onclick={() => choose(p)}
+                >{p === 'date' ? 'Pick Date' : pickLabel(p)}</ZenButton>
+              {/each}
+            </div>
+            {#if pick === 'date'}
+              <label for="deadline" class="sr-only">Claim deadline</label>
+              <input id="deadline" type="datetime-local" bind:value={deadline} disabled={!!draft} aria-describedby="deadline-note" class="control-border w-full sm:w-auto rounded-[var(--zen-radius-input)] bg-transparent px-4 py-3 text-sm" />
             {/if}
+            <div id="deadline-note">
+              {#if minMs !== null && deadline && !deadlineOk}
+                <Note tone="error">Pick a time after {shortWhen(minMs)}.</Note>
+              {:else if Number.isFinite(deadlineMs)}
+                <div class="grid grid-cols-1 gap-3 pt-2" title="Your time zone ({zoneName(deadlineMs)}). Fixed once you send.">
+                  {@render ledgerRow('Claims Close', `${shortWhen(deadlineMs)} ${zoneName(deadlineMs)}`)}
+                  {@render ledgerRow('Then', 'You take back the rest')}
+                </div>
+              {/if}
+            </div>
           </div>
-          <Term q="Does it come back by itself?">No. After the deadline you take it back yourself, in Campaigns. Until you do, it stays in the Zarf contract.</Term>
           {@render actions(true, 'Continue', deadlineOk, () => (uiStep = 2))}
         {:else if step === 2}
-          <p class="text-sm">Your NEAR wallet holds your {UNIT} and asks you before anything moves.</p>
+          {@render stepHeader('Wallet', account ? '' : 'It pays for this send.')}
           {#if !account}
             {#if TESTNET}
-              <!-- What you need, in order (numbered like Zarf's pipeline, hairlines, no boxes) -->
-              <ol class="flex flex-col border-y-[0.5px] border-zen-border-subtle text-sm">
-                <li class="flex gap-3 py-3 border-b-[0.5px] border-zen-border-subtle">
-                  <span class="font-mono text-[11px] text-zen-fg-muted pt-0.5">01</span>
-                  <span class="flex flex-col gap-0.5">
-                    <span class="font-medium">A NEAR testnet account</span>
-                    <a href="https://docs.near.org/getting-started/create-account" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 self-start text-zen-fg-muted underline underline-offset-2 hover:text-zen-fg">Create one in a NEAR wallet<ArrowUpRight class="w-3.5 h-3.5" aria-hidden="true" /></a>
-                  </span>
-                </li>
-                <li class="flex gap-3 py-3 border-b-[0.5px] border-zen-border-subtle">
-                  <span class="font-mono text-[11px] text-zen-fg-muted pt-0.5">02</span>
-                  <span class="flex flex-col gap-0.5">
-                    <span class="font-medium">Test USDC in it</span>
-                    <a href="https://faucet.circle.com" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 self-start text-zen-fg-muted underline underline-offset-2 hover:text-zen-fg">Get free test USDC from Circle<ArrowUpRight class="w-3.5 h-3.5" aria-hidden="true" /></a>
-                    <span class="text-xs text-zen-fg-muted">On Circle's page choose NEAR Testnet and paste your account name.</span>
-                  </span>
-                </li>
-                <li class="flex gap-3 py-3">
-                  <span class="font-mono text-[11px] text-zen-fg-muted pt-0.5">03</span>
-                  <span class="flex flex-col gap-0.5">
-                    <span class="font-medium">A little test NEAR in it, for storage and network fees</span>
-                    <a href={TEST_NEAR_URL} target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 self-start text-zen-fg-muted underline underline-offset-2 hover:text-zen-fg">Get free test NEAR<ArrowUpRight class="w-3.5 h-3.5" aria-hidden="true" /></a>
-                  </span>
-                </li>
-              </ol>
+              <div class="flex flex-wrap gap-2">
+                <ZenButton variant="ghost" size="sm" href="https://wallet.meteorwallet.app" target="_blank" rel="noopener noreferrer">Get a NEAR Account{#snippet iconRight()}<ArrowUpRight class="w-3.5 h-3.5" />{/snippet}</ZenButton>
+                <Tooltip text="On Circle's page choose NEAR Testnet and paste your account name." position="bottom">
+                  <ZenButton variant="ghost" size="sm" href="https://faucet.circle.com" target="_blank" rel="noopener noreferrer">Get Test USDC{#snippet iconRight()}<ArrowUpRight class="w-3.5 h-3.5" />{/snippet}</ZenButton>
+                </Tooltip>
+                <ZenButton variant="ghost" size="sm" href={TEST_NEAR_URL} target="_blank" rel="noopener noreferrer">Get Test NEAR{#snippet iconRight()}<ArrowUpRight class="w-3.5 h-3.5" />{/snippet}</ZenButton>
+              </div>
             {/if}
-            <Term q="What is a NEAR wallet?">NEAR is the network this runs on. A NEAR wallet such as Meteor, Intear or Nightly connects here. It holds your {UNIT} and the NEAR that pays for storage and fees.</Term>
-            {@render actions(true, 'Connect a NEAR wallet', walletReady, connect, 'This shares your account name. Nothing moves until you send.')}
+            {@render actions(true, 'Connect Wallet', walletReady, connect, 'This shares your account name. Nothing moves until you send.')}
           {:else}
             {@render accountRow()}
             <!-- Have versus need (Zarf's DeployStep3Connect), for the test USDC and for the NEAR; then one verdict -->
-            <div class="grid grid-cols-2 gap-x-4 gap-y-5 py-2">
-              {@render figure('You have', balance !== null ? formatAmount(BigInt(balance)) : '…', UNIT, balance === null)}
-              {@render figure('This send', formatAmount(parsed.total), UNIT)}
-              {@render figure('You have', nearHave !== null ? formatNear(nearHave.toString()) : '…', 'NEAR', nearHave === null)}
-              {@render figure('Needs free to start', nearNeed !== null ? nearUp(nearNeed) : '…', 'NEAR', nearNeed === null)}
+            <div class="grid grid-cols-2 gap-x-4 gap-y-5">
+              {@render figure('You Have', balance !== null ? formatAmount(BigInt(balance)) : '…', UNIT, balance === null)}
+              {@render figure('This Send', formatAmount(parsed.total), UNIT)}
+              {@render figure('You Have', nearHave !== null ? sig3(nearHave) : '…', 'NEAR', nearHave === null, nearHave !== null ? formatNear(nearHave.toString()) : '')}
+              {@render figure('Needs Free', nearNeed !== null ? sig3(nearNeed, true) : '…', 'NEAR', nearNeed === null, nearNeed !== null ? formatNear(nearNeed.toString()) : '')}
             </div>
-            <div class="flex flex-col gap-1">
+            <div class="flex flex-col gap-2">
               {#if balanceFailed && balance === null}
                 <div class="flex flex-wrap items-center justify-between gap-x-3">
                   <Note tone="error">Couldn't read your {UNIT} balance. Nothing was sent.</Note>
-                  <ZenButton variant="ghost" size="sm" class="rounded-full min-h-11 !text-zen-fg" onclick={() => balanceTick++}>Check again</ZenButton>
+                  <ZenButton variant="ghost" size="sm" onclick={() => balanceTick++}>Check Again</ZenButton>
                 </div>
               {:else if short > 0n}
                 <div class="flex flex-wrap items-center justify-between gap-x-3">
                   <Note tone="error">{formatAmount(short)} {UNIT} short.</Note>
                   <span class="flex items-center gap-1">
-                    {#if TESTNET}<a href="https://faucet.circle.com" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 min-h-11 px-2 text-sm underline underline-offset-2 hover:text-zen-fg">Get test USDC<ArrowUpRight class="w-3.5 h-3.5" aria-hidden="true" /></a>{/if}
-                    <ZenButton variant="ghost" size="sm" class="rounded-full min-h-11 !text-zen-fg" onclick={() => balanceTick++}>Check again</ZenButton>
+                    {#if TESTNET}<ZenButton variant="ghost" size="sm" href="https://faucet.circle.com" target="_blank" rel="noopener noreferrer">Get Test USDC{#snippet iconRight()}<ArrowUpRight class="w-3.5 h-3.5" />{/snippet}</ZenButton>{/if}
+                    <ZenButton variant="ghost" size="sm" onclick={() => balanceTick++}>Check Again</ZenButton>
                   </span>
                 </div>
               {/if}
@@ -1009,20 +969,16 @@
                 <div class="flex flex-wrap items-center justify-between gap-x-3">
                   <Note tone="error">About {nearUp(nearShort)} NEAR short, for storage and the network fee.</Note>
                   <span class="flex items-center gap-1">
-                    {#if TESTNET}<a href={TEST_NEAR_URL} target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 min-h-11 px-2 text-sm underline underline-offset-2 hover:text-zen-fg">Get test NEAR<ArrowUpRight class="w-3.5 h-3.5" aria-hidden="true" /></a>{/if}
-                    <ZenButton variant="ghost" size="sm" class="rounded-full min-h-11 !text-zen-fg" onclick={() => balanceTick++}>Check again</ZenButton>
+                    {#if TESTNET}<ZenButton variant="ghost" size="sm" href={TEST_NEAR_URL} target="_blank" rel="noopener noreferrer">Get Test NEAR{#snippet iconRight()}<ArrowUpRight class="w-3.5 h-3.5" />{/snippet}</ZenButton>{/if}
+                    <ZenButton variant="ghost" size="sm" onclick={() => balanceTick++}>Check Again</ZenButton>
                   </span>
                 </div>
               {/if}
               {#if nearNeed !== null}
-                <p class="text-xs text-zen-fg-muted">Needs about {nearUp(nearNeed)} NEAR free to start; most comes back. The network fee itself is {feeMax !== null ? `at most ${nearUp(feeMax)}` : 'a small amount of'} NEAR{storageShort ? ', plus storage' : ''}.</p>
+                <p class="text-xs text-zen-fg-subtle">Most of the NEAR comes back. Network fee {feeMax !== null ? `at most ${sig3(feeMax, true)}` : 'a small amount of'} NEAR{storageShort ? ', plus storage' : ''}.</p>
               {/if}
-              {#if balance !== null && short === 0n}
-                {#if nearHave !== null && nearNeed !== null && nearShort === 0n}
-                  <Note tone="success">Enough {UNIT} and NEAR to send.</Note>
-                {:else if !(nearShort > 0n)}
-                  <Note tone="success">Enough {UNIT}.</Note>
-                {/if}
+              {#if balance !== null && short === 0n && (nearHave !== null && nearNeed !== null ? nearShort === 0n : !(nearShort > 0n))}
+                <p class="flex items-center gap-2 text-sm text-zen-fg" role="status"><CheckCircle2 class="w-4 h-4 text-zen-success shrink-0" aria-hidden="true" />Ready to send</p>
               {/if}
             </div>
             {@render actions(true, 'Continue', ready && short === 0n && balance !== null, prepare, balance === null && balanceFailed ? 'Check your balance first.' : '')}
@@ -1030,101 +986,88 @@
         {:else}
           {@const d = draft!}
           {@const n = BigInt(d.recipients.length)}
-          <!-- 1. Who gets what. Full addresses: this is where the sender checks them. -->
-          <div class="flex flex-col gap-2">
-            <h2 class="text-sm"><span class="font-semibold">{people(d.recipients.length)} get</span> <span class="font-semibold tabular-nums">{formatAmount(BigInt(d.total))}</span> <span class="text-xs font-medium uppercase tracking-widest text-zen-primary">{UNIT}</span></h2>
-            <ul class="flex flex-col text-sm border-y-[0.5px] border-zen-border-subtle max-h-64 overflow-auto">
-              {#each d.recipients as r (r.commitment)}
-                <li class="flex items-start justify-between gap-3 py-2.5 border-b-[0.5px] border-zen-border-subtle last:border-b-0">
-                  <span class="break-all min-w-0">{r.email}</span><span class="shrink-0 whitespace-nowrap tabular-nums text-zen-fg-muted">{formatAmount(BigInt(r.amount))} <span class="text-[10px] uppercase tracking-widest">{UNIT}</span></span>
-                </li>
-              {/each}
-            </ul>
-            {#if !pinned}<ZenButton variant="ghost" size="sm" class="rounded-full min-h-11 self-start -ml-4 !text-zen-fg" onclick={() => ((draft = null), (uiStep = 0))} disabled={!!busy}>Edit</ZenButton>{/if}
+          {@render stepHeader('Review', 'Check it once. A send cannot be undone.')}
+          <!-- One DeploymentSummary card (Zarf create deploy/DeploymentSummary.svelte) -->
+          <ZenCard variant="elevated" class="overflow-hidden !p-0">
+            <div class="p-4 bg-zen-bg-elevated border-b border-zen-border-subtle flex justify-between items-center gap-3">
+              <h2 class="font-bold text-sm uppercase tracking-wider text-zen-fg-subtle">Summary</h2>
+              <Tooltip text="Emails never go on chain. Our verifier sees each one once, when that person claims." position="left">
+                <button type="button" class="inline-flex items-center justify-center w-6 h-6 rounded-full text-zen-fg-subtle hover:text-zen-fg" aria-label="Who sees the emails: emails never go on chain. Our verifier sees each one once, when that person claims."><Info class="w-3.5 h-3.5" aria-hidden="true" /></button>
+              </Tooltip>
+            </div>
+            <div class="p-6 grid grid-cols-1 gap-6">
+              <div>
+                <div class="text-xs font-semibold uppercase text-zen-fg-subtle mb-1">Asset</div>
+                <div class="flex items-center gap-2">
+                  <img src="/tokens/usdc.svg" alt="" class="w-8 h-8 rounded-full" />
+                  <div class="min-w-0">
+                    <div class="font-bold text-lg">{UNIT}</div>
+                    {#if token}
+                      <div class="flex items-center gap-1 text-xs font-mono text-zen-fg-subtle">
+                        {#if explorerAccount}<a href="{explorerAccount}{token}" target="_blank" rel="noopener noreferrer" class="hover:text-zen-fg" title={token}>{token.slice(0, 6)}…{token.slice(-4)}</a>{:else}<span title={token}>{token.slice(0, 6)}…{token.slice(-4)}</span>{/if}
+                        <CopyButton value={token} label="Copy token id" />
+                      </div>
+                    {/if}
+                  </div>
+                </div>
+              </div>
+              <div>
+                <div class="text-xs font-semibold uppercase text-zen-fg-subtle mb-1">Total Allocation</div>
+                <div class="text-xl font-bold tabular-nums">{formatAmount(BigInt(d.total))} <span class="text-sm font-normal text-zen-fg-subtle">{UNIT}</span></div>
+                <div class="text-xs text-zen-fg-subtle">{d.recipients.length} {d.recipients.length === 1 ? 'Recipient' : 'Recipients'}</div>
+              </div>
+              <ul class="divide-y divide-zen-border-subtle border-y border-zen-border-subtle max-h-64 overflow-auto text-sm">
+                {#each d.recipients as r (r.commitment)}
+                  <li class="flex items-center gap-2 py-2">
+                    <EmailMark email={r.email} /><span class="flex-1 min-w-0 break-all">{r.email}</span><span class="shrink-0 whitespace-nowrap tabular-nums text-zen-fg-muted">{formatAmount(BigInt(r.amount))}</span>
+                  </li>
+                {/each}
+              </ul>
+              {#if !pinned}<ZenButton variant="ghost" size="sm" class="justify-self-start -mt-3" onclick={() => ((draft = null), (uiStep = 0))} disabled={!!busy}>Edit</ZenButton>{/if}
+              <div class="border-t border-zen-border-subtle pt-4 grid grid-cols-1 gap-4">
+                {@render ledgerRow('Claims Close', `${shortWhen(deadlineMs)} ${zoneName(deadlineMs)}`)}
+                {#if storageShort === null}
+                  {@render ledgerRow('Storage', 'checking…')}
+                {:else if costs && perClaim !== null && freePrepay !== null}
+                  {@render ledgerRow(
+                    'Storage',
+                    storageShort > 0n ? `≈ ${sig3(storageShort, true)} NEAR` : 'From your Zarf balance',
+                    `Up to ${nearUp(BigInt(costs.campaign_bytes_cost))} NEAR records this send; ${formatNear((n * perClaim).toString())} NEAR is held for the links (${formatNear(perClaim.toString())} each) and comes back for links nobody claims. Zarf balance now: ${formatNear(freePrepay.toString())} NEAR.`,
+                  )}
+                {/if}
+                {@render ledgerRow('Network Fee', feeMax !== null ? `≤ ${sig3(feeMax, true)} NEAR` : 'a little NEAR')}
+              </div>
+              <p class="text-[11px] text-zen-fg-subtle">Unclaimed {UNIT} returns via Campaigns after the deadline.{#if !TESTNET}{' '}{CIRCLE_LINE}{/if}</p>
+            </div>
+          </ZenCard>
+
+          {@render nameField()}
+
+          <!-- Backup: the checkbox appears only once the file was saved (Zarf's DeployStep2Backup order) -->
+          <div class="flex flex-wrap items-center justify-between gap-3" title="It rebuilds every link if this tab closes. It lists every email: keep it private.">
+            {#if recoverySaved}<ZenCheckbox bind:checked={recoveryAck} disabled={phase > 0} label="I Saved the Backup" />{:else}<span class="text-sm text-zen-fg-muted">Backup of every link</span>{/if}
+            <ZenButton variant="ghost" size="sm" onclick={saveRecovery} disabled={phase > 0}>{#snippet iconLeft()}<Download class="w-3.5 h-3.5" />{/snippet}{recoverySaved ? 'Download Again' : 'Download Backup'}</ZenButton>
           </div>
 
-          <!-- 2. Leaves your wallet: only what actually leaves it -->
-          <section class="flex flex-col gap-2" aria-labelledby="leaves-h">
-            <h2 id="leaves-h" class="text-[11px] font-medium uppercase tracking-[0.15em] text-zen-fg-muted">Leaves your wallet{#if account}<span class="normal-case tracking-normal font-mono">&nbsp;·&nbsp;{account}</span>{/if}</h2>
-            <dl class="flex flex-col text-sm border-y-[0.5px] border-zen-border-subtle">
-              <div class="flex flex-col sm:flex-row sm:items-baseline gap-x-4 py-2.5 border-b-[0.5px] border-zen-border-subtle">
-                <dt class="sm:w-36 shrink-0 font-semibold tabular-nums whitespace-nowrap">{formatAmount(BigInt(d.total))} <span class="text-[10px] uppercase tracking-widest">{UNIT}</span></dt>
-                <dd class="text-zen-fg-muted">held by the Zarf contract until each person claims</dd>
-              </div>
-              {#if storageShort === null}
-                <div class="flex flex-col sm:flex-row sm:items-baseline gap-x-4 py-2.5 border-b-[0.5px] border-zen-border-subtle">
-                  <dt class="sm:w-36 shrink-0 font-semibold">NEAR for storage</dt><dd class="text-zen-fg-muted">checking…</dd>
-                </div>
-              {:else if storageShort > 0n}
-                <div class="flex flex-col sm:flex-row sm:items-baseline gap-x-4 py-2.5 border-b-[0.5px] border-zen-border-subtle">
-                  <dt class="sm:w-36 shrink-0 font-semibold tabular-nums whitespace-nowrap">{nearUp(storageShort)} <span class="text-[10px] uppercase tracking-widest">NEAR</span></dt>
-                  <dd class="text-zen-fg-muted">into your Zarf balance, which pays for storing this send on NEAR</dd>
-                </div>
-              {/if}
-              <div class="flex flex-col sm:flex-row sm:items-baseline gap-x-4 py-2.5">
-                <dt class="sm:w-36 shrink-0 font-semibold">Network fee</dt>
-                <dd class="text-zen-fg-muted">{feeMax !== null ? `at most ${nearUp(feeMax)} NEAR at today's gas price` : 'a small amount of NEAR'}</dd>
-              </div>
-            </dl>
-          </section>
-
-          <!-- 3. The NEAR for storage, in the sender's own words: used, held, and from where -->
-          {#if storageShort !== null && costs && perClaim !== null && freePrepay !== null}
-            <section class="flex flex-col gap-2" aria-labelledby="storage-h">
-              <h2 id="storage-h" class="text-[11px] font-medium uppercase tracking-[0.15em] text-zen-fg-muted">Storage on NEAR</h2>
-              <ul class="flex flex-col gap-1.5 text-sm">
-                <li>Up to {nearUp(BigInt(costs.campaign_bytes_cost))} NEAR is used up to record this send.</li>
-                <li>{formatNear((n * perClaim).toString())} NEAR is held for the links, {formatNear(perClaim.toString())} each. A claim uses its link's share.</li>
-                <li class="text-zen-fg-muted">
-                  {#if storageShort === 0n}Both come from your Zarf balance ({formatNear(freePrepay.toString())} NEAR now), so no NEAR leaves your wallet for storage.
-                  {:else if freePrepay > 0n}Your Zarf balance had {formatNear(freePrepay.toString())} NEAR, so only the rest comes from your wallet.
-                  {:else}What isn't used stays in your Zarf balance.{/if}
-                </li>
-              </ul>
-              <Term q="What is my Zarf balance?">NEAR you keep at the Zarf contract to pay for storage. Each send draws on it; whatever is left is yours. You withdraw it to your wallet in Campaigns.</Term>
-            </section>
-          {/if}
-
-          <!-- 4. Comes back to you: what, where, and who acts -->
-          <section class="flex flex-col gap-2" aria-labelledby="back-h">
-            <h2 id="back-h" class="text-[11px] font-medium uppercase tracking-[0.15em] text-zen-fg-muted">Comes back to you</h2>
-            <p class="text-sm">After {shortWhen(deadlineMs)}, nothing comes back by itself. In Campaigns you take back:</p>
-            <ul class="flex flex-col gap-1.5 pl-4 border-l-[0.5px] border-zen-border text-sm">
-              <li>the {UNIT} nobody claimed, <span class="text-zen-fg-muted">to your wallet;</span></li>
-              {#if perClaim !== null}
-                <li>up to {formatNear((n * perClaim).toString())} NEAR, {formatNear(perClaim.toString())} for each link nobody claimed, <span class="text-zen-fg-muted">to your Zarf balance. You can withdraw it to your wallet there.</span></li>
-              {/if}
-            </ul>
-            <Term q="Can I cancel after sending?">No. Before the deadline only the people on your list can claim. After it, you take back what's left.</Term>
-          </section>
-
-          <!-- 5. Backup: the checkbox appears only once the file was saved (Zarf's DeployStep2Backup order) -->
-          <section class="flex flex-col gap-2" aria-labelledby="backup-h">
-            <h2 id="backup-h" class="text-[11px] font-medium uppercase tracking-[0.15em] text-zen-fg-muted">Backup</h2>
-            <p class="text-sm text-zen-fg-muted">It rebuilds every link if this tab closes. It lists every email: keep it private.</p>
-            <ZenButton variant="secondary" size="sm" class="rounded-full self-start min-h-11" onclick={saveRecovery} disabled={phase > 0}>{recoverySaved ? 'Save it again' : 'Save the backup file'}</ZenButton>
-            {#if recoverySaved}<ZenCheckbox bind:checked={recoveryAck} disabled={phase > 0} label="I saved it somewhere private" />{/if}
-          </section>
-
-          <!-- 6. Send. Every sub-state in Zarf's alert, each answering "where is my money?" in plain words, with one thing to do. -->
+          <!-- Send. Every sub-state in Zarf's alert, each answering "where is my money?" in plain words, with one thing to do. -->
           {#if wrongAccount}
             {@render wrongAccountAlert()}
           {:else if txState === 'mismatch'}
             <ZenAlert variant="error">
-              {#snippet title()}Don't use these links{/snippet}
+              {#snippet title()}Don't Use These Links{/snippet}
               Zarf already holds a different send under them, so they can't work. Check Campaigns for what you sent, then make new links.
             </ZenAlert>
             <div class="flex flex-wrap items-center gap-3">
-              <ZenButton variant="primary" class="rounded-full min-h-11" onclick={startOver}>Make new links</ZenButton>
-              <ZenButton href="/campaigns" variant="ghost" class="rounded-full min-h-11 !text-zen-fg">Open Campaigns</ZenButton>
+              <ZenButton variant="primary" onclick={startOver}>Make New Links</ZenButton>
+              <ZenButton href="/campaigns" variant="ghost">Open Campaigns</ZenButton>
             </div>
           {:else if txState === 'unclear'}
             <ZenAlert variant="warning">
-              {#snippet title()}Don't send again yet{/snippet}
+              {#snippet title()}Don't Send Again Yet{/snippet}
               Your {UNIT} is either held by Zarf or on its way back to your wallet; this send didn't make the links. Check again in a few minutes.
             </ZenAlert>
             <div class="flex flex-wrap items-center gap-4">
-              <ZenButton variant="primary" class="rounded-full min-h-11" onclick={recheck} disabled={!!busy}>Check again</ZenButton>
+              <ZenButton variant="primary" onclick={recheck} disabled={!!busy}>Check Again</ZenButton>
               <span class="text-zen-fg-muted">{@render explorerLink(sentTx ?? '')}</span>
             </div>
           {:else}
@@ -1132,21 +1075,20 @@
               <ZenAlert variant="error">
                 {#snippet title()}{errorTitle}{/snippet}
                 {error}{#if errorTitle.startsWith('Not sent') && storageShort !== null && storageShort > 0n}{' '}Any NEAR it added for storage stays in your Zarf balance for your next send; you can withdraw it in Campaigns.{/if}
-                {#snippet actions()}{#if deadlineFix}<ZenButton variant="primary" size="sm" class="rounded-full min-h-11" onclick={() => ((draft = null), (uiStep = 1), (error = errorTitle = errorCode = ''))}>Change the deadline</ZenButton>{/if}{/snippet}
+                {#snippet actions()}{#if deadlineFix}<ZenButton variant="primary" size="sm" onclick={() => ((draft = null), (uiStep = 1), (error = errorTitle = errorCode = ''))}>Change Deadline</ZenButton>{/if}{/snippet}
               </ZenAlert>
             {/if}
-            <div class="mt-4 pt-6 border-t-[0.5px] border-zen-border-subtle flex flex-col gap-2">
+            <!-- Zarf's action bar -->
+            <div class="mt-4 pt-6 border-t border-zen-border-subtle flex flex-col gap-2">
               {#if !TESTNET}<Note tone="info">Real USDC. Check the amounts.</Note>{/if}
               <div class="flex items-center {pinned ? 'justify-end' : 'justify-between'} gap-3">
-                {#if !pinned}<ZenButton variant="ghost" class="rounded-full min-h-11 !text-zen-fg -ml-6" onclick={() => (draft = null)} disabled={!!busy}>Back</ZenButton>{/if}
-                <ZenButton variant={deadlineFix ? 'secondary' : 'primary'} class="rounded-full min-h-11" disabled={!!sendBlocker || phase > 0} onclick={create}>Send {formatAmount(BigInt(d.total))} {UNIT}</ZenButton>
+                {#if !pinned}<ZenButton variant="ghost" onclick={() => (draft = null)} disabled={!!busy}>Back</ZenButton>{/if}
+                <ZenButton variant={deadlineFix ? 'secondary' : 'primary'} size="lg" class="px-8" disabled={!!sendBlocker || phase > 0} onclick={create}>Send {formatAmount(BigInt(d.total))} {UNIT}</ZenButton>
               </div>
               {#if phase === 0 && sendBlocker.trim()}
                 <p class="text-xs text-zen-fg-muted text-right ml-auto max-w-60">{sendBlocker}</p>
-              {:else if phase === 0}
-                <p class="text-xs text-zen-fg-muted text-right ml-auto max-w-sm">
-                  Your wallet opens for your approval.{txCount === 2 ? ` This send is 2 transactions: NEAR for storage, then the ${UNIT}.` : txCount === 1 ? ` This send is 1 transaction: the ${UNIT}.` : ''}
-                </p>
+              {:else if phase === 0 && txCount}
+                <p class="text-xs text-zen-fg-subtle text-right ml-auto">{txCount === 2 ? 'Two wallet approvals.' : 'One wallet approval.'}</p>
               {/if}
             </div>
             {#if phase > 0}{@render pipeline()}{/if}
@@ -1155,50 +1097,56 @@
                 {#snippet title()}Checking with NEAR{/snippet}
                 Your send may have gone out: your {UNIT} is either in your wallet or held by Zarf. Don't send again until this check finishes.
               </ZenAlert>
-              <ZenButton variant="secondary" class="rounded-full self-start min-h-11" onclick={recheck}>Check again</ZenButton>
+              <ZenButton variant="secondary" class="self-start" onclick={recheck}>Check Again</ZenButton>
             {:else if txState === 'settling'}
               <ZenAlert variant="warning">
-                {#snippet title()}Making sure nothing was sent twice{/snippet}
+                {#snippet title()}Making Sure Nothing Was Sent Twice{/snippet}
                 The last try was refunded to your wallet. One more check in about 90 seconds, in case an earlier try went through.
               </ZenAlert>
             {/if}
           {/if}
+          {#if previewEmail}
+            <!-- Phones: the message after the action bar, one tap away; desktop shows it in the right column -->
+            <details class="lg:hidden group text-sm">
+              <summary class="inline-flex items-center gap-1.5 py-1 cursor-pointer list-none text-zen-fg-muted hover:text-zen-fg">Preview Message <ChevronDown class="w-3.5 h-3.5 transition-transform group-open:rotate-180" aria-hidden="true" /></summary>
+              <div class="mt-3">{@render messageCard(previewEmail, message(d.recipients[0], `${claimHost}/claim/…`))}</div>
+            </details>
+          {/if}
         {/if}
 
         {#if error && step !== 3}<Note tone="error">{error}</Note>{/if}
-        {#if step < 3}{@render emailsNote()}{/if}
       </section>
 
       {#if step < 3}
-        <!-- What the first recipient will see: the claim card in miniature, in the order they act (account, then Google).
-             Beside the form on desktop, below it on phones -->
-        <aside class="w-full lg:flex-1 lg:sticky lg:top-24 min-w-0" aria-label="Preview of a claim">
-          <p class="mb-4 ml-1 text-[11px] font-medium uppercase tracking-[0.15em] text-zen-fg-muted truncate">{#if previewEmail}What <span class="normal-case tracking-normal text-xs">{previewEmail}</span> sees{:else}What they see{/if}</p>
-          <ZenCard variant="elevated" padding="lg">
-            <div class="flex flex-col items-center text-center gap-4 {parsed.rows.length ? '' : 'opacity-50'}" aria-hidden="true">
-              <Medallion icon={Mail} />
-              <Amount label="Waiting for you" value={previewAmount} unit={UNIT} />
-              <span class="text-xs text-zen-fg-muted">From {#if account}<span class="font-mono">{account}</span>{:else}you{/if}{#if previewLeft}{' · '}{previewLeft}{/if}</span>
-              <!-- The landing's step 02 scene: their NEAR account first, then Google -->
-              <div class="w-full max-w-[240px] flex flex-col items-center gap-2.5">
-                <div class="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg border-[0.5px] border-zen-border">
-                  <span class="text-xs font-mono text-zen-fg-muted">{TESTNET ? 'their-name.testnet' : 'their-name.near'}</span>
-                  <span class="text-[11px] text-zen-fg-muted">their account</span>
+        <!-- Live Preview (Zarf create step-1:330-345): what the first recipient will see, the claim card in miniature -->
+        <aside class="w-full min-w-0 lg:flex-1 lg:max-w-2xl lg:sticky lg:top-24" aria-label="Preview of a claim">
+          <div class="flex items-center gap-2 mb-4 text-xs font-semibold uppercase tracking-wider text-zen-fg-subtle ml-1"><Eye class="w-3.5 h-3.5" aria-hidden="true" /> Live Preview</div>
+          <ZenCard variant="elevated" class="!rounded-3xl !p-6 sm:!p-8">
+            <div class="space-y-8 {parsed.rows.length ? '' : 'opacity-50'}" aria-hidden="true">
+              <div class="flex items-start gap-4">
+                <div class="w-12 h-12 rounded-full bg-zen-primary/10 text-zen-primary flex items-center justify-center shrink-0"><Mail class="w-6 h-6" /></div>
+                <div class="min-w-0">
+                  <div class="text-xl font-semibold">{TESTNET ? 'Claim Your Test USDC' : 'Claim Your USDC'}</div>
+                  <div class="text-sm text-zen-fg-muted font-light mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span class="inline-flex items-center gap-1.5 min-w-0">{#if account}<Avatar name={account} /><span class="font-mono truncate">{account}</span>{:else}From you{/if}</span>
+                    {#if previewLeft}<span class="tabular-nums whitespace-nowrap">{previewLeft}</span>{/if}
+                  </div>
                 </div>
-                <img src={themeStore.isDark ? '/google/signin-dark.svg' : '/google/signin-light.svg'} alt="" width="175" height="40" />
               </div>
+              <AmountPanel label="Claim Amount" value={previewAmount} unit={UNIT} />
+              <div class="space-y-3">
+                <div class="pl-1 text-xs font-bold uppercase tracking-widest text-zen-fg-subtle">NEAR Account</div>
+                <div class="rounded-[var(--zen-radius-input)] border-[0.5px] border-zen-border px-4 py-3 text-zen-fg-subtle">{TESTNET ? 'their-name.testnet' : 'their-name.near'}</div>
+              </div>
+              <div class="flex items-center justify-center rounded-full bg-zen-fg text-zen-bg text-sm font-medium h-11"><GoogleG />Sign in with Google</div>
             </div>
           </ZenCard>
-          <p class="mt-3 ml-1 text-xs text-zen-fg-muted">{TESTNET ? 'They choose a NEAR account, then sign in with Google.' : "They choose a NEAR account or another chain's address, then sign in with Google."}</p>
         </aside>
-      {:else}
-        <aside class="w-full lg:flex-1 lg:sticky lg:top-24 min-w-0" aria-label="Preview of the message">
-          {#if previewEmail && draft}
-            {@render nameField()}
-            <p class="mb-4 ml-1 text-[11px] font-medium uppercase tracking-[0.15em] text-zen-fg-muted truncate">What <span class="normal-case tracking-normal text-xs">{previewEmail}</span> gets</p>
-            {@render messageCard(previewEmail, message(draft.recipients[0], `${claimHost}/claim/…`), 'Each person gets their own link after you send.')}
-          {/if}
-          {@render emailsNote()}
+      {:else if previewEmail && draft}
+        <aside class="hidden lg:block w-full min-w-0 lg:flex-1 lg:max-w-2xl lg:sticky lg:top-24" aria-label="Preview of the message">
+          <div class="flex items-center gap-2 mb-4 text-xs font-semibold uppercase tracking-wider text-zen-fg-subtle ml-1"><Eye class="w-3.5 h-3.5" aria-hidden="true" /> Message Preview</div>
+          {@render messageCard(previewEmail, message(draft.recipients[0], `${claimHost}/claim/…`))}
+          <p class="mt-3 ml-1 text-xs text-zen-fg-subtle">Each person gets their own link after you send.</p>
         </aside>
       {/if}
     </div>

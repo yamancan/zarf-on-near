@@ -59,6 +59,8 @@ export function checkGrid(rows: readonly GridRow[]): { problems: (RowProblem | n
     firstExact.set(email, line);
     if (account !== null) firstAccount.set(account, line);
     if (!r.amount.trim()) return flag('amount', 'Add an amount');
+    // T-010 review minor 3: "1,000.5" is a thousands comma, not too many decimals.
+    if (/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(r.amount.trim())) return flag('amount', 'Write it without commas, like 1000.5');
     let amount: bigint;
     try {
       amount = parseAmount(r.amount);

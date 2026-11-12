@@ -149,9 +149,18 @@ const fastTimers = (ctx) => ctx.addInitScript(() => { if (!/\/receipt$|\/auth\/g
 const virtualClock = (ctx) => ctx.addInitScript(() => { if (!/\/receipt$|\/auth\/google$/.test(location.pathname)) return; let off = 0; const n = Date.now.bind(Date), st = window.setTimeout; Date.now = () => n() + off; window.setTimeout = (f, ms, ...a) => st(() => { off += ms || 0; f(...a); }, 0); });
 const lateClock = (ctx) => ctx.addInitScript(() => { if (!/\/receipt$|\/auth\/google$/.test(location.pathname)) return; const n = Date.now.bind(Date); Date.now = () => n() + 3_600_000; });
 
-// MyNearWallet's popup: 'ok' posts the tx hash back, 'fail' posts a failure, 'hang' never answers.
-const walletPopup = (ctx, mode) => ctx.route('https://testnet.mynearwallet.com/**', (r) => r.fulfill({ contentType: 'text/html', body:
-  mode === 'hang' ? '<title>MyNearWallet</title>' : `<script>opener.postMessage(${JSON.stringify(mode === 'ok' ? { status: 'success', transactionHashes: TX } : { status: 'failure', errorMessage: 'User rejected the request' })}, '*')</script>` }));
+// NEAR Connect: Meteor's executor (wallets.json) is served by a stub. It signs in as the account set by wallet(ctx)
+// and answers signAndSendTransactions per walletPopup's mode: 'ok' returns TX, 'fail' rejects, 'hang' never answers.
+const stubExecutor = (ctx, o) => ctx.route(/meteor-near-connect-latest\.js/, (r) => r.fulfill({ contentType: 'application/javascript', body: `
+  const acct = ${JSON.stringify(o.id ?? 'sender.testnet')}; const mode = ${JSON.stringify(o.mode ?? 'hang')};
+  window.selector.ready({
+    async signIn() { if (mode === 'fail') throw new Error('User rejected the request'); return [{ accountId: acct, publicKey: '' }]; },
+    async signOut() {},
+    async getAccounts() { return [{ accountId: acct, publicKey: '' }]; },
+    async signAndSendTransactions() { if (mode === 'ok') return [{ transaction: { hash: ${JSON.stringify(TX)} } }]; if (mode === 'fail') throw new Error('User rejected the request'); return new Promise(() => {}); },
+  });` }));
+const walletState = new WeakMap();
+const walletPopup = (ctx, mode) => { const o = walletState.get(ctx) ?? {}; o.mode = mode; walletState.set(ctx, o); return stubExecutor(ctx, o); };
 const ROOT = 'ab'.repeat(32);
 /** The /create recipient grid: Paste List → text → Add to List. */
 const pasteList = async (p, text) => { await p.getByRole('button', { name: 'Paste List' }).click(); await p.fill('#paste-text', text); await p.getByRole('button', { name: 'Add to List' }).click(); };
@@ -165,8 +174,8 @@ const toStep4 = async (p) => {
   await p.getByRole('button', { name: 'Continue' }).click(); await p.getByRole('button', { name: 'Continue' }).click(); await p.waitForTimeout(600);
   await p.getByRole('button', { name: 'Continue' }).click(); await p.waitForTimeout(800);
 };
-const saveBackup = (p) => p.getByRole('button', { name: 'Save the backup file' }).click();
-const ackBackup = async (p) => { await saveBackup(p); await p.getByText('I saved it somewhere private').click(); };
+const saveBackup = (p) => p.getByRole('button', { name: 'Download Backup' }).click();
+const ackBackup = async (p) => { await saveBackup(p); await p.getByText('I Saved the Backup').click(); };
 // /create only: timers 1000x faster, so the 45 s of tx-lookup retries end in a render's wait.
 const fastCreate = (ctx) => ctx.addInitScript(() => { if (location.pathname !== '/create') return; const st = window.setTimeout; window.setTimeout = (f, ms, ...a) => st(f, (ms || 0) / 1000, ...a); });
 const toStep = async (p, n, csv = CSV) => {
@@ -174,16 +183,14 @@ const toStep = async (p, n, csv = CSV) => {
   for (let i = 0; i < n; i++) { await p.getByRole('button', { name: 'Continue' }).click(); await p.waitForTimeout(600); }
   await p.waitForTimeout(400);
 };
-const SEND = 'Send 37.5 test USDC';
-// "Pick a date" reads "Date" at 390: click the radio's label, whatever it shows.
-const pickDate = (p) => p.locator('label:has(input[name="pick"][value="date"])').click();
+const SEND = 'Send 37.5 Test USDC';
+const pickDate = (p) => p.locator('[data-pick="date"]').click();
 
-const wallet = (ctx, id = 'sender.testnet') => ctx.addInitScript((a) => {
-  localStorage.setItem('signedAccountId', a);
-  localStorage.setItem('near-wallet-selector:selectedWalletId', JSON.stringify('my-near-wallet'));
-  localStorage.setItem('near_app_wallet_auth_key', JSON.stringify({ accountId: a, allKeys: [] }));
-  localStorage.setItem('near-wallet-selector:recentlySignedInWallets', JSON.stringify(['my-near-wallet']));
-}, id);
+const wallet = async (ctx, id = 'sender.testnet') => {
+  const o = walletState.get(ctx) ?? {}; o.id = id; walletState.set(ctx, o);
+  await ctx.addInitScript(() => { try { if (window === window.top) localStorage.setItem("selected-wallet", "meteor-wallet"); } catch {} });
+  await stubExecutor(ctx, o);
+};
 
 const heroShown = (p) => p.waitForFunction(() => { const a = [...document.querySelectorAll('a')].find((x) => /Try it with Google/.test(x.textContent)); return a && getComputedStyle(a.parentElement).opacity === '1'; }, null, { timeout: 15000 }).then(() => p.waitForTimeout(200));
 // Without PUBLIC_GOOGLE_CLIENT_ID (row 46): blank the value in the served env, nothing else changes.
@@ -203,7 +210,7 @@ const S = {
   'claim-testnet-detail': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByRole('button', { name: /Who sees the email/ }).focus(); await p.waitForTimeout(400); return { full: true }; },
   'claim-chain-mainnet': async (p) => { await rpc(p, { network: 'mainnet', camp: { sender: 'sender.near' } }); await oneclick(p, 'SUCCESS'); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText('Another Chain', { exact: true }).click(); await p.waitForSelector('#chain'); await p.fill('#addr', EVM); await p.waitForSelector('.quote'); await p.waitForTimeout(300); return { full: true }; },
   // RPC never answers: wait for the app's own checking card, not the boot mark (critic r2 coverage row 23).
-  'claim-checking': async (p) => { await p.route(/fastnear|rpc/, () => {}); await p.goto(base + LINK); await p.getByRole('heading', { name: 'Checking your claim…' }).waitFor({ timeout: 20000 }); await p.waitForTimeout(300); return {}; },
+  'claim-checking': async (p) => { await p.route(/fastnear|rpc/, () => {}); await p.goto(base + LINK); await p.getByRole('heading', { name: 'Checking Claim…' }).waitFor({ timeout: 20000 }); await p.waitForTimeout(300); return {}; },
   // The app's script never arrives: the first paint the recipient sees on a slow phone.
   'boot-opening': async (p) => { await p.route(/\/(src|node_modules|@vite|@fs|\.svelte-kit|@id)\//, (r) => r.abort()); await p.goto(base + LINK, { waitUntil: 'commit' }); await p.waitForSelector('#boot-line'); await p.waitForTimeout(800); return {}; },
   'claim-no-google': async (p) => { await noGoogle(p); await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.fill('#dest', 'alice.testnet'); await yes(p); await yes(p); await p.locator('button.google').click(); await p.waitForTimeout(400); return { full: true }; },
@@ -268,7 +275,7 @@ const S = {
   'receipt-implicit': (p) => nearClaim(p, { dest: IMPLICIT, ack: true }),
   'receipt-reverted': (p) => nearClaim(p, { relayer: 'reverted' }),
   // Virtual time on the receipt: the 60 s settle watch runs out at once, then wait for the card itself (critic r3 coverage).
-  'receipt-unsettled': async (p, ctx) => { await virtualClock(ctx); const o = await nearClaim(p, { relayer: 'submitted', rpc: { claimStateAfterFirst: 'pending' }, wait: 300 }); await p.getByRole('heading', { name: 'Still settling' }).waitFor({ timeout: 30000 }); await p.waitForTimeout(300); return o; },
+  'receipt-unsettled': async (p, ctx) => { await virtualClock(ctx); const o = await nearClaim(p, { relayer: 'submitted', rpc: { claimStateAfterFirst: 'pending' }, wait: 300 }); await p.getByRole('heading', { name: 'Still Settling' }).waitFor({ timeout: 30000 }); await p.waitForTimeout(300); return o; },
   'receipt-wrong-account': (p) => nearClaim(p, { verifierError: 'COMMITMENT_MISMATCH' }),
   'receipt-pending-elsewhere': (p) => nearClaim(p, { verifierError: 'E123_CLAIM_PENDING' }),
   'receipt-failed-final': (p) => nearClaim(p, { verifierError: 'E105_ALREADY_CLAIMED' }),
@@ -278,7 +285,7 @@ const S = {
   'term-claimed-paid': async (p) => { await nearClaim(p); await p.unrouteAll(); await rpc(p, { claimState: 'claimed' }); await p.goto(base + LINK); await p.waitForSelector('h1'); await p.waitForTimeout(500); return {}; },
   'receipt-quote-expired': async (p, ctx) => { await lateClock(ctx); return chainClaim(p, { wait: 1500 }); },
   'receipt-chain-failed': (p) => chainClaim(p, { final: 'FAILED' }),
-  'receipt-chain-stalled': async (p, ctx) => { await fastTimers(ctx); const o = await chainClaim(p, { final: 'PROCESSING', wait: 500 }); await p.getByRole('heading', { name: 'Still on its way to Base' }).waitFor({ timeout: 90000 }); await p.waitForTimeout(300); return o; },
+  'receipt-chain-stalled': async (p, ctx) => { await fastTimers(ctx); const o = await chainClaim(p, { final: 'PROCESSING', wait: 500 }); await p.getByRole('heading', { name: 'Still on Its Way to Base' }).waitFor({ timeout: 90000 }); await p.waitForTimeout(300); return o; },
   // A status we do not treat as final: still processing, polling goes on (round 3 A2).
   'receipt-chain-incomplete': (p) => chainClaim(p, { final: 'INCOMPLETE_DEPOSIT' }),
   // FAILED, Details open: the deposit address the sender gives NEAR Intents support, copyable; no refund promised.
@@ -306,8 +313,8 @@ const S = {
   'create-3-wallet': async (p, ctx) => { await wallet(ctx); await rpc(p); await p.goto(base + '/create'); await p.waitForSelector('[aria-label="Recipient 1 email"]'); await p.waitForTimeout(1500); await pasteList(p, CSV); await p.getByRole('button', { name: 'Continue' }).click(); await p.getByRole('button', { name: 'Continue' }).click(); await p.waitForTimeout(800); return { full: true }; },
   'create-4': async (p, ctx) => { await wallet(ctx); await rpc(p); await p.goto(base + '/create'); await p.waitForSelector('[aria-label="Recipient 1 email"]'); await p.waitForTimeout(1500); await pasteList(p, CSV); await p.getByRole('button', { name: 'Continue' }).click(); await p.getByRole('button', { name: 'Continue' }).click(); await p.getByRole('button', { name: 'Continue' }).click(); await p.waitForTimeout(800); return { full: true }; },
   'create-done': async (p, ctx) => { await funding(ctx, { txHash: 'H', campaignId: '12' }); await rpc(p, { claimBy: { ['0'.repeat(64)]: 'claimed', ['2'.repeat(64)]: 'pending' } }); await p.goto(base + '/create'); await p.waitForTimeout(4500); return { full: true }; },
-  'create-done-detail': async (p, ctx) => { await funding(ctx, { txHash: 'H', campaignId: '12' }); await rpc(p); await p.goto(base + '/create'); await p.waitForTimeout(4500); await p.getByText('Keep each link private').click(); await p.waitForTimeout(300); return { full: true }; },
-  'create-done-copied': async (p, ctx) => { await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: base }); await funding(ctx, { txHash: 'H', campaignId: '12' }); await rpc(p); await p.goto(base + '/create'); await p.waitForTimeout(4500); await p.getByRole('button', { name: 'Copy message' }).nth(1).click(); await p.waitForTimeout(300); return { full: true }; },
+  'create-done-detail': async (p, ctx) => { await funding(ctx, { txHash: 'H', campaignId: '12' }); await rpc(p); await p.goto(base + '/create'); await p.waitForTimeout(4500); await p.getByRole('button', { name: /Keep each link private/ }).focus(); await p.waitForTimeout(300); return { full: true }; },
+  'create-done-copied': async (p, ctx) => { await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: base }); await funding(ctx, { txHash: 'H', campaignId: '12' }); await rpc(p); await p.goto(base + '/create'); await p.waitForTimeout(4500); await p.getByRole('button', { name: 'Copy Message' }).nth(1).click(); await p.waitForTimeout(300); return { full: true }; },
   'create-done-long': async (p, ctx) => {
     await ctx.addInitScript((d) => sessionStorage.setItem('zarf-near:create-funding', JSON.stringify({ txHash: 'H', sender: 'sender.testnet', deadline: '2026-12-01T12:00', campaignId: '12', draft: d })),
       { merkleRoot: ROOT, total: String(501 * 1000000), recipients: Array.from({ length: 501 }, (_, i) => ({ email: `person${i}@gmail.com`, amount: '1000000', salt: 'ab'.repeat(32), commitment: i.toString(16).padStart(64, '0'), proof: Array(9).fill('cd'.repeat(32)) })) });
@@ -315,7 +322,6 @@ const S = {
   },
   // Send UX round (r5): every new or changed sender state.
   'landing-usdc': async (p) => { await rpc(p); await p.goto(base + '/'); await p.waitForSelector('h1'); await heroShown(p); await p.getByRole('button', { name: 'USDC', exact: true }).click(); await p.waitForTimeout(300); return { full: true }; },
-  'create-1-usdc': async (p) => { await rpc(p); await p.goto(base + '/create'); await p.waitForSelector('[aria-label="Recipient 1 email"]'); await p.waitForTimeout(1500); await p.getByRole('button', { name: /What is test USDC/ }).click(); await p.waitForTimeout(300); return { full: true }; },
   'create-1-ok': async (p) => { await rpc(p); await p.goto(base + '/create'); await p.waitForSelector('[aria-label="Recipient 1 email"]'); await p.waitForTimeout(1500); await pasteList(p, CSV); await p.waitForTimeout(400); return { full: true }; },
   'create-1-dup': async (p) => { await rpc(p); await p.goto(base + '/create'); await p.waitForSelector('[aria-label="Recipient 1 email"]'); await p.waitForTimeout(1500); await pasteList(p, CSV + '\nAlice@gmail.com,5'); await p.waitForTimeout(400); return { full: true }; },
   'create-1-email': async (p) => { await rpc(p); await p.goto(base + '/create'); await p.waitForSelector('[aria-label="Recipient 1 email"]'); await p.waitForTimeout(1500); return { full: true }; },
@@ -324,7 +330,7 @@ const S = {
   'create-3-balance-error': async (p, ctx) => { await wallet(ctx); await rpc(p, { fail: 'ft_balance_of' }); await toStep(p, 2); await p.waitForTimeout(800); return { full: true }; },
   'create-4-deposit': async (p, ctx) => { await wallet(ctx); await rpc(p, { prepay: '0' }); await toStep4(p); return { full: true }; },
   'create-4-saved': async (p, ctx) => { await wallet(ctx); await rpc(p); await toStep4(p); await saveBackup(p); await p.waitForTimeout(300); return { full: true }; },
-  'create-4-terms': async (p, ctx) => { await wallet(ctx); await rpc(p, { prepay: '0' }); await toStep4(p); for (const q of ['What is my Zarf balance?', 'Can I cancel after sending?']) await p.getByText(q).click(); await p.waitForTimeout(300); return { full: true }; },
+  'create-4-terms': async (p, ctx) => { await wallet(ctx); await rpc(p, { prepay: '0' }); await toStep4(p); await p.getByRole('button', { name: /Who sees the emails/ }).focus(); await p.waitForTimeout(300); return { full: true }; },
   'create-send-chain': async (p, ctx) => { await wallet(ctx); await walletPopup(ctx, 'ok'); await rpc(p, { prepay: '0' }); await toStep4(p); await ackBackup(p); await p.getByRole('button', { name: SEND }).click(); await p.waitForTimeout(2500); return { full: true }; },
   'create-send-lost': async (p, ctx) => { await fastCreate(ctx); await wallet(ctx); await funding(ctx, { txHash: TX }); await rpc(p); await p.goto(base + '/create'); await p.getByText('Checking with NEAR').waitFor({ timeout: 20000 }); await p.waitForTimeout(300); return { full: true }; },
   'create-done-terms': async (p, ctx) => { await funding(ctx, { txHash: 'H', campaignId: '12' }); await rpc(p, { claimBy: { ['0'.repeat(64)]: 'claimed' } }); await p.goto(base + '/create'); await p.waitForTimeout(4500); await p.getByText('What happens next').scrollIntoViewIfNeeded(); return {}; },
@@ -337,7 +343,7 @@ const S = {
   'create-setup-error': async (p) => { await rpc(p, { rpcDown: true }); await p.goto(base + '/create'); await p.waitForTimeout(4500); return {}; },
   'create-deadline-early': async (p) => { await rpc(p); await p.goto(base + '/create'); await p.waitForSelector('[aria-label="Recipient 1 email"]'); await pasteList(p, CSV); await p.getByRole('button', { name: 'Continue' }).click(); await pickDate(p); await p.fill('#deadline', '2026-11-12T00:00'); await p.waitForTimeout(400); return { full: true }; },
   'create-3-short': async (p, ctx) => { await wallet(ctx); await rpc(p, { balance: '10000000' }); await p.goto(base + '/create'); await p.waitForSelector('[aria-label="Recipient 1 email"]'); await p.waitForTimeout(1500); await pasteList(p, CSV); await p.getByRole('button', { name: 'Continue' }).click(); await p.getByRole('button', { name: 'Continue' }).click(); await p.waitForTimeout(1000); return { full: true }; },
-  'create-wallet-error': async (p, ctx) => { await walletPopup(ctx, 'fail'); await rpc(p); await p.goto(base + '/create'); await p.waitForSelector('[aria-label="Recipient 1 email"]'); await p.waitForTimeout(1500); await pasteList(p, CSV); await p.getByRole('button', { name: 'Continue' }).click(); await p.getByRole('button', { name: 'Continue' }).click(); await p.getByRole('button', { name: 'Connect MyNearWallet' }).click(); await p.waitForTimeout(2500); return { full: true }; },
+  'create-wallet-error': async (p, ctx) => { await walletPopup(ctx, 'fail'); await rpc(p); await p.goto(base + '/create'); await p.waitForSelector('[aria-label="Recipient 1 email"]'); await p.waitForTimeout(1500); await pasteList(p, CSV); await p.getByRole('button', { name: 'Continue' }).click(); await p.getByRole('button', { name: 'Continue' }).click(); await p.getByRole('button', { name: 'Connect Wallet' }).click(); await p.waitForTimeout(2500); return { full: true }; },
   'create-4-ready': async (p, ctx) => { await wallet(ctx); await rpc(p, { prepay: '0' }); await toStep4(p); await ackBackup(p); await p.waitForTimeout(400); return { full: true }; },
   'create-send-waiting': async (p, ctx) => { await wallet(ctx); await walletPopup(ctx, 'hang'); await rpc(p, { prepay: '0' }); await toStep4(p); await ackBackup(p); await p.getByRole('button', { name: SEND }).click(); await p.waitForTimeout(2000); return { full: true }; },
   'create-send-notsent': async (p, ctx) => {
@@ -362,7 +368,7 @@ const S = {
   'campaigns-loading': async (p, ctx) => { await wallet(ctx); await rpc(p, { hang: 'campaigns_of' }); await p.goto(base + '/campaigns'); await p.waitForTimeout(4000); return {}; },
   'campaigns-load-error': async (p, ctx) => { await wallet(ctx); await rpc(p, { fail: 'campaigns_of' }); await p.goto(base + '/campaigns'); await p.waitForTimeout(4000); return {}; },
   'campaigns-empty': async (p, ctx) => { await wallet(ctx); await rpc(p, { campaigns: {} }); await p.goto(base + '/campaigns'); await p.waitForTimeout(4000); return {}; },
-  'campaigns-wallet-error': async (p, ctx) => { await walletPopup(ctx, 'fail'); await rpc(p); await p.goto(base + '/campaigns'); await p.waitForTimeout(4000); await p.getByRole('button', { name: 'Connect MyNearWallet' }).click(); await p.waitForTimeout(2500); return {}; },
+  'campaigns-wallet-error': async (p, ctx) => { await walletPopup(ctx, 'fail'); await rpc(p); await p.goto(base + '/campaigns'); await p.waitForTimeout(4000); await p.getByRole('button', { name: 'Connect Wallet' }).click(); await p.waitForTimeout(2500); return {}; },
   ...Object.fromEntries([
     ['busy', 'hang', null],
     ['reclaimed', 'ok', receipts([CONTRACT, { logs: [ev('reclaimed', { campaign_id: 12, amount: '27500000' })] }])],
@@ -372,7 +378,7 @@ const S = {
     ['send-failed', 'fail', null],
   ].map(([k, mode, tx]) => [`campaigns-reclaim-${k}`, async (p, ctx) => {
     await wallet(ctx); await walletPopup(ctx, mode); await rpc(p, { campaigns: { 12: cview({ deadline_ns: PAST }), 13: cview({ amount: '5000000', balance: '5000000', storage_reserved: '2310000000000000000000' }) }, tx }); await p.goto(base + '/campaigns'); await p.waitForTimeout(4000);
-    await p.getByRole('button', { name: /^Take back/ }).first().click(); await p.waitForTimeout(2500); return { full: true };
+    await p.getByRole('button', { name: /^Take back/i }).first().click(); await p.waitForTimeout(2500); return { full: true };
   }])),
   ...Object.fromEntries([['done', receipts([CONTRACT])], ['failed', receipts([CONTRACT, { status: { Failure: { ActionError: { kind: { FunctionCallError: { ExecutionError: 'Smart contract panicked: E107_UNAUTHORIZED' } } } } } }])]].map(([k, tx]) => [`campaigns-withdraw-${k}`, async (p, ctx) => {
     await wallet(ctx); await walletPopup(ctx, 'ok'); await rpc(p, { campaigns: { 12: cview({ deadline_ns: PAST }), 13: cview({ amount: '5000000', balance: '5000000', storage_reserved: '2310000000000000000000' }) }, tx }); await p.goto(base + '/campaigns'); await p.waitForTimeout(4000);
@@ -382,7 +388,7 @@ const S = {
   error500: async (p) => { await p.route(/routes\/privacy\/\+page\.svelte/, (r) => r.abort()); await p.goto(base + '/privacy'); await p.waitForTimeout(2500); return {}; },
   // These two need a server started with PUBLIC_IMPLICIT_ACCOUNTS=on (PORT=… for a second one).
   'implicit-start': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText('New Account', { exact: true }).click(); await p.waitForTimeout(400); return { full: true }; },
-  'implicit-key': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText('New Account', { exact: true }).click(); await p.getByRole('button', { name: 'Create NEAR Account' }).click(); await p.waitForTimeout(600); await p.getByRole('button', { name: 'Download key' }).click(); await p.waitForTimeout(400); return { full: true }; },
+  'implicit-key': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText('New Account', { exact: true }).click(); await p.getByRole('button', { name: 'Create NEAR Account' }).click(); await p.waitForTimeout(600); await p.getByRole('button', { name: 'Download Key' }).click(); await p.waitForTimeout(400); return { full: true }; },
   notfound: async (p) => { await p.goto(base + '/nope'); await p.waitForSelector('h1'); return {}; },
 };
 

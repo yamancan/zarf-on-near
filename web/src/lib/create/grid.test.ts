@@ -85,3 +85,10 @@ describe('parsePaste', () => {
     expect(parsePaste('a@b.co,1\nemail,amount').skipped).toEqual(['Line 2: no email address']);
   });
 });
+
+describe('thousands comma (T-010 review minor 3)', () => {
+  it('says to drop the comma, not to use fewer decimals', () => {
+    const { problems } = checkGrid([{ email: 'a@gmail.com', amount: '1,000.5' }]);
+    expect(problems[0]?.message).toBe('Write it without commas, like 1000.5');
+  });
+});

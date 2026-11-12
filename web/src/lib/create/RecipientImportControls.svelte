@@ -50,7 +50,8 @@
     e.currentTarget.value = ''; // the same file can be picked again
     fileError = null;
     try {
-      await onImportFile(file);
+      // T-010 review minor 4: an import that added nothing says so.
+      if (!(await onImportFile(file))) fileError = 'No email addresses found in this file.';
     } catch {
       fileError = 'Could not read this file. Try selecting it again.';
     }
