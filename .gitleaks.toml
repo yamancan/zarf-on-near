@@ -1,0 +1,13 @@
+# Secret scan for the repository: gitleaks' default rules, plus one narrow allowlist.
+# The only allowed value is Circle's USDC token *account id* on NEAR (testnet and mainnet), a public
+# 64-hex account name that the generic-api-key rule mistakes for a key.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Circle USDC account ids on NEAR (public)"
+regexTarget = "match"
+regexes = [
+  '''3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af''',
+  '''17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1''',
+]

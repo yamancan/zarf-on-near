@@ -1,21 +1,54 @@
 # Zarf on NEAR
 
-**Pay any email, on any chain.** A sender funds a campaign with USDC for a list of email
-addresses. Each recipient opens their claim link, signs in with Google, and receives the tokens
-at a NEAR account they already have; they need no NEAR for gas, because a relayer pays it. The chain stores
-salted commitments, amounts, each campaign's merkle root and sender, and each claim's destination;
-never an email. Built for the NEAR Hackathon
-(build window ends 2026-11-14 23:59 UTC).
+**Pay any email on NEAR.** A sender funds a campaign with USDC for a list of email addresses. Each
+recipient opens their claim link, signs in with Google, and receives the USDC at a NEAR account they
+choose; they need no NEAR for gas, because a relayer pays it. The chain stores salted commitments,
+amounts, each campaign's merkle root and sender, and each claim's destination; never an email.
+
+**Linkdrop pays whoever holds the link; Zarf pays the owner of the email.** A forwarded or leaked
+Zarf link is useless without that person's Google account.
 
 **Live on NEAR testnet** (test funds, no value):
 
+- Judges' page, a claim link for 0.5 test USDC to your Google email: https://zarf-near-faucet-testnet.sparkling-queen-5e77.workers.dev/try
 - Claim and send app: https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev
-- Judges' page, a small amount of test USDC to your Google account: https://zarf-near-faucet-testnet.sparkling-queen-5e77.workers.dev/try
 - Escrow contract: [`zarf-near-1112.testnet`](https://testnet.nearblocks.io/address/zarf-near-1112.testnet)
   (accounts, keys and versions: `docs/deploy/testnet.md`)
 
-> Status: live on NEAR testnet. A real Google claim has run end to end on the hosted app; the
-> cross-chain payout has not run yet. The evidence table below says what has.
+> Status: live on NEAR testnet. A real Google claim has run end to end on the hosted app. The
+> cross-chain payout (NEAR Intents) is built but has not run through the bridge yet. The evidence
+> table below says what has run.
+
+**What it uses from NEAR** (each one is in the code and on testnet unless it says otherwise):
+
+1. A **function-call access key limited to `claim`** for the relayer: the recipient pays no gas, and a
+   stolen relayer key cannot move funds (`relayer/`, `scripts/deploy.sh`).
+2. A **keyless escrow account**: every access key is deleted after deploy; the code changes only
+   through a public, delayed upgrade (10 min on testnet, at most 1 h on mainnet).
+3. **NEP-141 USDC with storage registration by the escrow**: the recipient does not need to be
+   registered on the token first; `claim` registers them (`storage_deposit`) and pays (`ft_transfer`).
+4. **Storage staking paid by the sender**: a pre-pay covers each claim's storage, and what is not used
+   comes back to the sender.
+5. **Promise callbacks**: a payout that fails on the token rolls the claim back to unclaimed, so a
+   claim cannot pay twice (`on_claim`).
+6. **NEAR Connect** wallet selector for senders (Meteor, Intear, Nightly; HOT on mainnet).
+7. **NEAR Intents (1Click)** payout to USDC on Base, Arbitrum or Ethereum: built, not yet run through
+   the bridge.
+8. **Any NEAR account as the destination**: named, implicit, or NEP-518 `0x` (Ethereum) accounts. A
+   `0x` account received a payout and spent it with its Ethereum key on testnet
+   ([payout](https://testnet.nearblocks.io/txns/2Zi796Z4k87JPLkgt8Dtsu1iZxhThtVcj4dPUCCNgRtJ),
+   [spend](https://testnet.nearblocks.io/txns/FkRvT7Wt77DwWpgosZJ7EG31rfFSJbKW6voxCW4MAafe)); the claim
+   form accepts `0x` when `PUBLIC_ETH_ACCOUNTS=on`.
+
+Google sign-in is not a NEAR feature: our verifier checks the Google token, and the contract checks
+the verifier's signature. The verifier is a server we run and you trust (Trust model, below).
+
+**Same team, separate entry** (rule Q-015): **ad402-near**, a sponsor rail that pays a user per sponsor
+card into a NEAR account, https://github.com/yamancan/ad402-near <!-- TODO(Q-015): set the final public URL before submission -->.
+The two projects share no code.
+
+Built for the NEAR Hackathon (build window ends 2026-11-14 23:59 UTC). Pre-window work it builds
+on is listed under "Prior work, baseline and libraries".
 
 ## Trust model
 
@@ -190,11 +223,26 @@ includes it and rejects its tokens (`verifier/test/demo.test.ts`).
 **Prior work.** This builds on Zarf on Stellar by the same team (Trion Labs), live at
 [zarf.to](https://zarf.to). The ideas carried over are a token sent to an email and claimed with
 Google, a nonce bound to the destination, a claim expiry, the canonical-email rule, and the
-error-code numbering. **No code is reused.** Zarf on Stellar proves Google sign-in with a Noir
-circuit verified by Soroban contracts. Neither runs on NEAR, so this repository replaces the proof
-with the verifier service described above.
+error-code numbering. None of its protocol code is reused: Zarf on Stellar proves Google sign-in with
+a Noir circuit verified by Soroban contracts, neither runs on NEAR, and this repository replaces the
+proof with the verifier service described above.
 
-**Hackathon diff.** Everything in this repository was built in the build window, starting
+**Baseline: pre-window Trion work copied into this repository.** The web apps reuse Zarf's
+interface, copied from Zarf on Stellar (2026-10-14) and
+adapted; these files are not hackathon work:
+
+| Path here | From Zarf on Stellar |
+| --- | --- |
+| `web/src/lib/zen/**` | The Zen UI kit: components (ZenButton, ZenCard, ZenInput, ZenSelect, ZenCheckbox, ZenAlert, ZenBadge, PageHeader, ThemeToggle, ZarfLogo), theme store, colour, spacing, motion, radius and shadow tokens, light and dark themes |
+| `web/src/app.css` | The ripple background, the dark ground and the landing grain |
+| `web/src/lib/{Amount,Hero,Medallion,Note,ZarfMark}.svelte`, `web/src/routes/+layout.svelte` | The claim card's amount block, the landing hero, the status medallion and line, the logo mark, the navbar: markup and classes adapted |
+| `web/src/lib/create/RecipientGrid.svelte`, `RecipientImportControls.svelte` | The create app's recipient grid and import controls, adapted (NEAR's own row checks are in `grid.ts`) |
+| `web/static/favicon.svg`, `web/static/og.png`, `faucet/src/assets.ts` (favicon) | Brand assets |
+
+Third-party assets: the Saira font (`web/static/fonts`, SIL OFL, licence beside it) and Google's sign-in
+button and Gmail mark (`web/static/google`, used as Google's branding guidelines allow).
+
+**Hackathon diff.** Everything else in this repository was built in the build window, starting
 from the first commit on 2026-11-07.
 History: [hackathon-submission](https://github.com/yamancan/zarf-on-near/tree/hackathon-submission).
 
@@ -224,7 +272,7 @@ humans deciding design and scope.
 
 ## Tracks
 
-Real-World Money (primary), Privacy & Private AI, Open Innovation.
+Real-World Money (primary), Open Innovation.
 
 ## License
 
