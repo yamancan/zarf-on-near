@@ -30,6 +30,7 @@
   import Tooltip from '$lib/zen/components/Tooltip.svelte';
   import ZenBadge from '$lib/zen/components/ZenBadge.svelte';
   import ZenInput from '$lib/zen/components/ZenInput.svelte';
+  import FundFromChain from '$lib/create/FundFromChain.svelte';
   import { markIn, swapIn } from '$lib/motion';
   import Note from '$lib/Note.svelte';
   import ZenAlert from '$lib/zen/components/ZenAlert.svelte';
@@ -1020,6 +1021,10 @@
                 <p class="flex items-center gap-2 text-sm text-zen-fg" role="status"><CheckCircle2 class="w-4 h-4 text-zen-success shrink-0" aria-hidden="true" />Ready to send</p>
               {/if}
             </div>
+            {#if balance !== null && contract}
+              <!-- USDC from Base, Arbitrum or Ethereum through 1Click into this account (T-019); the send itself is unchanged -->
+              <FundFromChain {account} {contract} need={short} testnet={TESTNET} onArrived={() => balanceTick++} />
+            {/if}
             {@render actions(true, 'Continue', ready && short === 0n && balance !== null, prepare, balance === null && balanceFailed ? 'Check your balance first.' : '')}
           {/if}
         {:else}
