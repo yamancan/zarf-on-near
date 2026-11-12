@@ -413,6 +413,18 @@ describe('worker', () => {
     expect(seen.filter((u) => u.startsWith('https://challenges.cloudflare.com/')).length).toBe(before);
   });
 
+  it('the burst limit is per IP: a second IP still gets its own 3', async () => {
+    net();
+    const env = { ...fullEnv(), PER_IP: perIp(3) };
+    const { default: worker } = await import('../src/index');
+    const send = (ip: string) => worker.fetch(new Request('https://f.example/faucet', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': ip }, body: JSON.stringify({ email: 'a@x.io', turnstile: 't' }),
+    }), env as never);
+    for (let i = 0; i < 3; i++) expect((await send('198.51.100.7')).status).not.toBe(429);
+    for (let i = 0; i < 3; i++) expect((await send('203.0.113.9')).status).not.toBe(429);
+    expect((await send('198.51.100.7')).status).toBe(429);
+  });
+
   it('a missing token never reaches siteverify', async () => {
     const seen = net();
     expect((await post(fullEnv(), { email: 'a@x.io' })).body).toEqual({ error: 'TURNSTILE_FAILED' });
