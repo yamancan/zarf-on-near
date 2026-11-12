@@ -7,7 +7,7 @@
   import { ArrowLeftRight, CheckCircle2, Clock, AlertTriangle } from 'lucide-svelte';
   import { evmAddressError, getStatus, QuoteError, type StatusView } from '$lib/intents';
   import {
-    describeFunding, followFunding, FUNDING_CHAINS, FUNDING_LIFETIME_MS, getFundingQuote, loadFunding, refundConfirmed, saveFunding,
+    describeFunding, followFunding, FUNDING_CHAINS, FUNDING_LIFETIME_MS, getFundingQuote, loadFunding, mayPay, mayStartOver, refundConfirmed, saveFunding,
     TESTNET_PREVIEW_RECIPIENT, type FundingQuote, type SavedFunding,
   } from './fundIn';
   import { formatAmount } from './recipients';
@@ -29,69 +29,111 @@
   let quote = $state<FundingQuote | null>(null);
   let saved = $state<SavedFunding | null>(null);
   let status = $state<StatusView | null>(null);
-  let stopped = false;
+  let fresh = $state(false); // 1Click answered for this address since it was shown (a just-made quote counts)
+  let stalled = $state(false); // the poller gave up after an hour: "Check Again" follows the same address
+  let now = $state(Date.now()); // the deadline check needs a clock that moves
+  let unmounted = false;
+  let poller = 0; // each follow() gets its own number; an older poller never writes again
+  let request = 0; // the same for quote requests: a reply to an older request is dropped
 
   const chain = $derived(FUNDING_CHAINS.find((c) => c.key === (saved?.chainKey ?? source)) ?? null);
   const addrError = $derived(refundTo ? evmAddressError(refundTo.trim()) : null);
   const confirmed = $derived(!addrError && refundConfirmed(refundTo.trim(), last6));
   const line = $derived(saved && status && chain ? describeFunding(status, chain.name, account, saved.refundTo, saved.depositAddress) : null);
+  const canPay = $derived(!!saved && mayPay(status?.status, fresh, saved.deadline, now));
+  const expired = $derived(!!saved && Date.parse(saved.deadline) <= now && (!status || status.status === 'PENDING_DEPOSIT'));
+  const canStartOver = $derived(!!saved && mayStartOver(status?.status, saved.deadline, now));
   const when = (iso: string) => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(Date.parse(iso));
   const usdc = (v: string) => formatAmount(BigInt(v));
   const feeOf = (i: string, o: string) => (BigInt(i) > BigInt(o) ? BigInt(i) - BigInt(o) : 0n).toString();
 
   onMount(() => {
-    saved = loadFunding(contract, account); // a funding this browser started: keep following it after a reload
-    if (saved) follow(saved);
-    return () => { stopped = true; };
+    // A funding this browser started: its last known status at once, the address only after 1Click answers again.
+    saved = loadFunding(contract, account);
+    if (saved) {
+      status = saved.status ? { status: saved.status } : null;
+      if (!saved.status || !describeFunding({ status: saved.status }, '', '', '', '').done) follow(saved);
+    }
+    const t = setInterval(() => (now = Date.now()), 15_000);
+    return () => ((unmounted = true), poller++, clearInterval(t));
   });
 
   function follow(f: SavedFunding) {
+    const mine = ++poller;
+    stalled = false;
+    const chainName = FUNDING_CHAINS.find((c) => c.key === f.chainKey)?.name ?? '';
     void followFunding(f.depositAddress, (s) => {
       status = s;
-      saveFunding(contract, account, { ...f, status: s.status });
-      const v = describeFunding(s, chain?.name ?? '', account, f.refundTo, f.depositAddress);
+      fresh = true;
+      saved = { ...f, status: s.status };
+      saveFunding(contract, account, saved);
       if (s.status === 'SUCCESS') onArrived(); // the page reads the balance again; the send continues as before
-      return v.done;
-    }, () => stopped, (a) => getStatus(a));
+      return describeFunding(s, chainName, account, f.refundTo, f.depositAddress).done;
+    }, () => unmounted || mine !== poller, (a) => getStatus(a)).then((end) => {
+      if (end === 'timeout' && mine === poller) stalled = true;
+    });
   }
 
   async function ask() {
-    if (!chain || !confirmed) return;
+    if (!chain || !confirmed || busy) return;
+    // Everything the quote is for, fixed now: the controls are disabled until it returns, and a reply to an
+    // older request (or after unmount) is dropped, so a quote is never shown or saved under another chain or address.
+    const ctx = { chain, refundTo: refundTo.trim(), account, need, mine: ++request };
     error = '';
     busy = true;
     quote = null;
     try {
       const deadline = new Date(Date.now() + FUNDING_LIFETIME_MS).toISOString();
-      const q = await getFundingQuote(testnet, { chain, amount: need.toString(), recipient: testnet ? TESTNET_PREVIEW_RECIPIENT : account, refundTo: refundTo.trim(), deadline });
+      const q = await getFundingQuote(testnet, { chain: ctx.chain, amount: ctx.need.toString(), recipient: testnet ? TESTNET_PREVIEW_RECIPIENT : ctx.account, refundTo: ctx.refundTo, deadline });
+      if (unmounted || ctx.mine !== request) return;
       quote = q;
       if (!testnet && q.depositAddress) {
-        saved = { chainKey: chain.key, depositAddress: q.depositAddress, refundTo: refundTo.trim(), amountIn: q.amountIn, amountInFormatted: q.amountInFormatted, amountOut: q.amountOut, deadline: q.deadline };
-        saveFunding(contract, account, saved);
+        saved = { chainKey: ctx.chain.key, depositAddress: q.depositAddress, refundTo: ctx.refundTo, amountIn: q.amountIn, amountInFormatted: q.amountInFormatted, amountOut: q.amountOut, deadline: q.deadline };
+        saveFunding(contract, ctx.account, saved);
+        status = null;
+        fresh = true; // just quoted: the address may be shown at once
         follow(saved);
       }
     } catch (e) {
+      if (unmounted || ctx.mine !== request) return;
       error = e instanceof QuoteError ? e.message : 'Quotes are unavailable right now. Try again, or fund with USDC on NEAR.';
     } finally {
-      busy = false;
+      if (ctx.mine === request) busy = false;
     }
   }
 
+  // A shown quote belongs to the address it was asked for: editing the address drops it (and any reply still out).
+  $effect(() => {
+    void refundTo;
+    quote = null;
+    request++;
+  });
+
+  /** Only offered when nothing more can arrive at the address (mayStartOver): the record is then dropped. */
   function startOver() {
-    stopped = true;
+    if (!canStartOver) return;
+    poller++;
     saveFunding(contract, account, null);
     saved = quote = status = null;
+    fresh = stalled = false;
     error = last6 = '';
-    tick().then(() => (stopped = false));
   }
+  const pick = (k: Source) => {
+    if (busy) return;
+    source = k;
+    quote = null;
+    error = '';
+    request++; // any reply still out is for the old choice
+  };
 
   const SOURCES = $derived([['near', 'USDC on NEAR'], ...FUNDING_CHAINS.map((c) => [c.key, c.name])] as [Source, string][]);
   function sourceKey(e: KeyboardEvent) {
     const d = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
     if (!d) return;
     e.preventDefault();
+    if (busy) return;
     const i = SOURCES.findIndex(([k]) => k === source);
-    source = SOURCES[(i + d + SOURCES.length) % SOURCES.length][0];
-    quote = null;
+    pick(SOURCES[(i + d + SOURCES.length) % SOURCES.length][0]);
     tick().then(() => (document.querySelector(`[data-source="${source}"]`) as HTMLElement | null)?.focus());
   }
 
@@ -121,8 +163,8 @@
       {@render row('You Get', `${usdc(saved.amountOut)} USDC on NEAR`)}
       {@render row('Fee', `${usdc(feeOf(saved.amountIn, saved.amountOut))} USDC`)}
       {@render row('Send Before', when(saved.deadline))}
-      {#if !status || status.status === 'PENDING_DEPOSIT'}
-        <!-- the address only until a deposit is seen: never invite a second payment -->
+      {#if canPay}
+        <!-- the address only while nothing is seen, before its deadline, and after 1Click answered: never invite a second payment -->
         <p class="text-sm text-zen-fg">Send exactly <span class="font-semibold tabular-nums">{saved.amountInFormatted} USDC</span> on {chain.name} to:</p>
         <div class="flex items-start gap-4">
           <svg viewBox="0 0 {qr!.size} {qr!.size}" class="w-28 h-28 shrink-0 rounded-lg bg-white" shape-rendering="crispEdges" role="img" aria-label="QR code of the deposit address">
@@ -143,11 +185,22 @@
           <span class="min-w-0 break-words">{line.text}</span>
         </p>
       {:else}
-        <p class="flex items-center gap-2 text-sm text-zen-fg-muted" role="status"><Clock class="w-4 h-4 shrink-0" aria-hidden="true" />Waiting for your USDC on {chain.name}.</p>
+        <p class="flex items-center gap-2 text-sm text-zen-fg-muted" role="status"><Clock class="w-4 h-4 shrink-0" aria-hidden="true" />{fresh ? `Waiting for your USDC on ${chain.name}.` : 'Checking with 1Click…'}</p>
       {/if}
-      <div class="flex flex-wrap gap-2">
-        <ZenButton variant="ghost" size="sm" onclick={startOver}>{line?.done ? 'Done' : 'Start Over'}</ZenButton>
-      </div>
+      {#if expired}
+        <Note tone="error">This deposit address has expired. Don't send anything to it.</Note>
+      {/if}
+      {#if stalled}
+        <div class="flex flex-wrap items-center justify-between gap-x-3">
+          <p class="text-xs text-zen-fg-subtle">Stopped checking after an hour. 1Click still has it.</p>
+          <ZenButton variant="ghost" size="sm" onclick={() => saved && follow(saved)}>Check Again</ZenButton>
+        </div>
+      {/if}
+      {#if canStartOver}
+        <div class="flex flex-wrap gap-2">
+          <ZenButton variant="ghost" size="sm" onclick={startOver}>{line?.done ? 'Done' : 'Start Over'}</ZenButton>
+        </div>
+      {/if}
     </div>
   {:else if need > 0n}
     <div class="flex flex-col gap-3">
@@ -162,7 +215,8 @@
             aria-checked={source === k}
             tabindex={source === k ? 0 : -1}
             data-source={k}
-            onclick={() => ((source = k), (quote = null), (error = ''))}
+            disabled={busy}
+            onclick={() => pick(k)}
           >{label}</ZenButton>
         {/each}
       </div>
@@ -171,9 +225,9 @@
       {#if testnet}
         <Note tone="info">Real cross-chain funding runs on mainnet only: 1Click has no testnet. Here you see a live mainnet price, with nothing to pay.</Note>
       {/if}
-      <ZenInput label="Your {chain.name} Address" hint="Refunds go here. Your own wallet, not an exchange." placeholder="0x…" bind:value={refundTo} error={addrError} autocomplete="off" spellcheck="false" />
+      <ZenInput label="Your {chain.name} Address" hint="Refunds go here. Your own wallet, not an exchange." placeholder="0x…" bind:value={refundTo} error={addrError} disabled={busy} autocomplete="off" spellcheck="false" />
       {#if refundTo && !addrError}
-        <ZenInput label="Its Last 6 Characters" hint="Read it again from your wallet." bind:value={last6} maxlength={6} autocomplete="off" spellcheck="false" class="font-mono" />
+        <ZenInput label="Its Last 6 Characters" hint="Read it again from your wallet." bind:value={last6} maxlength={6} disabled={busy} autocomplete="off" spellcheck="false" class="font-mono" />
       {/if}
       <div class="flex flex-wrap items-center gap-3">
         <ZenButton variant="secondary" size="sm" onclick={ask} disabled={!confirmed || busy}>

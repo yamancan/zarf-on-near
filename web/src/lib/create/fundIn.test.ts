@@ -3,7 +3,7 @@ import live from './fixtures/oneclick-dry-exact-output.json';
 import { NEAR_USDC_ASSET, QuoteError, type StatusView } from '../intents';
 import { ed25519B58, quoteSignedBytes, verifyQuoteSignature } from '../oneclickSig';
 import {
-  CANNOT_CHECK, describeFunding, FUNDING_CHAINS, followFunding, fundingCapError, fundingRequest, fundingWithinLossBound,
+  CANNOT_CHECK, MAX_QUOTE_AGE_MS, mayPay, mayStartOver, describeFunding, FUNDING_CHAINS, followFunding, fundingCapError, fundingRequest, fundingWithinLossBound,
   getFundingQuote, loadFunding, refundConfirmed, saveFunding, TOO_COSTLY, type FundingArgs,
 } from './fundIn';
 
@@ -13,6 +13,8 @@ const REFUND = '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed';
 const liveArgs: FundingArgs = { chain: base, amount: '10000000', recipient: 'aurora', refundTo: REFUND, deadline: live.quoteRequest.deadline };
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x));
 const answer = (body: unknown, status = 200) => async () => new Response(JSON.stringify(body), { status });
+const AT = Date.parse(live.timestamp); // "now" for the fixture: when 1Click signed it
+const fq = (dry: boolean, a: FundingArgs, f: Parameters<typeof getFundingQuote>[2], signer?: string, now = AT) => getFundingQuote(dry, a, f, signer, now);
 
 // A test key standing in for 1Click's, so request fields can be changed and still carry a valid signature.
 const keys = (await crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify'])) as CryptoKeyPair;
@@ -44,7 +46,7 @@ describe('limits at the boundary', () => {
     expect(fundingCapError(1_000_000_000n)).toBeNull();
     expect(fundingCapError(1_000_000_001n)).toMatch(/up to 1,000 USDC/);
     let asked = false;
-    await expect(getFundingQuote(true, { ...liveArgs, amount: '1000000001' }, async () => ((asked = true), new Response('{}')))).rejects.toThrow(/up to 1,000 USDC/);
+    await expect(fq(true, { ...liveArgs, amount: '1000000001' }, async () => ((asked = true), new Response('{}')))).rejects.toThrow(/up to 1,000 USDC/);
     expect(asked).toBe(false);
   });
   it('2% loss: paying 100 for 98 (2.00%) passes, 100 for 97.99 (2.01%) does not', () => {
@@ -54,25 +56,25 @@ describe('limits at the boundary', () => {
   });
   it('a signed quote over the bound is refused with its own sentence', async () => {
     const r = await signed((x) => { x.quote.amountIn = '10300000'; });
-    await expect(getFundingQuote(true, liveArgs, answer(r), testSigner)).rejects.toThrow(TOO_COSTLY);
+    await expect(fq(true, liveArgs, answer(r), testSigner)).rejects.toThrow(TOO_COSTLY);
   });
 });
 
 describe('quote signature, checked in the browser with the pinned key', () => {
   it('passes on the live 1Click response', async () => {
     await expect(verifyQuoteSignature(live)).resolves.toBeUndefined();
-    const q = await getFundingQuote(true, liveArgs, answer(live));
+    const q = await fq(true, liveArgs, answer(live));
     expect(q).toMatchObject({ amountIn: '10102388', amountOut: '10000000', fee: '102388', timeEstimate: 35 });
     expect(q.depositAddress).toBeUndefined();
   });
   it('fails on one changed figure, a missing signature, or another key', async () => {
     const changed = clone(live);
     changed.quote.amountIn = '10102389';
-    await expect(getFundingQuote(true, liveArgs, answer(changed))).rejects.toThrow(CANNOT_CHECK);
+    await expect(fq(true, liveArgs, answer(changed))).rejects.toThrow(CANNOT_CHECK);
     const unsigned = clone(live) as Partial<typeof live>;
     delete unsigned.signature;
-    await expect(getFundingQuote(true, liveArgs, answer(unsigned))).rejects.toThrow(CANNOT_CHECK);
-    await expect(getFundingQuote(true, liveArgs, answer(live), testSigner)).rejects.toThrow(QuoteError);
+    await expect(fq(true, liveArgs, answer(unsigned))).rejects.toThrow(CANNOT_CHECK);
+    await expect(fq(true, liveArgs, answer(live), testSigner)).rejects.toThrow(QuoteError);
   });
   it('a validly signed quote for another recipient, refund address, swap type or amount is refused', async () => {
     for (const edit of [
@@ -81,22 +83,48 @@ describe('quote signature, checked in the browser with the pinned key', () => {
       (x: typeof live) => { x.quoteRequest.swapType = 'EXACT_INPUT'; },
       (x: typeof live) => { x.quote.amountOut = '9000000'; },
     ]) {
-      await expect(getFundingQuote(true, liveArgs, answer(await signed(edit)), testSigner)).rejects.toThrow(CANNOT_CHECK);
+      await expect(fq(true, liveArgs, answer(await signed(edit)), testSigner)).rejects.toThrow(CANNOT_CHECK);
     }
-    await expect(getFundingQuote(true, liveArgs, answer(await signed(() => {})), testSigner)).resolves.toMatchObject({ amountOut: '10000000' });
+    await expect(fq(true, liveArgs, answer(await signed(() => {})), testSigner)).resolves.toMatchObject({ amountOut: '10000000' });
+  });
+  it('a stale or future-dated signature is a replay: refused', async () => {
+    await expect(fq(true, liveArgs, answer(live), undefined, AT + MAX_QUOTE_AGE_MS)).resolves.toBeTruthy();
+    await expect(fq(true, liveArgs, answer(live), undefined, AT + MAX_QUOTE_AGE_MS + 1)).rejects.toThrow(CANNOT_CHECK);
+    await expect(fq(true, liveArgs, answer(live), undefined, AT - MAX_QUOTE_AGE_MS - 1)).rejects.toThrow(CANNOT_CHECK);
+  });
+  it('fields 1Click adds are accepted only with their known defaults; anything unknown is refused', async () => {
+    for (const edit of [
+      (x: typeof live) => { (x.quoteRequest as Record<string, unknown>).referral = 'someone'; },
+      (x: typeof live) => { x.quoteRequest.appFees = [{ recipient: 'x.near', fee: 50 }]; },
+      (x: typeof live) => { x.quoteRequest.depositMode = 'MEMO'; },
+      (x: typeof live) => { (x.quoteRequest as Record<string, unknown>).virtualChainRecipient = 'v.near'; },
+      (x: typeof live) => { (x.quoteRequest as Record<string, unknown>).somethingNew = 1; },
+    ]) {
+      await expect(fq(true, liveArgs, answer(await signed(edit)), testSigner)).rejects.toThrow(CANNOT_CHECK);
+    }
   });
   it('a real quote needs an EVM deposit address', async () => {
     const real = (addr?: string) => signed((x) => {
       x.quoteRequest.dry = false;
       Object.assign(x.quote, { depositAddress: addr, deadline: '2026-11-14T16:18:02.000Z', timeEstimate: 35 });
     });
-    const ok = await getFundingQuote(false, liveArgs, answer(await real('0x76b4c56085ED136a8744D52bE956396624a730E8')), testSigner);
+    const ok = await fq(false, liveArgs, answer(await real('0x76b4c56085ED136a8744D52bE956396624a730E8')), testSigner);
     expect(ok).toMatchObject({ depositAddress: '0x76b4c56085ED136a8744D52bE956396624a730E8', deadline: '2026-11-14T16:18:02.000Z' });
-    await expect(getFundingQuote(false, liveArgs, answer(await real('a'.repeat(64))), testSigner)).rejects.toThrow(CANNOT_CHECK);
+    await expect(fq(false, liveArgs, answer(await real('a'.repeat(64))), testSigner)).rejects.toThrow(CANNOT_CHECK);
+  });
+  it('a real quote with too little time left to pay, or with a memo, is refused', async () => {
+    const real = (deadline: string, memo?: string) => signed((x) => {
+      x.quoteRequest.dry = false;
+      Object.assign(x.quote, { depositAddress: '0x76b4c56085ED136a8744D52bE956396624a730E8', deadline, depositMemo: memo });
+    });
+    await expect(fq(false, liveArgs, answer(await real(new Date(AT + 9 * 60_000).toISOString())), testSigner)).rejects.toThrow(CANNOT_CHECK);
+    await expect(fq(false, liveArgs, answer(await real('2020-01-01T00:00:00.000Z')), testSigner)).rejects.toThrow(CANNOT_CHECK);
+    await expect(fq(false, liveArgs, answer(await real(new Date(AT + 3600e3).toISOString(), 'memo')), testSigner)).rejects.toThrow(CANNOT_CHECK);
+    await expect(fq(false, liveArgs, answer(await real(new Date(AT + 3600e3).toISOString())), testSigner)).resolves.toBeTruthy();
   });
   it('1Click\'s own refusal is shown in plain words, never raw', async () => {
-    await expect(getFundingQuote(true, liveArgs, answer({ message: 'Amount is too low for bridge, try at least 1500000' }, 400))).rejects.toThrow(/too low to fund/);
-    await expect(getFundingQuote(true, liveArgs, answer({ message: 'tokenIn is not supported' }, 400))).rejects.toThrow(/cannot fund this right now/);
+    await expect(fq(true, liveArgs, answer({ message: 'Amount is too low for bridge, try at least 1500000' }, 400))).rejects.toThrow(/too low to fund/);
+    await expect(fq(true, liveArgs, answer({ message: 'tokenIn is not supported' }, 400))).rejects.toThrow(/cannot fund this right now/);
   });
 });
 
@@ -117,6 +145,34 @@ describe('each status on the funding screen', () => {
   it('FAILED never promises a refund; anything new keeps polling', () => {
     expect(line('FAILED').text).not.toMatch(/refund|back/i);
     expect(describeFunding({ status: 'NEW_THING' as never }, 'Base', 'a', REFUND, dep)).toMatchObject({ text: 'Still processing at 1Click.', done: false });
+  });
+  it('a poller stopped while a read is out never applies that answer', async () => {
+    let stop = false;
+    const seen: string[] = [];
+    const end = await followFunding(dep, (st) => void seen.push(st.status), () => stop, async () => ((stop = true), { status: 'SUCCESS' }), async () => {});
+    expect(end).toBe('stopped');
+    expect(seen).toEqual([]);
+  });
+  it('gives up after an hour of wall time, however slow the reads are', async () => {
+    let t = 0;
+    const end = await followFunding(dep, () => false, () => false, async () => ((t += 10_000), { status: 'PENDING_DEPOSIT' }), async () => void (t += 5000), () => t);
+    expect(end).toBe('timeout');
+    expect(t).toBeGreaterThanOrEqual(3600e3);
+    expect(t).toBeLessThan(3600e3 + 15_000);
+  });
+  it('the address is shown only while nothing is seen, before its deadline, and after a fresh answer', () => {
+    const later = new Date(AT + 3600e3).toISOString();
+    expect(mayPay(undefined, true, later, AT)).toBe(true); // just quoted
+    expect(mayPay('PENDING_DEPOSIT', false, later, AT)).toBe(false); // reloaded, 1Click not asked yet
+    for (const st of ['KNOWN_DEPOSIT_TX', 'PROCESSING', 'SUCCESS', 'INCOMPLETE_DEPOSIT', 'REFUNDED', 'FAILED'] as const) expect(mayPay(st, true, later, AT)).toBe(false);
+    expect(mayPay('PENDING_DEPOSIT', true, later, AT + 3600e3)).toBe(false); // expired
+  });
+  it('"Start Over" only when nothing more can arrive at the address', () => {
+    const later = new Date(AT + 3600e3).toISOString();
+    for (const st of ['SUCCESS', 'REFUNDED', 'FAILED'] as const) expect(mayStartOver(st, later, AT)).toBe(true);
+    for (const st of ['PENDING_DEPOSIT', 'KNOWN_DEPOSIT_TX', 'PROCESSING', 'INCOMPLETE_DEPOSIT'] as const) expect(mayStartOver(st, later, AT)).toBe(false);
+    expect(mayStartOver('PENDING_DEPOSIT', later, AT + 3600e3)).toBe(true); // expired with nothing sent
+    expect(mayStartOver('PROCESSING', later, AT + 3600e3)).toBe(false);
   });
   it('the poller stops at a final status', async () => {
     const seq: StatusView[] = [{ status: 'PENDING_DEPOSIT' }, { status: 'PROCESSING' }, { status: 'SUCCESS' }];

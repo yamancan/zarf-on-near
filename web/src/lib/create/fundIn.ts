@@ -69,7 +69,22 @@ export interface FundingQuote {
  * the exact output, the loss bound and, for a real quote, an EVM deposit address. Refusals are QuoteError with a
  * sentence for the sender.
  */
-export async function getFundingQuote(dry: boolean, a: FundingArgs, fetchFn: Fetch = defaultFetch, signer?: string): Promise<FundingQuote> {
+/** Fields 1Click adds to the echoed request that we accept, and only with these values (anything else: refused). */
+const ADDED_FIELDS: Record<string, (v: unknown) => boolean> = {
+  depositMode: (v) => v === undefined || v === 'SIMPLE',
+  confidentiality: (v) => v === undefined || v === 'public',
+  quoteWaitingTimeMs: (v) => v === undefined || v === 0,
+  insured: (v) => v === undefined || v === false,
+  referral: (v) => v === undefined || v === null || v === '',
+  // 1Click's own default fee entry (1 bp seen on 13 Nov); the loss bound below covers whatever it costs.
+  appFees: (v) => v === undefined || (Array.isArray(v) && v.length <= 1 && v.every((f) => f && typeof f.recipient === 'string' && Number.isInteger(f.fee) && f.fee >= 0 && f.fee <= 10)),
+};
+/** A real quote must leave this long to pay before its address goes inactive. */
+export const MIN_TIME_TO_PAY_MS = 10 * 60_000;
+/** A quote signed longer ago than this (or this far in the future) is a replay or a broken clock: refused. */
+export const MAX_QUOTE_AGE_MS = 5 * 60_000;
+
+export async function getFundingQuote(dry: boolean, a: FundingArgs, fetchFn: Fetch = defaultFetch, signer?: string, now = Date.now()): Promise<FundingQuote> {
   const cap = fundingCapError(BigInt(a.amount));
   if (cap) throw new QuoteError(cap); // before any quote
   const want = fundingRequest(dry, a);
@@ -79,7 +94,7 @@ export async function getFundingQuote(dry: boolean, a: FundingArgs, fetchFn: Fet
     signal: AbortSignal.timeout(10_000),
     body: JSON.stringify(want),
   });
-  const body = (await res.json().catch(() => ({}))) as { message?: string; quote?: Record<string, unknown>; quoteRequest?: Record<string, unknown> };
+  const body = (await res.json().catch(() => ({}))) as { message?: string; quote?: Record<string, unknown>; quoteRequest?: Record<string, unknown>; timestamp?: unknown };
   if (res.status >= 400 && res.status < 500) throw new QuoteError(fundingRefusal(body.message ?? ''));
   if (!res.ok || !body.quote || !body.quoteRequest) throw new Error(`quote: HTTP ${res.status}`);
   try {
@@ -88,9 +103,15 @@ export async function getFundingQuote(dry: boolean, a: FundingArgs, fetchFn: Fet
     if (e instanceof SignatureError) throw new QuoteError(CANNOT_CHECK);
     throw e;
   }
+  const signedAt = Date.parse(String(body.timestamp));
+  if (!Number.isFinite(signedAt) || Math.abs(now - signedAt) > MAX_QUOTE_AGE_MS) throw new QuoteError(CANNOT_CHECK);
   const qr = body.quoteRequest;
-  for (const [k, v] of Object.entries(want)) if (k !== 'deadline' && qr[k] !== v) throw new QuoteError(CANNOT_CHECK);
-  if (qr.virtualChainRecipient != null || qr.virtualChainRefundRecipient != null || qr.customRecipientMsg != null) throw new QuoteError(CANNOT_CHECK);
+  // Every field is one we sent (deadline aside: a real quote's signed deadline is checked below) or a known default.
+  for (const [k, v] of Object.entries(qr)) {
+    if (k === 'deadline') continue;
+    if (k in want ? v !== want[k as keyof typeof want] : !ADDED_FIELDS[k]?.(v)) throw new QuoteError(CANNOT_CHECK);
+  }
+  for (const k of Object.keys(want)) if (!(k in qr)) throw new QuoteError(CANNOT_CHECK);
   const q = body.quote;
   const amountIn = String(q.amountIn ?? ''), amountOut = String(q.amountOut ?? ''), minOut = String(q.minAmountOut ?? '');
   if (![amountIn, amountOut, minOut].every((x) => /^[1-9]\d{0,30}$/.test(x))) throw new QuoteError(CANNOT_CHECK);
@@ -98,6 +119,8 @@ export async function getFundingQuote(dry: boolean, a: FundingArgs, fetchFn: Fet
   if (!fundingWithinLossBound(amountIn, amountOut, a.chain.decimals)) throw new QuoteError(TOO_COSTLY);
   const depositAddress = typeof q.depositAddress === 'string' ? q.depositAddress : undefined;
   if (!dry && (!depositAddress || evmAddressError(depositAddress))) throw new QuoteError(CANNOT_CHECK);
+  if (!dry && q.depositMemo) throw new QuoteError(CANNOT_CHECK); // an EVM deposit never needs a memo
+  if (!dry && !(Date.parse(String(q.deadline)) > now + MIN_TIME_TO_PAY_MS)) throw new QuoteError(CANNOT_CHECK);
   return {
     amountIn, amountInFormatted: String(q.amountInFormatted ?? ''), amountOut, amountOutFormatted: String(q.amountOutFormatted ?? ''),
     fee: (BigInt(amountIn) > BigInt(amountOut) ? BigInt(amountIn) - BigInt(amountOut) : 0n).toString(),
@@ -135,15 +158,21 @@ export function describeFunding(s: StatusView, chainName: string, account: strin
   return { text: text[s.status] ?? 'Still processing at 1Click.', done, ok, outcome };
 }
 
-/** GET /v0/status every 5 s until a final status or `stop()`, for at most an hour; each answer goes to `onStatus`. */
+/**
+ * GET /v0/status every 5 s until a final status, `isStopped()`, or an hour of wall time; each answer goes to `onStatus`
+ * unless the poller was stopped while the read was out. 'timeout' lets the screen offer "Check Again" for the same address.
+ */
 export async function followFunding(
   depositAddress: string, onStatus: (s: StatusView) => boolean | void, isStopped: () => boolean,
   getStatusFn: (a: string) => Promise<StatusView | null>, wait = (ms: number) => new Promise((r) => setTimeout(r, ms)),
+  clock = () => Date.now(), forMs = 60 * 60_000,
 ): Promise<'done' | 'stopped' | 'timeout'> {
-  for (let i = 0; i < 720; i++) {
+  const until = clock() + forMs;
+  while (clock() < until) {
     if (isStopped()) return 'stopped';
     try {
       const s = await getStatusFn(depositAddress);
+      if (isStopped()) return 'stopped';
       if (s && onStatus(s)) return 'done';
     } catch {
       // a failed read says nothing about the deposit: ask again
@@ -152,6 +181,17 @@ export async function followFunding(
   }
   return 'timeout';
 }
+
+/**
+ * Whether the screen may show the deposit address and "Send exactly". Only while no deposit is seen, the address has
+ * not expired, and (after a reload) 1Click has answered again: a remembered funding never invites a second payment.
+ */
+export const mayPay = (status: PayoutStatus | undefined, fresh: boolean, deadline: string, now: number): boolean =>
+  fresh && (status === undefined || status === 'PENDING_DEPOSIT') && Date.parse(deadline) > now;
+
+/** "Start Over" drops the address: only once 1Click reports a final status, or nothing was ever sent to it in time. */
+export const mayStartOver = (status: PayoutStatus | undefined, deadline: string, now: number): boolean =>
+  status === 'SUCCESS' || status === 'REFUNDED' || status === 'FAILED' || ((status === undefined || status === 'PENDING_DEPOSIT') && Date.parse(deadline) <= now);
 
 /** A funding in flight, kept across reloads (nothing secret: the address and amounts are on chain anyway). */
 export interface SavedFunding {
