@@ -64,6 +64,12 @@ const CSS = `
   body { margin: 0; min-height: 100vh; display: flex; flex-direction: column; background: var(--bg); color: var(--fg);
     font: 400 16px/1.5 var(--font-sans); -webkit-font-smoothing: antialiased; }
   a { color: inherit; }
+  /* Zarf's app texture, verbatim from zarf web/apps/claim (and create) src/app.css .ripple-bg: fingerprint-like rings
+     from the lower right, fixed, no motion. Pure CSS (no image, no new origin). Header, main and footer sit above it. */
+  .ripple-bg { position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity: 0.5; --ripple-color: oklch(from var(--fg) l c h / 0.03);
+    background: repeating-radial-gradient(circle at 90% 90%, transparent 0px, transparent 7px, var(--ripple-color) 8px, transparent 9px); }
+  :root[data-theme='light'] .ripple-bg { --ripple-color: oklch(from var(--fg) l c h / 0.025); opacity: 0.6; }
+  header, main, footer { position: relative; z-index: 1; }
   :focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
   .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .icon { width: 16px; height: 16px; flex-shrink: 0; }
@@ -182,6 +188,7 @@ const html = (siteKey: string, claimHost: string, usdc: string | null) => `<!doc
 <style>${CSS}</style>
 </head>
 <body>
+<div class="ripple-bg" aria-hidden="true"></div>
 <header>
   <a class="lockup" href="${claimHost}/" aria-label="zarf.to home">${MARK(12)}<span>zarf.to</span></a>
   <div class="right">
