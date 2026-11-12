@@ -1,4 +1,4 @@
-// The judges' "try it with your Google email" page (T10). Static, same origin as POST /faucet, no third-party anything.
+// The judges' "try it with your Google email" page. Static, same origin as POST /faucet, no third-party anything.
 import { FAVICON_SVG, SAIRA_WOFF2_B64 } from './assets';
 
 // Turnstile loads its script and its challenge iframe from challenges.cloudflare.com; nothing else is third-party.

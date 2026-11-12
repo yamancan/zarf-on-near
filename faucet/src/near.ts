@@ -1,5 +1,5 @@
 // NEAR transaction encoding (borsh) and signing for one FunctionCall, Web Crypto only.
-// Copied from relayer/src/near.ts (web-agent, T5) and given a `deposit`, which ft_transfer_call
+// Copied from relayer/src/near.ts and given a `deposit`, which ft_transfer_call
 // needs (1 yocto). shortcut: two copies of one encoder; move it into a shared package after the hackathon.
 
 const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
