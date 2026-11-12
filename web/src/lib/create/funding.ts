@@ -182,6 +182,16 @@ export class NotSent extends Error {
   }
 }
 
+/**
+ * The connected wallet no longer holds the account that pinned this send (another tab switched it), so
+ * nothing was signed (T-012 finding 2). Thrown by the wallet before signing; never a send-uncertain case.
+ */
+export class AccountChanged extends Error {
+  constructor(readonly expected: string) {
+    super('ACCOUNT_CHANGED');
+  }
+}
+
 /** The wallet call failed, so we do not know whether it broadcast. Resolve with resolveByRoot; never assume nothing was sent. */
 export class SendUncertain extends Error {
   constructor() {
@@ -282,13 +292,17 @@ export async function fundCampaign(
     } catch (e) {
       throw new NotSent((e as Error).message);
     }
+    const txs = fundingTxs({ ...p, sender: d.sender, contractId: d.contractId, tokenId: d.tokenId, shortfall });
     let hashes: string[];
     try {
-      hashes = await d.send(fundingTxs({ ...p, sender: d.sender, contractId: d.contractId, tokenId: d.tokenId, shortfall }));
-    } catch {
+      hashes = await d.send(txs);
+    } catch (e) {
+      if (e instanceof AccountChanged) throw e; // refused before signing
       throw new SendUncertain(); // the wallet may have broadcast before failing
     }
-    const txHash = hashes[hashes.length - 1]; // ft_transfer_call is always last
+    // ft_transfer_call is always last, but only a full set of hashes says the last one is it (T-012 finding 3):
+    // a wallet that stopped early returned the prepay's hash, which would never show the campaign.
+    const txHash = hashes.length === txs.length ? hashes[hashes.length - 1] : undefined;
     if (!txHash) throw new SendUncertain();
     d.onSent?.(txHash);
     const expect = { merkleRoot: p.merkleRoot, total: p.total };
@@ -355,3 +369,69 @@ export function readMarker(store: Pick<Storage, 'getItem' | 'removeItem'>, key: 
  */
 export const fundsShort = (balance: string | null, total: bigint): bigint =>
   balance === null || !/^\d+$/.test(balance) || BigInt(balance) >= total ? 0n : total - BigInt(balance);
+
+/** The busy line while the wallet is open, and the one once it has returned a hash. */
+export const WAITING_FOR_WALLET = 'Waiting for your wallet…';
+export const CHECKING_TX = 'Checking the transaction…';
+
+/** What /create keeps about a send in progress (session storage), minus the draft it already holds. */
+export interface SendRecord {
+  txHash: string | null;
+  uncertain: boolean;
+}
+
+/**
+ * fundCampaign's beforeSend/onSent for /create, kept here so they are tested. `page` writes the page's state.
+ * - Every attempt starts with no hash and the wallet line, so an E128 auto-retry never keeps the first, refunded
+ *   tx as "the" send, and the page says it waits for the wallet again (T-012 finding 1).
+ * - The `uncertain` flag is saved with the hash too, so a reload still takes the second look (finding 7).
+ */
+export function sendHooks(page: {
+  set(patch: { sentTx?: string | null; busy?: string }): void;
+  uncertain(): boolean;
+  save(r: SendRecord): boolean;
+  pin(): void;
+}): Pick<FundDeps, 'beforeSend' | 'onSent'> {
+  return {
+    beforeSend() {
+      if (!page.save({ txHash: null, uncertain: page.uncertain() })) throw new Error('session storage unavailable');
+      page.set({ sentTx: null, busy: WAITING_FOR_WALLET });
+      page.pin();
+    },
+    onSent(txHash) {
+      page.set({ sentTx: txHash, busy: CHECKING_TX });
+      page.save({ txHash, uncertain: page.uncertain() });
+    },
+  };
+}
+
+/**
+ * After the wallet was rejected and no campaign showed up for this root (T-012 finding 4): wait as
+ * settleAfterUncertain does, then say whether the list is free to change ('free') or the send landed after all.
+ */
+export async function releaseAfterReject(
+  d: Pick<FundDeps, 'campaignByRoot' | 'campaign' | 'sender'>,
+  expect: { merkleRoot: string; total: string },
+  opts?: { waitMs?: number; sleep?: (ms: number) => Promise<void> },
+): Promise<{ kind: 'free' } | { kind: 'created'; campaignId: string }> {
+  const id = await settleAfterUncertain(d, expect, opts);
+  return id ? { kind: 'created', campaignId: id } : { kind: 'free' };
+}
+
+/** How long the wallet may stay open before /create suggests a reload (T-012 finding 5). */
+export const WALLET_WAIT_NOTE_MS = 120_000;
+export const walletWaitNote = (startedMs: number | null, nowMs: number): string | null =>
+  startedMs !== null && nowMs - startedMs >= WALLET_WAIT_NOTE_MS ? 'Closed the wallet? Reload; nothing is lost.' : null;
+
+/**
+ * /campaigns after the wallet returned a hash (T-012 finding 6): read the outcome with lookupOutcome's retries;
+ * null means sent but not read yet, never "not sent".
+ */
+export async function readSentOutcome(d: Pick<FundDeps, 'outcome' | 'lookupRetries' | 'sleep'>, txHash: string): Promise<Outcome | null> {
+  try {
+    return await lookupOutcome(d, txHash);
+  } catch (e) {
+    if (e instanceof LookupPending) return null;
+    throw e;
+  }
+}
