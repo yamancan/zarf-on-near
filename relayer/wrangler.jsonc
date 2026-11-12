@@ -42,7 +42,7 @@
         // Testnet starter NEAR (src/starter.ts): "on" sends 0.02 test NEAR once to a paid destination that holds
         // almost none. Needs the GAS_KEY secret (full-access key of GAS_ACCOUNT_ID, never RELAYER_KEY) and STARTER.
         // Local `wrangler dev` passes only the secrets listed in "required" above: add GAS_KEY there to try it locally.
-        "STARTER_NEAR": "",
+        "STARTER_NEAR": "on",
         "GAS_ACCOUNT_ID": "zarf-near-gas-1112.testnet"
       },
       // StarterGate: one Durable Object that runs every starter send in turn and keeps the once-per-destination

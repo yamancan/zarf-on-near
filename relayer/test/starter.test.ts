@@ -225,6 +225,7 @@ describe('worker: after a paid claim only', () => {
       if (method === 'status') return ok({ chain_id: 'testnet' });
       if (method === 'query' && params.method_name === 'get_config') return view({ token_ids: ['usdc.testnet'] });
       if (method === 'query' && params.method_name === 'required_claim_gas') return view('150000000000000');
+      if (method === 'query' && params.method_name === 'claim_state') return view('unclaimed');
       if (method === 'send_tx') {
         const tx = decodeSignedTransaction(Uint8Array.from(atob(params.signed_tx_base64), (c) => c.charCodeAt(0))).transaction;
         if (tx.signerId === GAS) return (transfers.push(tx.receiverId), signers.push(base58Encode(Uint8Array.from((tx.publicKey as unknown as { ed25519Key: { data: number[] } }).ed25519Key.data))), ok({ status: { SuccessValue: '' } }));
