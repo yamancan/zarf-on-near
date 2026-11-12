@@ -43,7 +43,7 @@
               <span class="text-3xl font-light tracking-tighter tabular-nums">10 <span class="text-xs font-medium uppercase tracking-widest text-zen-primary">{UNIT}</span></span>
               <div class="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg border-[0.5px] border-zen-border">
                 <span class="text-xs font-mono text-zen-fg/80">alice.testnet</span>
-                <span class="flex items-center gap-1 text-[11px] text-zen-success-content"><Check class="w-3 h-3" />found</span>
+                <span class="flex items-center gap-1 text-[11px] text-zen-success"><Check class="w-3 h-3" />found</span>
               </div>
               <img src={themeStore.isDark ? '/google/signin-dark.svg' : '/google/signin-light.svg'} alt="" width="150" height="33" />
             </div>

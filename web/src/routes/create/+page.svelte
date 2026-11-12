@@ -787,7 +787,7 @@
                   <span class="flex flex-wrap items-center gap-x-1.5 text-xs text-zen-fg-muted tabular-nums">
                     <span class="whitespace-nowrap">{formatAmount(BigInt(r.amount))} <span class="text-[10px] uppercase tracking-widest">{UNIT}</span></span>
                     {#if c === 'claimed'}
-                      <span class="inline-flex items-center gap-1 whitespace-nowrap text-zen-success-content">· <Check class="w-3 h-3" aria-hidden="true" />Claimed</span>
+                      <span class="inline-flex items-center gap-1 whitespace-nowrap text-zen-success">· <Check class="w-3 h-3" aria-hidden="true" />Claimed</span>
                     {:else if c === 'pending'}
                       <span class="inline-flex items-center gap-1 whitespace-nowrap">· <Clock class="w-3 h-3" aria-hidden="true" />Being paid</span>
                     {:else if c === 'unclaimed'}
@@ -851,14 +851,6 @@
     </div>
   {:else}
     <div class="relative isolate flex flex-col lg:flex-row lg:items-start gap-10 lg:gap-12">
-      {#if step === 0}
-        <!-- Background decor of create step 1 (main repo apps/create/src/routes/wizard/step-0/+page.svelte): the
-             same blob. Not clipped to this block (that shows straight edges); the page wrapper clips the overflow
-             sideways instead, so a 390 px screen never scrolls and the sticky preview keeps working -->
-        <div class="absolute inset-0 -z-10 pointer-events-none" aria-hidden="true">
-          <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-125 h-125 bg-zen-fg/5 rounded-full blur-[120px]"></div>
-        </div>
-      {/if}
       <!-- Form: the step question is the page title -->
       <section class="w-full lg:max-w-xl lg:shrink-0 flex flex-col gap-4" aria-labelledby="step-h">
         <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 mb-2">
@@ -1148,7 +1140,7 @@
           <ZenCard variant="elevated" padding="lg">
             <div class="flex flex-col items-center text-center gap-4 {parsed.rows.length ? '' : 'opacity-50'}" aria-hidden="true">
               <Medallion icon={Mail} />
-              <Amount label="Waiting for you" value={previewAmount} unit={UNIT} glow={false} />
+              <Amount label="Waiting for you" value={previewAmount} unit={UNIT} />
               <span class="text-xs text-zen-fg-muted">From {#if account}<span class="font-mono">{account}</span>{:else}you{/if}{#if previewLeft}{' · '}{previewLeft}{/if}</span>
               <!-- The landing's step 02 scene: their NEAR account first, then Google -->
               <div class="w-full max-w-[240px] flex flex-col items-center gap-2.5">

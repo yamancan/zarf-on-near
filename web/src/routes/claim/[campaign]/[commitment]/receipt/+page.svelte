@@ -297,17 +297,17 @@
           <!-- Two legs, one mark each: the NEAR claim, then the bridge payout -->
           <ol class="w-full flex flex-col gap-3 text-left text-sm border-y-[0.5px] border-zen-border-subtle py-4 my-1">
             <li class="flex items-center gap-3">
-              <Check class="w-4 h-4 text-zen-success-content shrink-0" aria-hidden="true" />
+              <Check class="w-4 h-4 text-zen-success shrink-0" aria-hidden="true" />
               <span class="flex-1">Claimed on NEAR</span>
               {#if explorer}<a href={explorer} target="_blank" rel="noopener noreferrer" class="inline-flex items-center min-h-11 text-xs text-zen-fg-muted underline underline-offset-2 hover:text-zen-fg">Transaction</a>{/if}
             </li>
             <li class="flex items-center gap-3">
-              {#if arrived}<Check class="w-4 h-4 text-zen-success-content shrink-0" aria-hidden="true" />
-              {:else if refunded}<Undo2 class="w-4 h-4 text-zen-error-content shrink-0" aria-hidden="true" />
-              {:else if lost}<AlertTriangle class="w-4 h-4 text-zen-error-content shrink-0" aria-hidden="true" />
+              {#if arrived}<Check class="w-4 h-4 text-zen-success shrink-0" aria-hidden="true" />
+              {:else if refunded}<Undo2 class="w-4 h-4 text-zen-error shrink-0" aria-hidden="true" />
+              {:else if lost}<AlertTriangle class="w-4 h-4 text-zen-error shrink-0" aria-hidden="true" />
               {:else if waiting || refunding}<Clock class="w-4 h-4 text-zen-fg-muted shrink-0" aria-hidden="true" />
               {:else}<Loader2 class="w-4 h-4 text-zen-fg-muted shrink-0 animate-spin" aria-hidden="true" />{/if}
-              <span class="flex-1 {refunded || lost ? 'text-zen-error-content' : ''}" role="status">{waiting ? 'Waiting for the bridge for 30 minutes.' : (bridgeView?.text ?? 'Sent from NEAR, waiting for the bridge.')}</span>
+              <span class="flex-1 {refunded || lost ? 'text-zen-error' : ''}" role="status">{waiting ? 'Waiting for the bridge for 30 minutes.' : (bridgeView?.text ?? 'Sent from NEAR, waiting for the bridge.')}</span>
             </li>
           </ol>
           {#if refunded || refunding || lost}<p class="text-sm text-zen-fg-muted max-w-xs">{nextStep(outcome)}</p>{/if}

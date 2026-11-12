@@ -203,11 +203,11 @@
       class="flex flex-col sm:flex-row items-center gap-4 mt-6 w-full sm:w-auto transition-all duration-700 ease-out {mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-5'}"
       style="transition-delay: 1200ms;"
     >
-      <ZenButton href={tryUrl} variant="primary" size="lg" class="rounded-full !bg-zen-fg/90 backdrop-blur-sm !text-zen-bg hover:shadow-lg hover:shadow-zen-fg/10 w-full sm:w-auto">
+      <ZenButton href={tryUrl} variant="primary" size="lg" class="w-full sm:w-auto">
         Try it with Google
         {#snippet iconRight()}<ArrowRight class="w-3.5 h-3.5" />{/snippet}
       </ZenButton>
-      <ZenButton href="/create" variant="secondary" size="lg" class="rounded-full !bg-zen-fg/5 backdrop-blur-md !text-zen-fg/80 !border-zen-fg/10 w-full sm:w-auto">
+      <ZenButton href="/create" variant="secondary" size="lg" class="w-full sm:w-auto">
         Send USDC
       </ZenButton>
     </div>
