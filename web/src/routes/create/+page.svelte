@@ -15,7 +15,7 @@
   import { mayNotSignIn } from '$lib/create/googleSignIn';
   import { nearConnectWallet, type SenderWallet } from '$lib/create/wallet';
   import { deadlineText, timeLeft } from '$lib/claim';
-  import { formatNear } from '$lib/create/campaigns';
+  import { formatNear, sig3 } from '$lib/create/campaigns';
   import { getClaimState, nearView, type ClaimState } from '$lib/services';
   import { CIRCLE_LINE, TESTNET, UNIT } from '$lib/network';
   import { ArrowRight, ArrowUpRight, Check, CheckCircle2, ChevronDown, Copy, Download, ExternalLink, Eye, Info, Lock, Mail, Plus, RefreshCw } from 'lucide-svelte';
@@ -180,14 +180,6 @@
   const short = $derived(fundsShort(balance, parsed.total));
   /** NEAR rounded up to the 5 decimals shown: a figure that is needed is never understated. */
   const nearUp = (y: bigint) => formatNear((y + 10n ** 19n - 1n).toString());
-  /** Display only (design spec G6f): NEAR to 3 significant digits, 4.99818 → 5.00, 0.01434 → 0.0143; `up` never shows less than a need. */
-  const sig3 = (y: bigint, up = false) => {
-    const v = Number(y) / 1e24;
-    if (v === 0) return '0';
-    if (v >= 1000) return Math.round(v).toLocaleString('en-US');
-    const step = 10 ** (Math.floor(Math.log10(v)) - 2);
-    return ((up ? Math.ceil(v / step - 1e-9) : Math.round(v / step)) * step).toPrecision(3);
-  };
   // Read again when the window regains focus or on "Check again": a sender who tops up is not stuck until a reload.
   let balanceTick = $state(0);
   let balanceFor: string | null = null;

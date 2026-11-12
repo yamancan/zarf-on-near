@@ -75,6 +75,19 @@ export const withdrawTx = (sender: string, contractId: string): Tx => ({
   actions: [{ type: 'FunctionCall', params: { methodName: 'prepay_withdraw', args: {}, gas: (30n * TGAS).toString(), deposit: '0' } }],
 });
 
+/**
+ * Display only (design spec G6f): yoctoNEAR as NEAR to 3 significant digits, 4.99818 → "5.00", 0.01434 → "0.0143";
+ * `up` rounds up, so a need is never shown smaller than it is. 1000 and above: whole NEAR.
+ */
+export function sig3(yocto: bigint, up = false): string {
+  const v = Number(yocto) / 1e24;
+  if (v === 0) return '0';
+  if (v >= 1000) return (up ? Math.ceil(v) : Math.round(v)).toLocaleString('en-US');
+  const step = 10 ** (Math.floor(Math.log10(v)) - 2);
+  const r = (up ? Math.ceil(v / step - 1e-9) : Math.round(v / step)) * step;
+  return r >= 1000 ? Math.round(r).toLocaleString('en-US') : r.toPrecision(3);
+}
+
 /** yoctoNEAR as NEAR with up to 5 decimals (display only). */
 export function formatNear(yocto: string): string {
   const v = BigInt(yocto);
