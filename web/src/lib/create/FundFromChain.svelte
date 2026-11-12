@@ -7,7 +7,7 @@
   import { ArrowLeftRight, CheckCircle2, Clock, AlertTriangle } from 'lucide-svelte';
   import { evmAddressError, getStatus, QuoteError, type StatusView } from '$lib/intents';
   import {
-    describeFunding, followFunding, FUNDING_CHAINS, FUNDING_LIFETIME_MS, getFundingQuote, loadFunding, mayPay, mayStartOver, refundConfirmed, saveFunding,
+    archiveFunding, describeFunding, earlierFundings, followFunding, FUNDING_CHAINS, FUNDING_LIFETIME_MS, getFundingQuote, loadFunding, mayPay, mayStartOver, refundConfirmed, saveFunding, unresolved,
     TESTNET_PREVIEW_RECIPIENT, type FundingQuote, type SavedFunding,
   } from './fundIn';
   import { formatAmount } from './recipients';
@@ -42,7 +42,8 @@
   const line = $derived(saved && status && chain ? describeFunding(status, chain.name, account, saved.refundTo, saved.depositAddress) : null);
   const canPay = $derived(!!saved && mayPay(status?.status, fresh, saved.deadline, now));
   const expired = $derived(!!saved && Date.parse(saved.deadline) <= now && (!status || status.status === 'PENDING_DEPOSIT'));
-  const canStartOver = $derived(!!saved && mayStartOver(status?.status, saved.deadline, now));
+  const canStartOver = $derived(!!saved && mayStartOver(status?.status, fresh, saved.deadline, now));
+  let earlier = $state<SavedFunding[]>([]);
   const when = (iso: string) => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(Date.parse(iso));
   const usdc = (v: string) => formatAmount(BigInt(v));
   const feeOf = (i: string, o: string) => (BigInt(i) > BigInt(o) ? BigInt(i) - BigInt(o) : 0n).toString();
@@ -50,6 +51,7 @@
   onMount(() => {
     // A funding this browser started: its last known status at once, the address only after 1Click answers again.
     saved = loadFunding(contract, account);
+    earlier = earlierFundings(contract, account);
     if (saved) {
       status = saved.status ? { status: saved.status } : null;
       if (!saved.status || !describeFunding({ status: saved.status }, '', '', '', '').done) follow(saved);
@@ -113,6 +115,10 @@
   function startOver() {
     if (!canStartOver) return;
     poller++;
+    if (saved && unresolved(status?.status)) {
+      archiveFunding(contract, account, saved); // expired and unpaid as far as 1Click knows: kept as a reference
+      earlier = earlierFundings(contract, account);
+    }
     saveFunding(contract, account, null);
     saved = quote = status = null;
     fresh = stalled = false;
@@ -202,6 +208,16 @@
         </div>
       {/if}
     </div>
+  {/if}
+  {#if earlier.length && !saved}
+    <div class="flex flex-col gap-1 text-xs text-zen-fg-subtle">
+      {#each earlier as e (e.depositAddress)}
+        <p class="break-all">Earlier address, expired: <span class="font-mono">{e.depositAddress}</span>. If you sent to it, 1Click refunds to <span class="font-mono">{e.refundTo}</span>; give 1Click support this address.</p>
+      {/each}
+    </div>
+  {/if}
+  {#if saved}
+    <!-- shown above -->
   {:else if need > 0n}
     <div class="flex flex-col gap-3">
       <div class="text-[10px] uppercase tracking-[0.3em] text-zen-fg-subtle font-bold" id="pay-with">Pay With</div>

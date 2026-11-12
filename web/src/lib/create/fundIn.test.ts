@@ -3,7 +3,7 @@ import live from './fixtures/oneclick-dry-exact-output.json';
 import { NEAR_USDC_ASSET, QuoteError, type StatusView } from '../intents';
 import { ed25519B58, quoteSignedBytes, verifyQuoteSignature } from '../oneclickSig';
 import {
-  CANNOT_CHECK, MAX_QUOTE_AGE_MS, mayPay, mayStartOver, describeFunding, FUNDING_CHAINS, followFunding, fundingCapError, fundingRequest, fundingWithinLossBound,
+  CANNOT_CHECK, MAX_QUOTE_AGE_MS, mayPay, mayStartOver, unresolved, archiveFunding, earlierFundings, describeFunding, FUNDING_CHAINS, followFunding, fundingCapError, fundingRequest, fundingWithinLossBound,
   getFundingQuote, loadFunding, refundConfirmed, saveFunding, TOO_COSTLY, type FundingArgs,
 } from './fundIn';
 
@@ -96,6 +96,8 @@ describe('quote signature, checked in the browser with the pinned key', () => {
     for (const edit of [
       (x: typeof live) => { (x.quoteRequest as Record<string, unknown>).referral = 'someone'; },
       (x: typeof live) => { x.quoteRequest.appFees = [{ recipient: 'x.near', fee: 50 }]; },
+      (x: typeof live) => { x.quoteRequest.appFees = [{ recipient: 'attacker.near', fee: 1 }]; }, // foreign recipient at 1 bp
+      (x: typeof live) => { x.quoteRequest.appFees = [{ recipient: x.quoteRequest.appFees[0].recipient, fee: 2 }]; },
       (x: typeof live) => { x.quoteRequest.depositMode = 'MEMO'; },
       (x: typeof live) => { (x.quoteRequest as Record<string, unknown>).virtualChainRecipient = 'v.near'; },
       (x: typeof live) => { (x.quoteRequest as Record<string, unknown>).somethingNew = 1; },
@@ -167,12 +169,24 @@ describe('each status on the funding screen', () => {
     for (const st of ['KNOWN_DEPOSIT_TX', 'PROCESSING', 'SUCCESS', 'INCOMPLETE_DEPOSIT', 'REFUNDED', 'FAILED'] as const) expect(mayPay(st, true, later, AT)).toBe(false);
     expect(mayPay('PENDING_DEPOSIT', true, later, AT + 3600e3)).toBe(false); // expired
   });
-  it('"Start Over" only when nothing more can arrive at the address', () => {
+  it('"Start Over" only after a final status, or an expired address 1Click confirmed as still waiting', () => {
     const later = new Date(AT + 3600e3).toISOString();
-    for (const st of ['SUCCESS', 'REFUNDED', 'FAILED'] as const) expect(mayStartOver(st, later, AT)).toBe(true);
-    for (const st of ['PENDING_DEPOSIT', 'KNOWN_DEPOSIT_TX', 'PROCESSING', 'INCOMPLETE_DEPOSIT'] as const) expect(mayStartOver(st, later, AT)).toBe(false);
-    expect(mayStartOver('PENDING_DEPOSIT', later, AT + 3600e3)).toBe(true); // expired with nothing sent
-    expect(mayStartOver('PROCESSING', later, AT + 3600e3)).toBe(false);
+    for (const st of ['SUCCESS', 'REFUNDED', 'FAILED'] as const) expect(mayStartOver(st, false, later, AT)).toBe(true);
+    for (const st of ['PENDING_DEPOSIT', 'KNOWN_DEPOSIT_TX', 'PROCESSING', 'INCOMPLETE_DEPOSIT'] as const) expect(mayStartOver(st, true, later, AT)).toBe(false);
+    expect(mayStartOver('PENDING_DEPOSIT', true, later, AT + 3600e3)).toBe(true); // expired, 1Click asked since: kept as an earlier address
+    expect(mayStartOver('PENDING_DEPOSIT', false, later, AT + 3600e3)).toBe(false); // expired but 1Click unreachable: keep tracking
+    expect(mayStartOver(undefined, false, later, AT + 3600e3)).toBe(false);
+    expect(mayStartOver('PROCESSING', true, later, AT + 3600e3)).toBe(false);
+    expect(unresolved('PENDING_DEPOSIT')).toBe(true);
+    expect(unresolved('SUCCESS')).toBe(false);
+  });
+  it('an unresolved address that starts over is kept as an earlier address', () => {
+    const m = new Map<string, string>();
+    const store = { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k) } as Storage;
+    const f = { chainKey: 'base', depositAddress: dep, refundTo: REFUND, amountIn: '1', amountInFormatted: '0.000001', amountOut: '1', deadline: 'x' };
+    archiveFunding('c', 'a.near', f, store);
+    expect(earlierFundings('c', 'a.near', store)).toEqual([f]);
+    expect(earlierFundings('c', 'b.near', store)).toEqual([]);
   });
   it('the poller stops at a final status', async () => {
     const seq: StatusView[] = [{ status: 'PENDING_DEPOSIT' }, { status: 'PROCESSING' }, { status: 'SUCCESS' }];

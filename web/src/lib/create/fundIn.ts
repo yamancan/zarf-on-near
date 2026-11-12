@@ -76,9 +76,11 @@ const ADDED_FIELDS: Record<string, (v: unknown) => boolean> = {
   quoteWaitingTimeMs: (v) => v === undefined || v === 0,
   insured: (v) => v === undefined || v === false,
   referral: (v) => v === undefined || v === null || v === '',
-  // 1Click's own default fee entry (1 bp seen on 13 Nov); the loss bound below covers whatever it costs.
-  appFees: (v) => v === undefined || (Array.isArray(v) && v.length <= 1 && v.every((f) => f && typeof f.recipient === 'string' && Number.isInteger(f.fee) && f.fee >= 0 && f.fee <= 10)),
+  // 1Click's own default fee entry, exactly as seen on 13 Nov 2026 (1 bp to its keyless account); anything else fails closed.
+  appFees: (v) => v === undefined || (Array.isArray(v) && v.length <= 1 && v.every((f) => f && f.recipient === ONECLICK_FEE_RECIPIENT && Number.isInteger(f.fee) && f.fee >= 0 && f.fee <= 1)),
 };
+/** The fee recipient 1Click puts on every quote by default (an implicit account; seen on every quote 13 Nov 2026). */
+export const ONECLICK_FEE_RECIPIENT = '5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd';
 /** A real quote must leave this long to pay before its address goes inactive. */
 export const MIN_TIME_TO_PAY_MS = 10 * 60_000;
 /** A quote signed longer ago than this (or this far in the future) is a replay or a broken clock: refused. */
@@ -189,9 +191,15 @@ export async function followFunding(
 export const mayPay = (status: PayoutStatus | undefined, fresh: boolean, deadline: string, now: number): boolean =>
   fresh && (status === undefined || status === 'PENDING_DEPOSIT') && Date.parse(deadline) > now;
 
-/** "Start Over" drops the address: only once 1Click reports a final status, or nothing was ever sent to it in time. */
-export const mayStartOver = (status: PayoutStatus | undefined, deadline: string, now: number): boolean =>
-  status === 'SUCCESS' || status === 'REFUNDED' || status === 'FAILED' || ((status === undefined || status === 'PENDING_DEPOSIT') && Date.parse(deadline) <= now);
+/**
+ * "Start Over": after a final status; or for an expired address that 1Click, asked since this page opened, still
+ * shows as waiting. Expiry is no proof nothing was sent, so that record is not dropped: it moves to the earlier
+ * addresses (archiveFunding), shown with its refund address as a reference for 1Click support.
+ */
+export const mayStartOver = (status: PayoutStatus | undefined, fresh: boolean, deadline: string, now: number): boolean =>
+  status === 'SUCCESS' || status === 'REFUNDED' || status === 'FAILED' || (fresh && (status === undefined || status === 'PENDING_DEPOSIT') && Date.parse(deadline) <= now);
+/** Whether a record must be kept as an earlier address when the screen starts over (anything not final). */
+export const unresolved = (status: PayoutStatus | undefined): boolean => status !== 'SUCCESS' && status !== 'REFUNDED' && status !== 'FAILED';
 
 /** A funding in flight, kept across reloads (nothing secret: the address and amounts are on chain anyway). */
 export interface SavedFunding {
@@ -213,6 +221,27 @@ export function saveFunding(contract: string, account: string, f: SavedFunding |
     else s.removeItem(fundingKey(contract, account));
   } catch {
     // best effort: without it a reload loses the live status, never the deposit (1Click still has it)
+  }
+}
+
+const earlierKey = (contract: string, account: string) => `zarf-near:funding-earlier:${contract}/${account}`;
+
+/** Keeps an unresolved funding's address and refund address when the screen starts over (the last 5). */
+export function archiveFunding(contract: string, account: string, f: SavedFunding, store?: Storage): void {
+  try {
+    const s = store ?? localStorage;
+    s.setItem(earlierKey(contract, account), JSON.stringify([f, ...earlierFundings(contract, account, s)].slice(0, 5)));
+  } catch {
+    // best effort, as saveFunding
+  }
+}
+
+export function earlierFundings(contract: string, account: string, store?: Storage): SavedFunding[] {
+  try {
+    const list = JSON.parse((store ?? localStorage).getItem(earlierKey(contract, account)) ?? '[]');
+    return Array.isArray(list) ? list.filter((f: SavedFunding) => f && !evmAddressError(f.depositAddress) && !evmAddressError(f.refundTo)) : [];
+  } catch {
+    return [];
   }
 }
 
