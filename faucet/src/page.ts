@@ -20,6 +20,8 @@ const X_ICON = '<svg class="icon" fill="currentColor" viewBox="0 0 24 24" aria-h
 // Where a judge without an account makes one: a wallet, in a new tab, so this tab keeps the issued link (as the claim card).
 // NEAR's own guide: MyNearWallet ended account creation, and the guide names the wallets that still create testnet accounts.
 const WALLET = 'https://docs.near.org/getting-started/create-account';
+// The screenshot gallery (preview worker): every screen of the flow, for a judge who wants to look first.
+const GALLERY = 'https://zarf-near-claim-preview.sparkling-queen-5e77.workers.dev/gallery/';
 
 /** Token base units (6 decimals) as a decimal string, e.g. "500000" -> "0.5"; null unless a positive integer. */
 export const usdcText = (amount: string): string | null => {
@@ -114,7 +116,8 @@ const CSS = `
   input:focus { outline: none; }
   input:focus-visible { border-color: var(--fg); box-shadow: 0 0 0 1px var(--fg); }
   input[aria-invalid='true'] { border-color: var(--error); }
-  .cf-turnstile { margin-top: 16px; min-height: 65px; }
+  /* Turnstile "flexible": full width (min 300 px), clipped to the input's 12 px radius. */
+  .ts { margin-top: 16px; min-height: 65px; border-radius: 12px; overflow: hidden; }
   /* ZenButton primary / secondary: full pill, text-sm semibold. */
   .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; padding: 12px 24px;
     font: 600 14px/1.2 var(--font-sans); letter-spacing: 0.02em; border: 0; border-radius: 9999px; cursor: pointer; text-decoration: none; transition: background .2s, box-shadow .2s, color .2s; }
@@ -139,6 +142,7 @@ const CSS = `
   .note p { margin: 0; text-wrap: pretty; }
   .note.error { color: var(--error); }
   .note.wait { color: var(--warning); }
+  h2 + .note { margin-top: 16px; }
 
   /* "How this works": the detail, one layer down; the claim card's disclosure (centred, chevron after the label). */
   details { margin-top: 24px; padding-top: 16px; border-top: 0.5px solid var(--border-subtle); font-size: 13px; color: var(--fg-muted); }
@@ -205,24 +209,26 @@ const html = (siteKey: string, claimHost: string, usdc: string | null) => `<!doc
   <div class="card">
     <div id="ask">
       <div class="medallion">${ICON(MAIL)}</div>
-      <h1>Get ${usdc ? usdc + ' ' : ''}test USDC at your Google email.</h1>
-      <p class="lede">Claim it with Google into a NEAR testnet account. Test tokens, no real value.</p>
+      <h1>Try Zarf</h1>
+      <p class="lede">A test claim link for your Google email. Claiming is free: Zarf pays the NEAR gas.</p>
+      ${usdc ? `<div class="amount"><span class="label">Claim Amount</span><span class="figure"><span class="value">${usdc}</span><span class="unit">test USDC</span></span></div>` : ''}
       <form id="f" novalidate>
         <label for="email">Your Google email</label>
         <input id="email" name="email" type="email" autocomplete="email" inputmode="email" required spellcheck="false" autocapitalize="off" placeholder="you@gmail.com">
-        <div class="cf-turnstile" data-sitekey="${siteKey}" data-response-field="false"></div>
+        <div class="ts"><div class="cf-turnstile" data-sitekey="${siteKey}" data-size="flexible" data-response-field="false"></div></div>
         <button id="go" class="btn primary" type="submit">Create my claim link</button>
       </form>
     </div>
     <div id="out" role="status" aria-live="polite"></div>
     <p class="hint">No NEAR testnet account? <a id="wallet" href="${WALLET}" target="_blank" rel="noopener noreferrer">Create a free account in a NEAR wallet</a>, such as Meteor (choose testnet). This tab keeps your link.</p>
+    <p class="hint">Want to look first? <a href="${GALLERY}" target="_blank" rel="noopener noreferrer">See every screen</a>.</p>
     <details>
       <summary>How this works ${ICON(CHEVRON)}</summary>
       <ul class="more">
         <li>We create a NEAR testnet campaign that holds the test USDC for your email and show you its claim link here. Nothing is emailed: this is the link a sender would email you.</li>
         <li>Open the link, pick your NEAR testnet account, and sign in with that same Google account. The USDC goes to that account.</li>
         <li>Your email never goes on chain; the chain stores a salted hash. Our verifier, operated by Trion Labs, sees your email once, when you claim.</li>
-        <li>Testnet only. One link per email per day.</li>
+        <li>Testnet only. One link per email per day: ask again with the same email and you get the same link back.</li>
       </ul>
     </details>
   </div>
@@ -355,14 +361,23 @@ const JS = `(() => {
       }
       const usdc = (Number(body.amount) / 1e6).toString();
       const who = f.email.value.trim();
+      // Demo mode created nothing on chain: never the green "ready" for a link that cannot work.
+      if (body.stub) {
+        const title = el('h2', { tabIndex: -1 }, 'Demo only: no link was created');
+        ask.hidden = true;
+        show([title, note('wait', 'This faucet is in demo mode. Nothing was created on NEAR, so there is no link to claim.')]);
+        title.focus();
+        return;
+      }
       const medal = el('div', { className: 'medallion ok' });
       medal.append(icon('copied'));
-      const title = el('h2', { tabIndex: -1 }, 'Your link is ready');
+      const title = el('h2', { tabIndex: -1 }, body.reshown ? 'Your link from earlier' : 'Your link is ready');
       const amount = el('div', { className: 'amount' });
       const figure = el('span', { className: 'figure' });
       figure.append(el('span', { className: 'value' }, usdc), el('span', { className: 'unit' }, 'test USDC'));
       amount.append(el('span', { className: 'label' }, 'Waiting for you'), figure, el('span', { className: 'for' }, 'for ' + who));
-      const open = el('a', { className: 'btn primary', href: body.claim_url });
+      // A new tab: this page keeps the link on screen while the claim page strips its secret part.
+      const open = el('a', { className: 'btn primary', href: body.claim_url, target: '_blank', rel: 'noopener' });
       open.append(el('span', {}, 'Open it and claim'), icon('arrow'));
       const actions = el('div', { className: 'actions' });
       actions.append(open, copyButton(body.claim_url));
@@ -373,7 +388,6 @@ const JS = `(() => {
         el('p', { className: 'link', title: body.claim_url }, middle(body.claim_url)),
         actions,
         el('p', { className: 'next' }, 'Sign in with ' + who + ' when it asks. The link works until ' + until(Number(BigInt(body.deadline_ns) / 1000000n)) + '; keep it private.'),
-        ...(body.stub ? [note('wait', 'Demo mode: this campaign was not created on chain.')] : []),
       ]);
       title.focus();
     } catch {

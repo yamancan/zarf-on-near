@@ -1,6 +1,6 @@
 import { canonicalizeEmail, claimLink, commitment, hex, leaf } from './claim';
 import { CreateError, type CampaignCreator } from './creator';
-import { takeQuota, type KvLike, type Limits } from './limits';
+import { readLink, saveLink, takeQuota, type KvLike, type Limits } from './limits';
 
 export interface FaucetDeps {
   claimHost: string; // https://<claim-host>
@@ -30,6 +30,10 @@ export async function handleFaucet(input: unknown, ip: string, d: FaucetDeps): P
   if (!canonical || !/^[^@]+@[^@]+\.[^@]+$/.test(canonical)) return { status: 400, body: { error: 'BAD_EMAIL' } };
 
   const nowMs = d.nowMs ?? Date.now();
+  // Asked again today (Turnstile already passed): the same link, no new campaign, no quota spent. Only the
+  // Google account behind this email can claim it, so showing it again gives nobody else anything.
+  const earlier = await readLink(d.kv, d.limitKey, canonical, nowMs);
+  if (earlier) return { status: 200, body: { ...earlier, reshown: true } };
   // A failed create spends the IP and day slots but not the email's (see takeQuota).
   const quota = await takeQuota(d.kv, d.limitKey, d.limits, ip, canonical, nowMs);
   if (!quota.ok) return { status: 429, body: { error: quota.code } };
@@ -42,24 +46,24 @@ export async function handleFaucet(input: unknown, ip: string, d: FaucetDeps): P
   let created;
   try {
     created = await d.creator.create({ merkleRoot: root, amount: d.amount, deadlineNs });
-    await quota.commitEmail();
   } catch (e) {
     if (e instanceof CreateError) return { status: 503, body: { error: e.code } };
     console.log('faucet_create_failed'); // fixed tag: never the error, which could carry request data
     return { status: 503, body: { error: 'CREATE_FAILED' } };
   }
 
-  return {
-    status: 200,
-    body: {
-      // Amount and the (empty) proof travel in the link; no leaf list is published (spec).
-      claim_url: claimLink(d.claimHost, created.campaignId, c, hex(salt), d.amount),
-      campaign_id: created.campaignId,
-      commitment: c,
-      amount: d.amount,
-      deadline_ns: deadlineNs,
-      tx_hash: created.txHash,
-      ...(d.creator.live ? {} : { stub: true }),
-    },
+  const body = {
+    // Amount and the (empty) proof travel in the link; no leaf list is published (spec).
+    claim_url: claimLink(d.claimHost, created.campaignId, c, hex(salt), d.amount),
+    campaign_id: created.campaignId,
+    commitment: c,
+    amount: d.amount,
+    deadline_ns: deadlineNs,
+    tx_hash: created.txHash,
+    ...(d.creator.live ? {} : { stub: true }),
   };
+  // Neither write throws; the link is saved first so a spent email counter always has a link to show again.
+  await saveLink(d.kv, d.limitKey, canonical, nowMs, body);
+  await quota.commitEmail();
+  return { status: 200, body };
 }
