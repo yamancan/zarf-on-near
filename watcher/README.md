@@ -8,9 +8,13 @@ A Cloudflare cron Worker that runs every 2 minutes and sends an alert to `ALERT_
   - a verifier key added to or removed from `owner_keys`, compared with `EXPECTED_SIGNERS`;
 - **the live claim page** (`CLAIM_PAGE_URL`) differs from `expected/<network>.json`. That file holds the
   sha256 of its HTML (per-request CSP nonces removed) and of every same-origin script it loads, followed
-  through static and dynamic imports: a changed, added or missing script is reported by path;
+  through static and dynamic imports: a changed, added or missing script is reported by path. This check catches drift and outsiders only: it fetches one fixed claim path, and a hostile
+  claim Worker controls what it returns. A change reverted before a run looks is not seen either. Anyone
+  holding the account's deploy token can also redeploy or delete the watcher itself;
 - **it cannot check**: the RPC or the page cannot be read, the config is empty, or the page loads more
-  scripts than `MAX_SCRIPTS`. Silence means "checked and clean", never "could not look".
+  scripts than `MAX_SCRIPTS`. A run that executes and cannot check alerts. Silence is not proof of a clean
+  check: a watcher that does not run at all (cron off, Worker deleted, account or billing stopped, a run
+  that throws, a webhook that fails) is silent too, and nothing here alerts on that.
 
 An alert repeats on every run while its condition holds (a pending upgrade pages every 2 minutes until it is
 applied or cancelled). The upgrade delay is 10 min on testnet and at most 1 h on mainnet, so somebody must
