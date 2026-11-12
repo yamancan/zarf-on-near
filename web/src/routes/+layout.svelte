@@ -4,11 +4,13 @@
   import { page } from '$app/state';
   import { beforeNavigate } from '$app/navigation';
   import { TESTNET } from '$lib/network';
+  import { brandName } from '$lib/text';
   import ZarfMark from '$lib/ZarfMark.svelte';
   import ThemeToggle from '$lib/zen/components/ThemeToggle.svelte';
   import { themeStore } from '$lib/zen/stores/themeStore.svelte';
 
   let { children } = $props();
+  const brand = brandName(location.hostname); // ssr=false: always in the browser
   let scrollY = $state(0);
   const NAV = [
     { href: '/create', label: 'Send' },
@@ -36,7 +38,7 @@
   <!-- Brand kit lockup: the mark as tall as the "f" of zarf.to; ink gap mark→"z" 0.4x the mark (the "z" side
        bearing and the mark's own edge add about 2 px to the box gap, measured from renders) -->
   <span class="flex items-center {small ? 'gap-[2px] text-xs' : 'gap-[3px] text-base'} font-semibold tracking-tight">
-    <ZarfMark size={small ? 11 : 12} />zarf.to
+    <ZarfMark size={small ? 11 : 12} />{brand}
   </span>
 {/snippet}
 
@@ -52,7 +54,7 @@
   <header class="h-16 flex items-center justify-between gap-3 px-4 sm:px-6 sticky top-0 z-50 transition-all duration-500
     {!landing ? 'bg-zen-bg border-b-[0.5px] border-zen-border-subtle' : scrollY > 20 ? 'backdrop-blur-xl bg-base-100/70 border-b border-base-content/5' : 'bg-transparent border-b border-transparent'}">
     <div class="flex items-center gap-4 sm:gap-5 md:gap-8">
-      <a href="/" class="group flex items-center min-h-11 opacity-80 hover:opacity-100 transition-opacity" aria-label="zarf.to home">
+      <a href="/" class="group flex items-center min-h-11 opacity-80 hover:opacity-100 transition-opacity" aria-label="{brand} home">
         {@render lockup(false)}
       </a>
       <!-- Zarf hides the nav below md; here Send stays reachable on phones (critic P1-24), but not for recipients -->
@@ -106,7 +108,7 @@
   <footer class="relative mt-auto border-t border-base-content/5 overflow-hidden">
     <div class="container mx-auto px-6 py-10 relative z-10">
       <div class="flex flex-col md:flex-row justify-between items-center gap-5">
-        <a href="/" class="flex items-center gap-2 text-zen-fg-muted hover:text-base-content/60 transition-colors duration-300" aria-label="zarf.to home">
+        <a href="/" class="flex items-center gap-2 text-zen-fg-muted hover:text-base-content/60 transition-colors duration-300" aria-label="{brand} home">
           {@render lockup(true)}
         </a>
 

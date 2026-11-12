@@ -64,6 +64,13 @@ describe('verifier and relayer', () => {
     expect(isUnmapped(new ClaimError('E999'))).toBe(true);
     expect(isUnmapped(new ClaimError('COMMITMENT_MISMATCH'))).toBe(false);
   });
+  it('a different Google account: names the sender typo case and sends the recipient back to the sender (T-004)', () => {
+    const m = describeError(new ClaimError('COMMITMENT_MISMATCH'));
+    expect(m).toMatch(/different Google account/);
+    expect(m).toMatch(/sender may have typed it differently/);
+    expect(m).toMatch(/send a new link/);
+    expect(m).toMatch(/goes back to them after the deadline/);
+  });
   it.each([
     ['DESTINATION_CREDITS_NOBODY', 'That account cannot receive USDC this way. Use your own NEAR account.'],
     ['EMAIL_NOT_GOOGLE_AUTHORITATIVE', 'This address cannot prove itself with Google. Ask the sender to use your Gmail or work Google address.'],

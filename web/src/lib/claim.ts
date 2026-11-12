@@ -160,6 +160,33 @@ export interface PayoutAttempt {
   amountOutFormatted: string;
 }
 
+/**
+ * The NEAR account typed before a failed sign-in (another Google account, expired), so "Back to Claim" keeps it.
+ * A cross-chain attempt's destination is a 1Click deposit address, never something the recipient typed.
+ */
+export const typedBefore = (a: Attempt | null, campaign: string, commitment: string): string =>
+  a && a.campaign === campaign && a.commitment === commitment && !a.intents ? a.destination : '';
+
+/** A sign-in for this link started in this tab (the claim page saved an attempt id): a reload mid-claim, not "nothing yet". */
+export const claimStartedHere = (a: Attempt | null, campaign: string, commitment: string): boolean =>
+  !!a && a.campaign === campaign && a.commitment === commitment && !!a.attemptId;
+
+/** Claimed on chain, and this browser has no record of it: never implies theft (red-team UX #3). */
+export const CLAIMED_NO_RECORD = 'This link was claimed. If you just tried, check your wallet. If not, contact the sender.';
+/** No secret part in the address: the usual cause is "Open in browser" from a chat app, which drops it (#4). */
+export const INCOMPLETE_LINE = 'Part is missing. Opened it from another app? Open the link from your message in Safari or Chrome.';
+/** While a claim runs, leaving asks first: the sign-in lives in this tab only (#3). Returns the remover. */
+export function holdPage(target: EventTarget): () => void {
+  const ask = (e: Event) => {
+    e.preventDefault();
+    (e as BeforeUnloadEvent).returnValue = ''; // older browsers show the prompt only with this set
+  };
+  target.addEventListener('beforeunload', ask);
+  return () => target.removeEventListener('beforeunload', ask);
+}
+/** The receipt's button opens an explorer, not a wallet (#10). */
+export const EXPLORER_LABEL = 'View on Explorer';
+
 const KEY = 'zarf-near:attempt';
 export const saveAttempt = (a: Attempt, store: Storage = sessionStorage) => store.setItem(KEY, JSON.stringify(a));
 export function loadAttempt(store: Storage = sessionStorage): Attempt | null {

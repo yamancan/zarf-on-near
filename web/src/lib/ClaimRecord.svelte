@@ -5,7 +5,7 @@
   import { onMount } from 'svelte';
   import { env } from '$env/dynamic/public';
   import { AlertTriangle, ArrowUpRight, Check, Clock, Undo2 } from 'lucide-svelte';
-  import { claimedAt, middle, shownAmount, type Receipt } from '$lib/claim';
+  import { CLAIMED_NO_RECORD, claimedAt, middle, shownAmount, type Receipt } from '$lib/claim';
   import { needsRecheck, nextStep, notReturnedYet, recheckReceipt } from '$lib/intents';
   import BridgeDetails from '$lib/BridgeDetails.svelte';
   import { formatAmount } from '$lib/create/recipients';
@@ -58,7 +58,7 @@
   struck={kind === 'refunded'}
 />
 {#if !rec}
-  <p class="text-sm text-zen-fg-muted max-w-xs">If that was not you, contact the sender.</p>
+  <p class="text-sm text-zen-fg-muted max-w-xs">{CLAIMED_NO_RECORD}</p>
 {:else}
   <p class="text-sm text-zen-fg-muted max-w-xs" role="status">
     {#if kind === 'paid'}

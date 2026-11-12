@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import wranglerJsonc from '../../wrangler.jsonc?raw';
 import vectors from '../../../spec/vectors.json';
 import {
-  classifyDestination, nearAccountReady, missingAccountLine, claimState, deadlineText, timeLeft, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isImplicitAccount, isValidAccountId, loadAttempt, newAttemptId,
+  classifyDestination, nearAccountReady, missingAccountLine, typedBefore, claimStartedHere, holdPage, CLAIMED_NO_RECORD, INCOMPLETE_LINE, EXPLORER_LABEL, claimState, deadlineText, timeLeft, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isImplicitAccount, isValidAccountId, loadAttempt, newAttemptId,
   decodeProof, encodeProof, parseCallback, parseLinkFragment, saveAttempt, clearAttempt, saveReceipt, loadReceipt, settleReceipt, claimedAt, middle, twoDecimals, shownAmount, confirmRemembered, RECEIPT_TTL_MS,
 } from './claim';
 
@@ -359,5 +359,52 @@ describe('shared contracts and 0x ids (T-002 items 3-4)', () => {
     expect(cfg.env.testnet.vars.PUBLIC_ETH_ACCOUNTS).toBe('on');
     expect(cfg.env.mainnet.vars.PUBLIC_ETH_ACCOUNTS).toBe('');
     expect(cfg.vars.PUBLIC_ETH_ACCOUNTS).toBe('');
+  });
+});
+
+describe('T-004: no false failures after Back, refresh or a lost link', () => {
+  const att = { campaign: '7', commitment: 'c'.repeat(64), salt: 's', amount: '10', proof: [], destination: 'alice.testnet', attemptId: 'x' };
+  it('Back after "Arrived": the remembered claim shows once the chain says claimed, else the incomplete card', async () => {
+    const r = { amount: '500000', txHash: 'H'.repeat(44), at: 1, destination: 'alice.testnet' };
+    expect(await confirmRemembered(r, async () => 'claimed')).toBe(r);
+    expect(await confirmRemembered(r, async () => 'unclaimed')).toBeNull();
+    expect(await confirmRemembered(null, async () => 'claimed')).toBeNull();
+    await expect(confirmRemembered(r, async () => { throw new Error('rpc'); })).rejects.toThrow();
+  });
+  it('claimed with no record here: points at the wallet first, never implies theft', () => {
+    expect(CLAIMED_NO_RECORD).toMatch(/^This link was claimed\. If you just tried, check your wallet\./);
+    expect(CLAIMED_NO_RECORD).not.toMatch(/not you/);
+  });
+  it('a link opened without its secret part says how to recover it ("Open in browser" from a chat app)', () => {
+    expect(INCOMPLETE_LINE).toMatch(/another app/);
+    expect(INCOMPLETE_LINE).toMatch(/link from your message in Safari or Chrome/);
+  });
+  it('refresh mid-claim: leaving asks first while the claim runs, and stops asking after', () => {
+    const t = new EventTarget();
+    const release = holdPage(t);
+    const e1 = new Event('beforeunload', { cancelable: true });
+    t.dispatchEvent(e1);
+    expect(e1.defaultPrevented).toBe(true);
+    release();
+    const e2 = new Event('beforeunload', { cancelable: true });
+    t.dispatchEvent(e2);
+    expect(e2.defaultPrevented).toBe(false);
+  });
+  it('a failed sign-in keeps the typed NEAR account for this link only, never a cross-chain deposit address', () => {
+    expect(typedBefore(att, '7', 'c'.repeat(64))).toBe('alice.testnet');
+    expect(typedBefore(att, '8', 'c'.repeat(64))).toBe('');
+    expect(typedBefore(null, '7', 'c'.repeat(64))).toBe('');
+    const chain = { ...att, destination: 'd'.repeat(64), intents: { chainName: 'Base', assetId: 'a', recipient: '0x1', refundTo: 's', requestDeadline: '', amountOutFormatted: '1' } };
+    expect(typedBefore(chain, '7', 'c'.repeat(64))).toBe('');
+  });
+  it('a reload mid-claim is told apart from a receipt opened before any sign-in', () => {
+    expect(claimStartedHere(att, '7', 'c'.repeat(64))).toBe(true);
+    expect(claimStartedHere({ ...att, attemptId: '', destination: '' }, '7', 'c'.repeat(64))).toBe(false); // link opened, no sign-in yet
+    expect(claimStartedHere(att, '7', 'd'.repeat(64))).toBe(false);
+    expect(claimStartedHere(null, '7', 'c'.repeat(64))).toBe(false);
+  });
+  it('the receipt names the explorer, not a wallet', () => {
+    expect(EXPLORER_LABEL).toBe('View on Explorer');
+    expect(EXPLORER_LABEL).not.toMatch(/wallet/i);
   });
 });

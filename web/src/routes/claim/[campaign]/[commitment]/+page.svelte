@@ -3,7 +3,7 @@
   import { page } from '$app/state';
   import { env } from '$env/dynamic/public';
   import {
-    classifyDestination, claimState, isEthAccount, missingAccountLine, nearAccountReady, type AccountCheck, deadlineText, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isValidAccountId, loadAttempt, loadReceipt,
+    INCOMPLETE_LINE, classifyDestination, claimState, confirmRemembered, isEthAccount, typedBefore, type Receipt, missingAccountLine, nearAccountReady, type AccountCheck, deadlineText, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isValidAccountId, loadAttempt, loadReceipt,
     middle, newAttemptId, parseLinkFragment, saveAttempt, timeLeft, type LinkSecret,
   } from '$lib/claim';
   import { rootFromProof } from '$lib/merkle';
@@ -54,6 +54,9 @@
   let checkError = $state('');
   // A claim this browser finished earlier (receipt page): lets "Already claimed" show what was paid.
   const paid = loadReceipt(env.PUBLIC_CONTRACT_ID ?? '', campaign, commitment);
+  // Back after "Arrived" (the address has no secret part any more): the remembered claim, once the chain confirms it.
+  let recalled = $state<Receipt | null>(null);
+  let recalling = $state(false);
   const MODES = $derived([
     ['existing', 'NEAR Account'],
     ...(crossChainOffered(network, env.PUBLIC_CROSS_CHAIN) ? [['chain', 'Another Chain']] : []), // testnet: chains marked "mainnet only" (canonical choice 9); mainnet: behind a flag
@@ -142,7 +145,17 @@
     link = parseLinkFragment(location.hash) ?? (same ? { salt: prev!.salt, amount: prev!.amount, proof: prev!.proof } : null);
     // Keep the salt out of the address bar and synced history; this tab's sessionStorage holds it.
     if (location.hash) history.replaceState(history.state, '', location.pathname); // $app/navigation's replaceState throws before the router is up
-    if (link && linkOk) saveAttempt({ campaign, commitment, ...link, destination: '', attemptId: '' });
+    if (link && linkOk) {
+      typed = typedBefore(prev, campaign, commitment); // "Back to Claim" after a failed sign-in keeps the account
+      saveAttempt({ campaign, commitment, ...link, destination: '', attemptId: '' });
+    }
+    if (!link && linkOk && paid) {
+      recalling = true;
+      confirmRemembered(paid, () => getClaimState(env.PUBLIC_NEAR_RPC_URL, env.PUBLIC_CONTRACT_ID, campaign, commitment))
+        .then((r) => (recalled = r))
+        .catch(() => {}) // a failed read leaves the incomplete-link card, which still says what to do
+        .finally(() => (recalling = false));
+    }
     loaded = true;
     if (link && linkOk) checkLink(link);
   });
@@ -262,8 +275,12 @@
   <ZenCard variant="elevated" class="!rounded-3xl !p-6 sm:!p-8">
     {#if !linkOk}
       {@render terminal(Link2Off, 'muted', 'Broken Link', 'Open the full link from your message.', 'home')}
-    {:else if loaded && !link}
-      {@render terminal(Link2Off, 'muted', 'Incomplete Link', 'Part is missing. Open the full link from your message.', 'home')}
+    {:else if loaded && !link && recalled}
+      <div class="flex flex-col items-center text-center gap-4 py-2" in:swapIn>
+        <ClaimRecord r={recalled} amount={recalled.amount} contract={env.PUBLIC_CONTRACT_ID ?? ''} {campaign} {commitment} />
+      </div>
+    {:else if loaded && !link && !recalling}
+      {@render terminal(Link2Off, 'muted', 'Incomplete Link', INCOMPLETE_LINE, 'home')}
     {:else if check === 'mismatch'}
       {@render terminal(Link2Off, 'error', 'Link Not Valid', describeError(new ClaimError('LINK_MISMATCH')), 'home')}
     {:else if check === 'unknown'}

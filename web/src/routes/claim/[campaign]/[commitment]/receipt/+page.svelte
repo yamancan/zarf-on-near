@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { page } from '$app/state';
   import { env } from '$env/dynamic/public';
-  import { claimedAt, clearAttempt, confirmRemembered, isImplicitAccount, loadAttempt, loadReceipt, middle, saveReceipt, settleReceipt, shownAmount, signedIn, type Receipt } from '$lib/claim';
+  import { CLAIMED_NO_RECORD, EXPLORER_LABEL, claimStartedHere, holdPage, claimedAt, clearAttempt, confirmRemembered, isImplicitAccount, loadAttempt, loadReceipt, middle, saveReceipt, settleReceipt, shownAmount, signedIn, type Receipt } from '$lib/claim';
   import { accountExplorerUrl, TESTNET, UNIT } from '$lib/network';
   import ClaimRecord from '$lib/ClaimRecord.svelte';
   import { canRetry, ClaimError, describeError, errorCode, failureHeading, getClaimState, isUnmapped, relayAndSettle, requestSignature, submitClaim } from '$lib/services';
@@ -81,6 +81,7 @@
   let checkedAt = $state(0); // when the bridge last answered
   let final = $state(false); // the claim can never succeed from this link: no way back to it
   const working = $derived(step === 'checking' || step === 'paying' || step === 'settling');
+  $effect(() => (ok && working ? holdPage(window) : undefined));
 
   onMount(async () => {
     if (remembered) return verifyRemembered();
@@ -189,7 +190,7 @@
     <!-- The title and the sentence say the same thing: as "Already claimed" on the claim page -->
     <Medallion icon={Check} tone="muted" />
     <h1 class="text-xl font-bold">Already Claimed</h1>
-    <p class="text-sm text-zen-fg-muted max-w-xs" role="alert">If that was not you, contact the sender.</p>
+    <p class="text-sm text-zen-fg-muted max-w-xs" role="alert">{CLAIMED_NO_RECORD}</p>
     {@render back()}
   {:else}
     {@const head = step === 'unsettled' ? { title: 'Still Settling', muted: true } : step === 'reverted' ? { title: 'Not Claimed', muted: false } : failureHeading(failCode)}
@@ -245,7 +246,7 @@
         </a>
       {:else if accountExplorerUrl(env.PUBLIC_EXPLORER_TX_URL, to)}
         <a href={accountExplorerUrl(env.PUBLIC_EXPLORER_TX_URL, to)} target="_blank" rel="external noopener noreferrer" class="flex items-center justify-center border border-zen-border-subtle bg-zen-bg hover:bg-zen-fg/5 h-14 rounded-2xl text-[10px] uppercase tracking-widest font-bold transition-colors">
-          <ExternalLink class="w-3.5 h-3.5 mr-2 opacity-40" aria-hidden="true" />View Account
+          <ExternalLink class="w-3.5 h-3.5 mr-2 opacity-40" aria-hidden="true" />{EXPLORER_LABEL}
         </a>
       {/if}
       {#if TESTNET}
@@ -276,8 +277,14 @@
         <ClaimRecord r={stored} amount={stored.amount} {contract} campaign={campaignId} commitment={commitmentId} />
       {:else if !resumed && (!ok || !attempt)}
         <Medallion icon={Mail} tone="muted" />
-        <h1 class="text-xl font-bold">Nothing to Show Yet</h1>
-        <p class="text-sm text-zen-fg-muted max-w-xs">This page shows your claim after you sign in with Google.</p>
+        {#if claimStartedHere(attempt, campaignId, commitmentId)}
+          <!-- Reloaded mid-claim: the sign-in was in memory only; the claim page reads where it stands on chain -->
+          <h1 class="text-xl font-bold">Page Reloaded</h1>
+          <p class="text-sm text-zen-fg-muted max-w-xs">Your claim may still be on its way. Open it to see where it stands.</p>
+        {:else}
+          <h1 class="text-xl font-bold">Nothing to Show Yet</h1>
+          <p class="text-sm text-zen-fg-muted max-w-xs">This page shows your claim after you sign in with Google.</p>
+        {/if}
         {#if canGoBack}
           {@render back()}
         {:else}
@@ -364,7 +371,7 @@
                 { label: 'Sending', state: step === 'checking' ? 'pending' : 'active' },
               ]}
             />
-            {#if step !== 'checking'}<p class="text-xs text-zen-fg-subtle">Keep this page open. It usually settles within a minute.</p>{/if}
+            <p class="text-xs text-zen-fg-subtle">Keep this page open. It usually settles within a minute.</p>
           </div>
         {:else}
           {@render failureCard()}

@@ -1014,7 +1014,7 @@
                 </div>
               {/if}
               {#if nearNeed !== null}
-                <p class="text-xs text-zen-fg-subtle">Most of the NEAR comes back. Network fee {feeMax !== null ? `at most ${sig3(feeMax, true)}` : 'a small amount of'} NEAR{storageShort ? ', plus storage' : ''}.</p>
+                <p class="text-xs text-zen-fg-subtle">Network fee {feeMax !== null ? `at most ${sig3(feeMax, true)}` : 'a small amount of'} NEAR{storageShort ? ', plus storage' : ''}. Storage for links nobody claims comes back to your Zarf balance.</p>
               {/if}
               {#if balance !== null && short === 0n && (nearHave !== null && nearNeed !== null ? nearShort === 0n : !(nearShort > 0n))}
                 <p class="flex items-center gap-2 text-sm text-zen-fg" role="status"><CheckCircle2 class="w-4 h-4 text-zen-success shrink-0" aria-hidden="true" />Ready to send</p>

@@ -283,6 +283,14 @@ const S = {
   'receipt-expired': (p) => nearClaim(p, { verifierError: 'EXPIRED' }),
   'receipt-failed-unmapped': (p) => nearClaim(p, { verifierError: 'BAD_AUDIENCE' }),
   'receipt-reload': async (p) => { await nearClaim(p); await p.unrouteAll(); await rpc(p, { claimState: 'claimed' }); await p.reload(); await p.waitForSelector('h1'); await p.waitForTimeout(800); return { full: true }; },
+  // T-004: Back after "Arrived" lands on the claim URL without its secret part; the remembered receipt shows.
+  'claim-back-arrived': async (p) => { await nearClaim(p); await p.unrouteAll(); await rpc(p, { claimState: 'claimed' }); await p.goBack(); await p.waitForSelector('h1'); await p.waitForTimeout(800); console.log('claim-back-arrived url', new URL(p.url()).pathname); return { full: true }; },
+  // T-004: refresh while the claim runs. Chrome asks only after a tap on the page (sticky activation), so tap first.
+  'receipt-refresh-mid-claim': async (p) => {
+    await nearClaim(p, { verifierHang: true }); await p.mouse.click(5, 300);
+    let asked = 'none'; p.once('dialog', (d) => { asked = d.type(); d.accept(); });
+    await p.reload(); await p.waitForSelector('h1'); await p.waitForTimeout(800); console.log('receipt-refresh-mid-claim dialog', asked); return { full: true };
+  },
   'term-claimed-paid': async (p) => { await nearClaim(p); await p.unrouteAll(); await rpc(p, { claimState: 'claimed' }); await p.goto(base + LINK); await p.waitForSelector('h1'); await p.waitForTimeout(500); return {}; },
   'receipt-quote-expired': async (p, ctx) => { await lateClock(ctx); return chainClaim(p, { wait: 1500 }); },
   'receipt-chain-failed': (p) => chainClaim(p, { final: 'FAILED' }),
