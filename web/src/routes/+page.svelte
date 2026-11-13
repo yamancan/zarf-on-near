@@ -4,7 +4,7 @@
   import Hero from '$lib/Hero.svelte';
   import HowItWorks from '$lib/landing/HowItWorks.svelte';
 
-  const TRY_URL = 'https://zarf-near-faucet-testnet.sparkling-queen-5e77.workers.dev/try';
+  const TRY_URL = 'https://near.zarf.to/try';
 </script>
 
 <svelte:head><title>Zarf: Send Tokens to an Email</title></svelte:head>
