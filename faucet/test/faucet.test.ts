@@ -486,7 +486,7 @@ describe('worker', () => {
     const linked = await (await worker.fetch(new Request('https://f.example/try'), { CLAIM_HOST: 'https://claim.example/' } as never)).text();
     expect(linked).toContain('href="https://claim.example/privacy"');
     expect(linked).toContain('href="https://claim.example/"');
-    expect(linked.match(/docs\.near\.org/g)).toHaveLength(1); // only the account-help link
+    expect(linked).not.toMatch(/docs\.near\.org/); // no wallet sign-up link any more (T-024: Face ID instead)
     const hostile = await (await worker.fetch(new Request('https://f.example/try'), { CLAIM_HOST: 'https://x.example/"><script>' } as never)).text();
     expect(hostile).not.toContain('x.example');
     expect(html).not.toMatch(/<script>(?!<)/);
@@ -591,15 +591,12 @@ describe('judges page presentation', () => {
       expect((await worker.fetch(new Request('https://f.example' + p), {} as never)).status).toBe(404);
   });
 
-  it('opens the account help in a new tab, at a wallet, and says this tab keeps the link', async () => {
+  it('tells a judge without a NEAR account to use Face ID, not a wallet sign-up (T-024)', async () => {
     const { default: worker } = await import('../src/index');
     const html = await (await worker.fetch(new Request('https://f.example/try'), {} as never)).text();
-    const a = html.match(/<a id="wallet"[^>]*>/)![0];
-    expect(a).toContain('href="https://docs.near.org/getting-started/create-account"');
-    expect(a).not.toContain('mynearwallet');
-    expect(a).toContain('target="_blank"');
-    expect(a).toMatch(/rel="[^"]*\bnoopener\b[^"]*"/);
-    expect(html).toContain('This tab keeps your link.');
+    expect(html).toContain('No NEAR account needed — create one with Face ID when you claim.');
+    expect(html).not.toMatch(/Meteor|mynearwallet|id="wallet"/i);
+    expect(html).not.toContain('zarf.to');
     // Every new-tab link drops the opener.
     for (const t of html.match(/<a [^>]*target="_blank"[^>]*>/g)!) expect(t).toMatch(/rel="noopener noreferrer"/);
   });
