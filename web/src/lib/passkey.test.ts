@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { accountBalances, accountFromPrf, formatNear, passkeyOffered, PRF_SALT, seedFromPrf } from './passkey';
+import { implicitAccountFromSeed, keyFile } from './implicit';
+import { b58decode } from './oneclickSig';
+import { hex } from './claim';
 
 const prf = (b: number) => new Uint8Array(32).fill(b);
 
@@ -9,6 +12,15 @@ describe('passkey seed derivation', () => {
     const b = await accountFromPrf(prf(7).buffer);
     expect(a).toEqual(b);
     expect(a.accountId).toMatch(/^[0-9a-f]{64}$/);
+  });
+  it('the key file downloaded after a Face ID unlock re-derives the same account (B5)', async () => {
+    const a = await accountFromPrf(prf(7));
+    const f = JSON.parse(keyFile(a));
+    const raw = b58decode(f.private_key.replace(/^ed25519:/, ''));
+    expect(raw.length).toBe(64); // seed || public key, the NEAR key-file format
+    expect(f.account_id).toBe(a.accountId);
+    expect(hex(raw.slice(32))).toBe(a.accountId);
+    expect((await implicitAccountFromSeed(raw.slice(0, 32))).accountId).toBe(a.accountId);
   });
   it('a different PRF output gives a different account', async () => {
     expect((await accountFromPrf(prf(7))).accountId).not.toBe((await accountFromPrf(prf(8))).accountId);

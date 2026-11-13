@@ -10,7 +10,7 @@
   import { accountExists, ClaimError, describeCheckError, describeError, getCampaign, getClaimState, getNetwork } from '$lib/services';
   import { crossChainOffered, getQuote, payoutCapError, QUOTE_LIFETIME_MS, withinLossBound, QuoteError, refusal, type PayoutAsset } from '$lib/intents';
   import PayoutPicker from '$lib/PayoutPicker.svelte';
-  import { AlertTriangle, ArrowUpRight, CheckCircle2, Clock, Info, Link2Off, Loader2, Mail, SearchX, Wallet } from 'lucide-svelte';
+  import { AlertTriangle, ArrowUpRight, CheckCircle2, ChevronDown, Clock, Info, Link2Off, Loader2, Mail, SearchX, Wallet } from 'lucide-svelte';
   import AmountPanel from '$lib/AmountPanel.svelte';
   import Avatar from '$lib/Avatar.svelte';
   import GoogleG from '$lib/GoogleG.svelte';
@@ -63,11 +63,18 @@
   // Back after "Arrived" (the address has no secret part any more): the remembered claim, once the chain confirms it.
   let recalled = $state<Receipt | null>(null);
   let recalling = $state(false);
+  // Blue-team gap 3: "NEAR Account · Face ID · Other Chain", in that order.
   const MODES = $derived([
     ['existing', 'NEAR Account'],
-    ...(crossChainOffered(network, env.PUBLIC_CROSS_CHAIN) ? [['chain', 'Another Chain']] : []), // testnet: chains marked "mainnet only" (canonical choice 9); mainnet: behind a flag
-    ...(implicitEnabled ? [['new', 'New Account']] : []),
+    ...(implicitEnabled ? [['new', passkeyOn ? 'Face ID' : 'New Account']] : []),
+    ...(crossChainOffered(network, env.PUBLIC_CROSS_CHAIN) ? [['chain', 'Other Chain']] : []), // testnet: a live mainnet price, "Mainnet Only"; mainnet: behind a flag
   ] as [typeof mode, string][]);
+  // Face ID is a phone gesture: preselect it on touch screens until the person picks a choice themselves.
+  let modePicked = false;
+  $effect(() => {
+    if (!modePicked && passkeyOn && mode === 'existing' && matchMedia('(pointer: coarse)').matches) mode = 'new';
+  });
+  const pick = (m: typeof mode) => ((modePicked = true), (mode = m));
   // MyNearWallet stopped creating accounts (Nov 2026). Meteor creates named accounts on both networks.
   const METEOR = 'https://wallet.meteorwallet.app';
   const ethOn = env.PUBLIC_ETH_ACCOUNTS === 'on'; // 0x (NEP-518) destinations, off until a real claim proves them
@@ -113,7 +120,7 @@
     if (!d) return;
     e.preventDefault();
     const i = MODES.findIndex(([v]) => v === mode);
-    mode = MODES[(i + d + MODES.length) % MODES.length][0];
+    pick(MODES[(i + d + MODES.length) % MODES.length][0]);
     tick().then(() => (document.querySelector(`[data-mode="${mode}"]`) as HTMLElement | null)?.focus());
   }
   function backToField() {
@@ -290,16 +297,31 @@
   </div>
 {/snippet}
 
+{#snippet faceIdDetails(made: boolean)}
+  <details class="group text-xs text-zen-fg-subtle">
+    <summary class="inline-flex items-center gap-1.5 py-1 cursor-pointer list-none hover:text-zen-fg">Details <ChevronDown class="w-3.5 h-3.5 transition-transform group-open:rotate-180" aria-hidden="true" /></summary>
+    <div class="flex flex-col items-start gap-2 pt-1 leading-relaxed">
+      <p>The wallet's key is never stored, here or with us. Face ID unlocks it on any device that syncs your passkeys. Lose both the passkey and a backup key, and the funds are gone.</p>
+      {#if made}
+        <ZenButton variant="ghost" size="sm" onclick={download}>{exported ? 'Backup Key Saved' : 'Download Backup Key'}</ZenButton>
+      {:else}
+        <ZenButton variant="ghost" size="sm" onclick={create}>Use a Key File Instead</ZenButton>
+      {/if}
+    </div>
+  </details>
+{/snippet}
+
 <!-- Zarf claim app frame: AppShell container (apps/claim/src/routes/+layout.svelte: w-full max-w-7xl mx-auto p-8 lg:p-12),
      the page column (apps/claim/src/routes/+page.svelte: max-w-5xl w-full px-4 md:px-0), then the card as LoginPrompt.svelte
      lays it out (section pt-8, max-w-lg mx-auto, ZenCard elevated, p-8; p-6 on phones for the form). No page header: the
      card's own title is the one header (T-023 waste list item 5). -->
-<div class="w-full max-w-7xl mx-auto p-8 lg:p-12">
-  <div class="h-full flex flex-col relative max-w-5xl w-full px-4 md:px-0">
+<!-- Phones: p-4 shell, no column inset, p-4 card (blue-team gap 2, accepted by main as a departure from the kit's p-8) -->
+<div class="w-full max-w-7xl mx-auto p-4 sm:p-8 lg:p-12">
+  <div class="h-full flex flex-col relative max-w-5xl w-full sm:px-4 md:px-0">
     <section class="w-full pt-8">
       <div class="max-w-lg mx-auto">
   <ZenCard variant="elevated" class="overflow-hidden">
-    <div class="p-6 sm:p-8">
+    <div class="p-4 sm:p-8">
     {#if !linkOk}
       {@render terminal(Link2Off, 'muted', 'Broken Link', 'Open the full link from your message.', 'home')}
     {:else if loaded && !link && recalled}
@@ -370,14 +392,14 @@
                   aria-checked={mode === value}
                   tabindex={mode === value ? 0 : -1}
                   data-mode={value}
-                  onclick={() => (mode = value)}
+                  onclick={() => pick(value)}
                 >{text}</ZenButton>
               {/each}
             </div>
           {/if}
 
           {#if mode === 'chain'}
-            <PayoutPicker {network} amount={link!.amount} refundTo={sender} {requote} onUseNear={() => ((error = ''), (mode = 'existing'))} bind:choice={payout} />
+            <PayoutPicker {network} amount={link!.amount} refundTo={sender} {requote} onUseNear={() => ((error = ''), pick('existing'))} bind:choice={payout} />
           {:else if mode === 'existing'}
             <!-- No visible label: the selected "NEAR Account" pill above names the field -->
             <ZenInput
@@ -393,24 +415,23 @@
             <div id="dest-note" class="flex flex-col gap-3">
               {#if acct?.state === 'checking'}
                 <Note tone="pending">Checking <span class="font-mono">{acct.id}</span>…</Note>
-              {:else if acct?.state === 'found' && !askConfirm}
+              {:else if acct?.state === 'found'}
                 <p class="flex items-center gap-2 text-sm text-zen-fg" role="status">
                   <!-- The name is in the field above; this row only says it was found (T-023 waste list item 6) -->
                   <CheckCircle2 class="w-4 h-4 text-zen-success shrink-0" aria-hidden="true" /><span>Account found</span>
-                  {#if accountOk}<ZenButton variant="ghost" size="xs" class="ml-auto" onclick={() => ((confirmedFor = ''), backToField())}>Change</ZenButton>{/if}
                 </p>
               {:else if acct?.state === 'missing' && dest.kind === 'implicit' && !isEthAccount(dest.id)}
                 <ZenCheckbox bind:checked={unfundedAck} label="Only the holder of its private key can use these funds. I hold it." />
               {/if}
-              {#if askConfirm}
-                <!-- Wrong-address guard before Google (a paid claim cannot be undone): a plain row under a hairline; the
-                     account itself is the field right above, so it is not restated -->
-                <div id="confirm" class="space-y-3 pt-4 border-t border-zen-border-subtle" role="group" aria-labelledby="confirm-q">
-                  <p id="confirm-q" class="text-sm text-zen-fg">Is this your account? The USDC cannot be taken back.</p>
-                  <div class="flex flex-wrap gap-2">
-                    <ZenButton variant="primary" size="sm" onclick={() => (confirmedFor = destination)}>Yes, It's Mine</ZenButton>
-                    <ZenButton variant="ghost" size="sm" onclick={backToField}>Change It</ZenButton>
-                  </div>
+              {#if askConfirm || accountOk}
+                <!-- Wrong-address guard before Google (a paid claim cannot be undone): one checkbox line, so Google stays
+                     the only primary button (blue-team gap 12). Ticked for this exact id; any edit asks again. -->
+                <div id="confirm" class="pt-4 border-t border-zen-border-subtle">
+                  <ZenCheckbox
+                    checked={confirmedFor === destination}
+                    onchange={(e: Event) => (confirmedFor = (e.currentTarget as HTMLInputElement).checked ? destination : '')}
+                    label="This is my account. The USDC cannot be taken back."
+                  />
                 </div>
               {/if}
               {#if acct?.state !== 'found' && !(dest.kind === 'implicit' && !isEthAccount(dest.id) && acct?.state === 'missing')}
@@ -418,12 +439,16 @@
                   <ZenButton variant="tonal" size="xs" onclick={useWallet} disabled={walletNote === 'Opening your wallet…'}>
                     {#snippet iconLeft()}<Wallet class="w-3.5 h-3.5" />{/snippet}Use My Wallet
                   </ZenButton>
-                  <!-- No account yet: Meteor in a new tab, three steps here; this tab keeps the claim (T-002) -->
-                  <!-- ZenButton's link form takes no onclick: open the wallet tab here and show the steps -->
-                  <ZenButton variant="ghost" size="xs" onclick={() => ((guideOpen = true), window.open(METEOR, '_blank', 'noopener,noreferrer'))}>
-                    Get a NEAR Account
-                    {#snippet iconRight()}<ArrowUpRight class="w-3.5 h-3.5" />{/snippet}
-                  </ZenButton>
+                  {#if passkeyOn}
+                    <!-- No account yet: a Face ID wallet, in this page (blue-team gap 3), not a trip to another wallet -->
+                    <ZenButton variant="ghost" size="xs" onclick={() => pick('new')}>Use Face ID Instead</ZenButton>
+                  {:else}
+                    <!-- No account yet: Meteor in a new tab, three steps here; this tab keeps the claim (T-002) -->
+                    <ZenButton variant="ghost" size="xs" onclick={() => ((guideOpen = true), window.open(METEOR, '_blank', 'noopener,noreferrer'))}>
+                      Get a NEAR Account
+                      {#snippet iconRight()}<ArrowUpRight class="w-3.5 h-3.5" />{/snippet}
+                    </ZenButton>
+                  {/if}
                 </div>
                 {#if walletNote && walletNote !== 'Opening your wallet…'}<p class="text-xs text-zen-error">{walletNote}</p>{/if}
                 {#if guideOpen}
@@ -436,16 +461,19 @@
               {/if}
             </div>
           {:else if !implicit && passkeyOn}
-            <p class="text-sm text-zen-fg-muted">We create a NEAR account that your Face ID or device passkey unlocks. Its key is never stored, here or with us.</p>
-            <ZenButton variant="secondary" class="self-center" onclick={createWithPasskey}>New Account with Face ID</ZenButton>
-            <ZenButton variant="ghost" size="sm" class="self-center" onclick={create}>Use a Key File Instead</ZenButton>
+            <!-- Face ID: one line, one button; the risk and the key-file way sit under Details (blue-team gap 3) -->
+            <p class="text-sm text-zen-fg-muted">A new wallet that your Face ID unlocks.</p>
+            <ZenButton variant="secondary" class="self-start" onclick={createWithPasskey}>Create With Face ID</ZenButton>
+            {@render faceIdDetails(false)}
           {:else if !implicit}
             <p class="text-sm text-zen-fg-muted">We create a NEAR account in this browser. Only you get its key.</p>
             <ZenButton variant="secondary" class="self-center" onclick={create}>Create NEAR Account</ZenButton>
           {:else if passkeyPrf}
-            <p class="text-sm text-zen-fg-muted">Your new account <span class="font-mono text-zen-fg" title={implicit.accountId}>{middle(implicit.accountId, 8)}</span></p>
-            <Note tone="info">Face ID unlocks it again on this device, or on any device that syncs your passkeys. If you delete the passkey, the funds are gone unless you keep a backup key.</Note>
-            <ZenButton variant="ghost" size="sm" class="self-start" onclick={download}>{exported ? 'Backup Key Saved' : 'Download Backup Key'}</ZenButton>
+            <p class="flex items-center gap-2 text-sm text-zen-fg" role="status">
+              <CheckCircle2 class="w-4 h-4 text-zen-success shrink-0" aria-hidden="true" />Wallet <span class="font-mono" title={implicit.accountId}>{middle(implicit.accountId, 4)}</span> ready
+            </p>
+            <p class="text-sm text-zen-fg-muted">Unlocks with Face ID on your devices.</p>
+            {@render faceIdDetails(true)}
           {:else}
             <p class="text-sm text-zen-fg-muted">Your new account <span class="font-mono text-zen-fg" title={implicit.accountId}>{middle(implicit.accountId, 8)}</span></p>
             {#if passkeyPrf === false}<Note tone="info">This device could not tie the account to Face ID, so it uses a key file instead.</Note>{/if}
@@ -458,23 +486,22 @@
         <!-- CTA: the main claim app's (DistributionCard:160-190), Google's G on white -->
         <div class="space-y-3">
           {#if busy}<Note tone="pending">{busy}</Note>{/if}
-          <ZenButton variant="primary" class="google w-full" disabled={!ready} onclick={signIn}>
-            <GoogleG />Sign in with Google
-          </ZenButton>
+          {#if mode === 'chain' && network !== 'mainnet'}
+            <!-- Testnet shows the chains and a live mainnet price; the payout itself runs on mainnet only -->
+            <ZenButton variant="primary" class="w-full" disabled>Mainnet Only</ZenButton>
+          {:else}
+            <ZenButton variant="primary" class="google w-full" disabled={!ready} onclick={signIn}>
+              <GoogleG />Sign in with Google
+            </ZenButton>
+          {/if}
           <p class="text-xs text-zen-fg-subtle text-center">Use the email this link was sent to.</p>
           <!-- T-001: the unaudited note stays visible on mainnet -->
           {#if network === 'mainnet'}<p class="text-xs text-zen-fg-subtle text-center">{UNAUDITED_LINE}</p>{/if}
-          {#if mode === 'chain' && network !== 'mainnet'}
-            <div class="flex flex-col items-center gap-2">
-              <p class="text-sm text-zen-fg-muted text-center">On testnet, claim to a NEAR account.</p>
-              <ZenButton variant="secondary" size="sm" onclick={() => ((error = ''), (mode = 'existing'))}>Use a NEAR Account</ZenButton>
-            </div>
-          {/if}
           {#if error}<Note tone="error" center>{error}</Note>{/if}
           {#if quoteFailed && mode === 'chain'}
             <div class="flex flex-wrap justify-center gap-2">
               <ZenButton variant="secondary" size="sm" onclick={() => ((error = ''), (quoteFailed = false), (requote += 1))}>Get New Quote</ZenButton>
-              <ZenButton variant="ghost" size="sm" onclick={() => ((error = ''), (mode = 'existing'))}>Claim to a NEAR Account</ZenButton>
+              <ZenButton variant="ghost" size="sm" onclick={() => ((error = ''), pick('existing'))}>Claim to a NEAR Account</ZenButton>
             </div>
           {/if}
         </div>

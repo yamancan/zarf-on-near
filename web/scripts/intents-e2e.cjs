@@ -66,7 +66,7 @@ async function run(final) {
     body: JSON.stringify({ status: 'paid', tx_hash: '6zgh2u9DqHHiXzdy9ouTP7oGky2T4nugqzqt9wJZwNFm' }) }));
 
   await p.goto(base + v.links.main[0]);
-  await p.getByText('Another Chain', { exact: true }).click();
+  await p.getByText('Other Chain', { exact: true }).click();
   await p.waitForSelector('#chain');
   assert((await p.locator('#chain button').first().innerText()).trim() === 'USDC on Base', 'Base is first');
   await p.fill('#addr', RECIPIENT.slice(0, -1) + 'D'); // checksum typo

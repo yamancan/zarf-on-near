@@ -271,12 +271,13 @@
 <!-- Zarf claim app frame: AppShell container (apps/claim/src/routes/+layout.svelte: w-full max-w-7xl mx-auto p-8 lg:p-12),
      the page column (apps/claim/src/routes/+page.svelte: max-w-5xl w-full px-4 md:px-0), then the card as LoginPrompt.svelte
      lays it out. No page header: the card's own title is the one header (T-023 waste list item 5). -->
-<div class="w-full max-w-7xl mx-auto p-8 lg:p-12">
-  <div class="h-full flex flex-col relative max-w-5xl w-full px-4 md:px-0">
+<!-- Phones: p-4 shell, no column inset, p-4 card, as the claim page (blue-team gap 2) -->
+<div class="w-full max-w-7xl mx-auto p-4 sm:p-8 lg:p-12">
+  <div class="h-full flex flex-col relative max-w-5xl w-full sm:px-4 md:px-0">
     <section class="w-full pt-8">
       <div class="max-w-lg mx-auto">
   <ZenCard variant="elevated" class="overflow-hidden">
-    <div class="p-6 sm:p-8">
+    <div class="p-4 sm:p-8">
     <div class="flex flex-col items-center text-center gap-4">
       {#if recall === 'checking'}
         <Medallion icon={Loader2} tone="muted" spin />

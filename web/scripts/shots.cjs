@@ -6,10 +6,11 @@
 const { chromium } = require(process.env.PLAYWRIGHT_CORE || 'playwright-core');
 const v = require('../../spec/vectors.json');
 const tokens = require('../src/lib/fixtures/1click-tokens.json');
+const tokensUsdc = require('../src/lib/fixtures/1click-tokens-usdc.json'); // T-025: every chain 1Click lists Circle USDC on
 const [base, out, filter] = process.argv.slice(2);
 const enc = (o) => [...Buffer.from(JSON.stringify(o))];
 // T-002: the NEAR path asks "Is this your account?" before Google; answer it when it shows (no-op elsewhere).
-const yes = async (p) => { const b = p.getByRole('button', { name: "Yes, It's Mine" }); try { await b.waitFor({ timeout: 3000 }); await b.click(); } catch {} };
+const yes = async (p) => { const b = p.getByLabel('This is my account. The USDC cannot be taken back.'); try { await b.waitFor({ state: 'attached', timeout: 3000 }); await b.check({ force: true }); } catch {} };
 const LINK = v.links.main[0];
 const [, , CAMP, COMMIT] = LINK.split('#')[0].split('/');
 const DEP = 'd'.repeat(64);
@@ -76,7 +77,7 @@ async function oneclick(p, final, o = {}) {
     if (u.pathname === '/v0/tokens') {
       if (o.tokens === 'hang') return;
       if (o.tokens === 'down') return r.fulfill({ status: 500, body: '{}' });
-      return r.fulfill({ contentType: 'application/json', body: JSON.stringify(tokens) });
+      return r.fulfill({ contentType: 'application/json', body: JSON.stringify(o.tokens === 'usdc' ? tokensUsdc : tokens) });
     }
     if (u.pathname === '/v0/quote') {
       const b = JSON.parse(r.request().postData());
@@ -133,7 +134,7 @@ const chainClaim = async (p, o = {}) => {
     if (o.verifierError) return r.fulfill({ status: 400, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ error: o.verifierError }) });
     r.fulfill({ contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ ...v.claims.valid[0].call_args, destination: DEP }) });
   });
-  await p.goto(base + LINK); await p.getByText('Another Chain', { exact: true }).click();
+  await p.goto(base + LINK); await p.getByText('Other Chain', { exact: true }).click();
   if (o.stopAt === 'picker') { await p.waitForTimeout(o.wait ?? 1200); return { full: true }; }
   await p.fill('#addr', o.addr ?? EVM);
   if (o.stopAt === 'quote') { await p.waitForTimeout(o.wait ?? 1500); return { full: true }; }
@@ -210,14 +211,16 @@ const S = {
   'claim-near': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.fill('#dest', 'alice.testnet'); await p.waitForTimeout(1200); return { full: true }; },
   'claim-near-missing': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.fill('#dest', 'alise.testnet'); await p.waitForTimeout(1200); return { full: true }; },
   'claim-testnet-detail': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByRole('button', { name: /Who sees the email/ }).focus(); await p.waitForTimeout(400); return { full: true }; },
-  'claim-chain-mainnet': async (p) => { await rpc(p, { network: 'mainnet', camp: { sender: 'sender.near' } }); await oneclick(p, 'SUCCESS'); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText('Another Chain', { exact: true }).click(); await p.waitForSelector('#chain'); await p.fill('#addr', EVM); await p.waitForSelector('.quote'); await p.waitForTimeout(300); return { full: true }; },
+  'claim-chain-mainnet': async (p) => { await rpc(p, { network: 'mainnet', camp: { sender: 'sender.near' } }); await oneclick(p, 'SUCCESS'); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText('Other Chain', { exact: true }).click(); await p.waitForSelector('#chain'); await p.fill('#addr', EVM); await p.waitForSelector('.quote'); await p.waitForTimeout(300); return { full: true }; },
   // RPC never answers: wait for the app's own checking card, not the boot mark (critic r2 coverage row 23).
   'claim-checking': async (p) => { await p.route(/fastnear|rpc/, () => {}); await p.goto(base + LINK); await p.getByRole('heading', { name: 'Checking Claim…' }).waitFor({ timeout: 20000 }); await p.waitForTimeout(300); return {}; },
   // The app's script never arrives: the first paint the recipient sees on a slow phone.
   'boot-opening': async (p) => { await p.route(/\/(src|node_modules|@vite|@fs|\.svelte-kit|@id)\//, (r) => r.abort()); await p.goto(base + LINK, { waitUntil: 'commit' }); await p.waitForSelector('#boot-line'); await p.waitForTimeout(800); return {}; },
   'claim-no-google': async (p) => { await noGoogle(p); await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.fill('#dest', 'alice.testnet'); await yes(p); await yes(p); await p.locator('button.google').click(); await p.waitForTimeout(400); return { full: true }; },
   'claim-no-account': async (p) => { await rpc(p); await p.context().route(/meteorwallet/, (r) => r.abort()); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.context().on('page', (pg) => pg.close().catch(() => {})); await p.getByText('Get a NEAR Account').click(); await p.bringToFront(); await p.waitForTimeout(400); return { full: true }; },
-  'claim-chain-testnet': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText('Another Chain', { exact: true }).click(); await p.waitForTimeout(400); return { full: true }; },
+  'claim-faceid': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText('Face ID', { exact: true }).click(); await p.waitForTimeout(400); return { full: true }; },
+  'claim-chain-testnet-quote': async (p) => { await rpc(p); await oneclick(p, 'SUCCESS', { tokens: 'usdc' }); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText('Other Chain', { exact: true }).click(); await p.fill('#addr', EVM); await p.waitForSelector('.quote', { timeout: 20000 }); await p.waitForTimeout(300); return { full: true }; },
+  'claim-chain-testnet': async (p) => { await rpc(p); await oneclick(p, 'SUCCESS', { tokens: 'usdc' }); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText('Other Chain', { exact: true }).click(); await p.waitForTimeout(400); return { full: true }; },
   'term-unknown': async (p) => { await rpc(p, { campaign: null }); await p.goto(base + LINK); await p.waitForSelector('h1'); return {}; },
   'term-mismatch': async (p) => { await rpc(p, { camp: { merkle_root: 'f'.repeat(64) } }); await p.goto(base + LINK); await p.waitForSelector('h1'); return {}; },
   'term-claimed': async (p) => { await rpc(p, { claimState: 'claimed' }); await p.goto(base + LINK); await p.waitForSelector('h1'); return {}; },
@@ -234,7 +237,7 @@ const S = {
   ...Object.fromEntries(['SUCCESS', 'REFUNDED', 'PROCESSING'].map((f) => [`receipt-chain-${f.toLowerCase()}`, async (p) => {
     await rpc(p, { network: 'mainnet', camp: { sender: 'sender.near' } }); await oneclick(p, f); await signinFlow(p);
     await p.route(/verifier.*\/claim$/, async (r) => r.fulfill({ contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ ...v.claims.valid[0].call_args, destination: DEP }) }));
-    await p.goto(base + LINK); await p.getByText('Another Chain', { exact: true }).click(); await p.fill('#addr', EVM); await p.waitForSelector('.quote');
+    await p.goto(base + LINK); await p.getByText('Other Chain', { exact: true }).click(); await p.fill('#addr', EVM); await p.waitForSelector('.quote');
     await yes(p); await p.locator('button.google').click(); await p.waitForURL(/receipt/); await p.waitForTimeout(f === 'PROCESSING' ? 2500 : 3000); return { full: true };
   }])),
   boot: async (p) => { await p.goto(base + LINK); return {}; },
@@ -285,6 +288,24 @@ const S = {
   'receipt-failed-final': (p) => nearClaim(p, { verifierError: 'E105_ALREADY_CLAIMED' }),
   'receipt-expired': (p) => nearClaim(p, { verifierError: 'EXPIRED' }),
   'receipt-failed-unmapped': (p) => nearClaim(p, { verifierError: 'BAD_AUDIENCE' }),
+  // B5: the receipt after a Face ID unlock. A WebAuthn stub returns a fixed PRF output; the claim goes to the account
+  // that output derives (passkey.ts: HKDF-SHA256, zero salt, the v1 info), then the stored receipt is marked passkey.
+  'receipt-faceid-unlocked': async (p) => {
+    const { subtle } = require('node:crypto').webcrypto;
+    const ikm = await subtle.importKey('raw', new Uint8Array(32).fill(7), 'HKDF', false, ['deriveBits']);
+    const seed = new Uint8Array(await subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(32), info: new TextEncoder().encode('zarf-near passkey ed25519 seed v1') }, ikm, 256));
+    const pkcs8 = new Uint8Array([0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20, ...seed]);
+    const jwk = await subtle.exportKey('jwk', await subtle.importKey('pkcs8', pkcs8, 'Ed25519', true, ['sign']));
+    const id = Buffer.from(jwk.x, 'base64url').toString('hex');
+    await p.addInitScript(() => {
+      navigator.credentials.get = async () => ({ getClientExtensionResults: () => ({ prf: { results: { first: new Uint8Array(32).fill(7) } } }) });
+    });
+    await nearClaim(p, { dest: id, ack: true });
+    await p.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('zarf-near:receipt:')) localStorage.setItem(k, JSON.stringify({ ...JSON.parse(localStorage.getItem(k)), passkey: true })); });
+    await p.unrouteAll(); await rpc(p, { claimState: 'claimed' }); await p.reload(); await p.waitForSelector('h1'); await p.waitForTimeout(800);
+    await p.getByRole('button', { name: /Face ID/ }).click(); await p.getByRole('button', { name: 'Download Key' }).waitFor({ timeout: 10000 }); await p.waitForTimeout(300);
+    return { full: true };
+  },
   'receipt-reload': async (p) => { await nearClaim(p); await p.unrouteAll(); await rpc(p, { claimState: 'claimed' }); await p.reload(); await p.waitForSelector('h1'); await p.waitForTimeout(800); return { full: true }; },
   // T-004: Back after "Arrived" lands on the claim URL without its secret part; the remembered receipt shows.
   'claim-back-arrived': async (p) => { await nearClaim(p); await p.unrouteAll(); await rpc(p, { claimState: 'claimed' }); await p.goBack(); await p.waitForSelector('h1'); await p.waitForTimeout(800); console.log('claim-back-arrived url', new URL(p.url()).pathname); return { full: true }; },
@@ -416,8 +437,8 @@ const S = {
   privacy: async (p) => { await p.goto(base + '/privacy'); await p.waitForSelector('h1'); return { full: true }; },
   error500: async (p) => { await p.route(/routes\/privacy\/\+page\.svelte/, (r) => r.abort()); await p.goto(base + '/privacy'); await p.waitForTimeout(2500); return {}; },
   // These two need a server started with PUBLIC_IMPLICIT_ACCOUNTS=on (PORT=… for a second one).
-  'implicit-start': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText('New Account', { exact: true }).click(); await p.waitForTimeout(400); return { full: true }; },
-  'implicit-key': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText('New Account', { exact: true }).click(); await p.getByRole('button', { name: 'Create NEAR Account' }).click(); await p.waitForTimeout(600); await p.getByRole('button', { name: 'Download Key' }).click(); await p.waitForTimeout(400); return { full: true }; },
+  'implicit-start': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText(/^(New Account|Face ID)$/).click(); await p.waitForTimeout(400); return { full: true }; },
+  'implicit-key': async (p) => { await rpc(p); await p.goto(base + LINK); await p.waitForSelector('#dest'); await p.getByText(/^(New Account|Face ID)$/).click(); await p.getByRole('button', { name: 'Create NEAR Account' }).click(); await p.waitForTimeout(600); await p.getByRole('button', { name: 'Download Key' }).click(); await p.waitForTimeout(400); return { full: true }; },
   notfound: async (p) => { await p.goto(base + '/nope'); await p.waitForSelector('h1'); return {}; },
 };
 
