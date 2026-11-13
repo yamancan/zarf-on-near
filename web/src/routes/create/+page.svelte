@@ -249,7 +249,12 @@
       walletId = wallet.walletId();
       wallet.onChange((a, id) => ((account = a), (walletId = id))); // sign-in/out NEAR Connect reports in this page
       // A funding tx from before a reload: resume checking it instead of offering Create again.
-      const f = loadFunding();
+      let f = loadFunding();
+      // A backup chosen on /campaigns wins over a finished send kept in this tab; an unsettled send still resumes first.
+      if (backup && f?.campaignId) {
+        clearFunding();
+        f = null;
+      }
       if (!f) {
         try {
           otherTab = readMarker(localStorage, MARKER_KEY, Date.now());
@@ -269,7 +274,8 @@
         else if (f.txHash) await check(f.txHash);
         else await checkByRoot(); // reloaded while the wallet popup was open
       }
-      if (backup && !f) await openBackup(backup);
+      if (backup && f) error = 'A send is still being checked here. When it settles, open the backup again from Campaigns.';
+      else if (backup) await openBackup(backup);
     } catch {
       setupError = "Couldn't reach NEAR. Nothing was sent.";
       setupRetry = true;
