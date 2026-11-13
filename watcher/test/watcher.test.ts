@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { accountFindings, contractFindings, type WatchView } from '../src/contract.ts';
-import { checkPage, fingerprint, normalizeHtml, rotation, scriptRefs, type Fingerprint } from '../src/bundle.ts';
+import { checkPage, fingerprint, normalizeHtml, pick, rotation, scriptRefs, type Fingerprint } from '../src/bundle.ts';
 import { alert, EXPECTED, run, type Env } from '../src/index.ts';
 import clean from './fixtures/watch-clean.json';
 import proposed from './fixtures/watch-proposed.json';
@@ -112,6 +112,33 @@ describe('claim page check (each cron run): HTML every run, scripts in rotation'
     }
     expect(() => rotation(['a'], 0, 0)).toThrow('at least 1');
   });
+  it('pick: 30 scheduled + 10 random of the rest; the scheduled slices alone cover all 47 in 2 runs', () => {
+    const paths = Array.from({ length: 47 }, (_, i) => `p${String(i).padStart(2, '0')}`);
+    for (const r of [0, 1, 1234]) {
+      const w = pick(paths, 40, r);
+      expect(new Set(w).size).toBe(40);
+      expect(w.slice(0, 30)).toEqual(rotation(paths, 30, r));
+    }
+    expect(new Set([...rotation(paths, 30, 8), ...rotation(paths, 30, 9)]).size).toBe(47);
+    expect(pick(paths.slice(0, 40), 40, 3)).toEqual(paths.slice(0, 40)); // all fit: all, every run
+  });
+  it('an origin that knows the schedule cannot rely on the skipped paths (Duo P1)', async () => {
+    // Each slot it serves a tampered copy of one path outside that slot's scheduled slice; random picks find it.
+    const rec = await fingerprint(PAGE, bigSite(47).fetcher);
+    const paths = Object.keys(rec.scripts).sort();
+    let caught = 0;
+    for (let run = 0; run < 200; run++) {
+      const sched = new Set(rotation(paths, 30, run));
+      const target = paths.find((p) => !sched.has(p))!;
+      const tampered = async (url: string) => (new URL(url).pathname === target ? new Response('steal()') : bigSite(47).fetcher(url));
+      if ((await checkPage(PAGE, tampered, rec, 40, run)).includes(`SCRIPT CHANGED: ${target}`)) caught++;
+    }
+    expect(caught).toBeGreaterThan(80); // 10 of the 17 unscheduled per run: ~59%; the old rotation caught 0
+  });
+  it('a redirect is not followed and is reported (each hop would cost a subrequest)', async () => {
+    const moved = async (url: string) => (url.endsWith('/c.C1.js') ? new Response(null, { status: 302, headers: { location: '/x' } }) : siteResponse('same', new URL(url).pathname));
+    expect(await checkPage(PAGE, moved, EXP, 40, 0)).toEqual(['SCRIPT NOT SERVED: /_app/immutable/chunks/c.C1.js (HTTP 302)']);
+  });
   it('a 100-script page stays inside the free-plan budget: the page and 40 scripts per run', async () => {
     const big = bigSite(100);
     const rec = await fingerprint(PAGE, big.fetcher);
@@ -178,6 +205,13 @@ describe('run + alert', () => {
     const body = JSON.parse(String(post.mock.calls[0][1]!.body));
     expect(body.text).toBe(body.content);
     expect(body.text).toMatch(/^\[zarf-near testnet\] zarf-near-1112\.testnet .*\n- UPGRADE PROPOSED: .*\n- SCRIPT CHANGED: /);
+  });
+  it('SCRIPTS_PER_RUN above the free-plan budget pages and is held at 40', async () => {
+    for (const v of ['41', '0', 'x']) {
+      expect(await run({ ...env, SCRIPTS_PER_RUN: v }, EXP, world(clean, 'same'))).toEqual([
+        `WATCHER MISCONFIGURED: SCRIPTS_PER_RUN ${v} is not 1-40 (the free plan's budget); checked 40`,
+      ]);
+    }
   });
   it('a run that cannot read is an alert', async () => {
     const down = vi.fn(async () => { throw new Error('rpc down'); });

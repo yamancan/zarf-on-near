@@ -23,7 +23,7 @@ function sandbox(secretList) {
 echo "$PWD: $*" >> "${dir}/calls.log"
 case "$*" in
   "wrangler whoami") echo "Account ID ${ACCOUNT}" ;;
-  "wrangler secret list --env mainnet") cat "${dir}/secrets.json" ;;
+  "wrangler secret list --env mainnet --format json") cat "${dir}/secrets.json" ;;
   *) echo "unexpected: $*" >&2; exit 9 ;;
 esac
 `);
@@ -63,7 +63,10 @@ test('with the secret it passes this gate (and stops at the next one here: env.m
   assert.doesNotMatch(r.calls, /deploy|secret put/);
 });
 
-test('a lookalike secret name does not count', () => {
-  const r = sandbox('[{"name":"ALERT_WEBHOOK_URL_OLD","type":"secret_text"}]');
-  assert.match(r.stderr, /no ALERT_WEBHOOK_URL secret/);
+test('lookalike names, unparsable output or an empty answer do not count', () => {
+  for (const name of ['ALERT_WEBHOOK_URL_OLD', '$ALERT_WEBHOOK_URL', 'ALERT_WEBHOOK_URL$', 'alert_webhook_url']) {
+    const r = sandbox(JSON.stringify([{ name, type: 'secret_text' }]));
+    assert.match(r.stderr, /no ALERT_WEBHOOK_URL secret/, name);
+  }
+  for (const out of ['', 'ALERT_WEBHOOK_URL', 'error: not found']) assert.match(sandbox(out).stderr, /no ALERT_WEBHOOK_URL secret/, out);
 });

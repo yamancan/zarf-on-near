@@ -4,8 +4,11 @@
 // Two halves (T-026). At deploy, scripts/fingerprint.ts crawls every script with no subrequest limit and
 // records them all (watcher/expected/<network>.json), after checking each one against the local build. Each
 // cron run can only fetch so much (free Workers: 50 subrequests), so checkPage() re-reads the HTML and
-// re-hashes a rotating window of the recorded scripts: every script is re-hashed within
-// ceil(scripts / perRun) runs, and anything a fetched file names that is not recorded is reported at once.
+// re-hashes `perRun` recorded scripts: a scheduled slice (3/4 of them) that rotates so every script is re-hashed
+// within ceil(scripts / slice) runs, plus a random sample of the rest (1/4), so an origin that knows the
+// schedule still cannot tell which skipped paths are safe to tamper with in this slot. Anything a fetched file
+// names that is not recorded is reported at once. Not covered: an origin serving the watcher other bytes
+// than it serves users (per-request cloaking), or a change reverted before any run looks.
 
 export interface Fingerprint {
   page: string;
@@ -74,14 +77,40 @@ export function rotation(paths: string[], perRun: number, run: number): string[]
   return Array.from({ length: perRun }, (_, i) => paths[(start + i) % paths.length]);
 }
 
+const cryptoRandom = (n: number): number => crypto.getRandomValues(new Uint32Array(1))[0] % n;
+
+/**
+ * The recorded scripts run `run` re-hashes: the scheduled slice (perRun minus a quarter, at least 1), which covers
+ * every path within ceil(n / slice) runs, plus perRun minus slice others drawn at random from the rest.
+ */
+export function pick(paths: string[], perRun: number, run: number, random: (n: number) => number = cryptoRandom): string[] {
+  if (paths.length <= perRun) return paths;
+  const slice = Math.max(1, perRun - Math.floor(perRun / 4));
+  const scheduled = rotation(paths, slice, run);
+  const rest = paths.filter((p) => !scheduled.includes(p));
+  const extra = Math.min(perRun - slice, rest.length);
+  for (let i = 0; i < extra; i++) {
+    const j = i + random(rest.length - i); // partial Fisher-Yates
+    [rest[i], rest[j]] = [rest[j], rest[i]];
+  }
+  return [...scheduled, ...rest.slice(0, extra)];
+}
+
 /** One cron run's check of the live page against the record: HTML every run, `perRun` scripts per run. */
-export async function checkPage(pageUrl: string, fetcher: Fetcher, ex: Fingerprint | null, perRun: number, run: number): Promise<string[]> {
+export async function checkPage(
+  pageUrl: string,
+  fetcher: Fetcher,
+  ex: Fingerprint | null,
+  perRun: number,
+  run: number,
+  random: (n: number) => number = cryptoRandom,
+): Promise<string[]> {
   if (!ex) return ['NO EXPECTED FINGERPRINT for this network: run scripts/deploy-web.sh to record one'];
   const { page, html } = await getPage(pageUrl, fetcher);
   const f = new Set<string>();
   if ((await htmlHash(html)) !== ex.html) f.add(`CLAIM PAGE HTML CHANGED: ${page.pathname}`);
   for (const p of scriptRefs(html, page.href)) if (!(p in ex.scripts)) f.add(`SCRIPT ADDED: ${p} (named by the page)`);
-  for (const p of rotation(Object.keys(ex.scripts).sort(), perRun, run)) {
+  for (const p of pick(Object.keys(ex.scripts).sort(), perRun, run, random)) {
     const url = new URL(p, page.origin).href;
     const r = await fetcher(url);
     if (!r.ok) {

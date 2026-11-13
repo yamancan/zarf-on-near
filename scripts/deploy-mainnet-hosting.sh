@@ -19,7 +19,8 @@ wr() { (cd "$1" && shift && CLOUDFLARE_API_TOKEN=$(cat "$token_file") npx wrangl
 (cd watcher && pnpm install --frozen-lockfile >/dev/null)
 wr watcher whoami 2>/dev/null | grep -q "$ACCOUNT" || die "the Cloudflare token does not see account $ACCOUNT"
 # Blue-team B1: nothing goes live while the watcher's alerts would reach nobody (src/index.ts throws without it).
-wr watcher secret list --env mainnet 2>/dev/null | grep -qw ALERT_WEBHOOK_URL ||
+wr watcher secret list --env mainnet --format json 2>/dev/null |
+  node -e 'process.exit(JSON.parse(require("fs").readFileSync(0, "utf8")).some((s) => s.name === "ALERT_WEBHOOK_URL") ? 0 : 1)' 2>/dev/null ||
   die "the mainnet watcher has no ALERT_WEBHOOK_URL secret, so its alerts would reach nobody. Set it first: (cd watcher && npx wrangler secret put ALERT_WEBHOOK_URL --env mainnet)"
 
 # env.mainnet must be filled in and agree across the three workers (jsonc: strip // comments first).

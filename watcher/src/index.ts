@@ -4,7 +4,9 @@
 // check is itself an alert: silence must mean "checked and clean".
 //
 // Subrequest budget (free Workers: 50 per run): 4 RPC reads with one retry each (8), the page (1), the alert
-// (1), and SCRIPTS_PER_RUN recorded scripts (40): see bundle.ts for how the scripts rotate across runs.
+// (1), and SCRIPTS_PER_RUN recorded scripts (at most 40): exactly 50 at worst. Redirects are not followed (each
+// hop would be one more subrequest): a redirect is a non-OK answer, so it alerts. See bundle.ts for which
+// scripts each run re-hashes.
 
 import { accountFindings, contractFindings, type AccountView, type WatchView } from './contract.ts';
 import { checkPage, type Fingerprint } from './bundle.ts';
@@ -21,7 +23,7 @@ export interface Env {
   /** The escrow account's code hash as view_account returns it (base58). */
   EXPECTED_CODE_HASH: string;
   CLAIM_PAGE_URL: string;
-  /** Recorded scripts re-hashed per run (default 40, the free plan's budget). */
+  /** Recorded scripts re-hashed per run: 1 to 40 (the free plan's budget), default 40. */
   SCRIPTS_PER_RUN?: string;
   /** Secret. POSTed {text, content} (Slack and Discord incoming-webhook shapes). */
   ALERT_WEBHOOK_URL?: string;
@@ -31,7 +33,8 @@ type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
 
 export const EXPECTED: Record<string, Fingerprint | null> = { testnet, mainnet } as Record<string, Fingerprint | null>;
 
-const timed: Fetcher = (url, init) => fetch(url, { ...init, signal: AbortSignal.timeout(15_000) });
+const timed: Fetcher = (url, init) => fetch(url, { ...init, redirect: 'manual', signal: AbortSignal.timeout(15_000) });
+const MAX_SCRIPTS_PER_RUN = 40; // the free plan's 50 less 8 RPC attempts, the page and the alert
 
 /** One NEAR RPC query, tried twice. */
 async function query<T>(env: Env, params: Record<string, unknown>, fetcher: Fetcher): Promise<T> {
@@ -71,6 +74,11 @@ export async function run(env: Env, expected: Fingerprint | null, fetcher: Fetch
   const missing = (['NETWORK', 'CONTRACT_ID', 'NEAR_RPC_URL', 'EXPECTED_OWNER', 'EXPECTED_SIGNERS', 'EXPECTED_CODE_HASH', 'CLAIM_PAGE_URL'] as const).filter((k) => !env[k]);
   if (missing.length) return [`WATCHER MISCONFIGURED: ${missing.join(', ')} empty, nothing was checked`];
   const f: string[] = [];
+  let perRun = Number(env.SCRIPTS_PER_RUN || MAX_SCRIPTS_PER_RUN);
+  if (!(Number.isInteger(perRun) && perRun >= 1 && perRun <= MAX_SCRIPTS_PER_RUN)) {
+    f.push(`WATCHER MISCONFIGURED: SCRIPTS_PER_RUN ${env.SCRIPTS_PER_RUN} is not 1-${MAX_SCRIPTS_PER_RUN} (the free plan's budget); checked ${MAX_SCRIPTS_PER_RUN}`);
+    perRun = MAX_SCRIPTS_PER_RUN;
+  }
   try {
     const [w, owner] = await Promise.all([view<WatchView>(env, 'watch', fetcher), view<string>(env, 'get_owner', fetcher)]);
     f.push(...contractFindings(w, owner, { owner: env.EXPECTED_OWNER, signers: env.EXPECTED_SIGNERS.split(',').map((s) => s.trim()).filter(Boolean) }));
@@ -84,7 +92,7 @@ export async function run(env: Env, expected: Fingerprint | null, fetcher: Fetch
   }
   try {
     // One window per 2-minute cron slot: consecutive runs re-hash consecutive slices of the recorded scripts.
-    f.push(...(await checkPage(env.CLAIM_PAGE_URL, fetcher, expected, Number(env.SCRIPTS_PER_RUN || 40), Math.floor(now / 120_000))));
+    f.push(...(await checkPage(env.CLAIM_PAGE_URL, fetcher, expected, perRun, Math.floor(now / 120_000))));
   } catch (e) {
     f.push(`CANNOT CHECK THE CLAIM PAGE: ${msg(e)}`);
   }

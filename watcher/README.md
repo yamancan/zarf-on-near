@@ -12,9 +12,12 @@ A Cloudflare cron Worker that runs every 2 minutes and sends an alert to `ALERT_
 - **the live claim page** (`CLAIM_PAGE_URL`) differs from `expected/<network>.json`. That file holds the
   sha256 of its HTML (per-request CSP nonces removed) and of every same-origin script it loads, followed
   through static and dynamic imports, however many (recorded at deploy, under Node). Each run reads the HTML
-  and re-hashes `SCRIPTS_PER_RUN` of the recorded scripts, the next slice each run, so every script is
-  re-hashed within ceil(scripts / `SCRIPTS_PER_RUN`) runs (47 scripts: 2 runs, 4 min). A changed HTML, a
-  changed or unserved script, or any script a fetched file names that is not recorded, is reported by path;
+  and re-hashes `SCRIPTS_PER_RUN` (40) of the recorded scripts: a scheduled slice of 30 that rotates, so every
+  script is re-hashed within ceil(scripts / 30) runs (47 scripts: 2 runs, 4 min), plus 10 drawn at random from
+  the rest, so an origin that knows the schedule cannot tell which skipped paths are safe in a given slot. A
+  changed HTML, a changed, redirected or unserved script, or any script a fetched file names that is not
+  recorded, is reported by path. Not covered: an origin that serves the watcher different bytes than it
+  serves users, or a change reverted before any run looks;
 - **it cannot check**: the RPC or the page cannot be read, or the config is empty. Silence means "checked
   and clean", never "could not look".
 
@@ -37,7 +40,7 @@ active yet. `guardian_id` is set at `new` and cannot be added later. The testnet
 | `EXPECTED_SIGNERS` | the relayer's `VERIFIER_SIGNERS` (hex, comma-separated) |
 | `EXPECTED_CODE_HASH` | `5GdxDSB4sGW9Ewod4Q4Na613C2sLQjVfFjLbbZbKt6N8` (`view_account`, base58). An honest upgrade changes it here too |
 | `CLAIM_PAGE_URL` | `https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev/claim/1/0` |
-| `SCRIPTS_PER_RUN` | `40`: the free plan's 50 subrequests per run, less 4 RPC reads with one retry each, the page and the alert |
+| `SCRIPTS_PER_RUN` | `40` (the most allowed): the free plan's 50 subrequests per run, less 4 RPC reads with one retry each, the page and the alert. Redirects are not followed |
 | `ALERT_WEBHOOK_URL` | **secret, the owner sets it**: a Slack or Discord incoming-webhook URL. The body is `{"text": …, "content": …}` |
 
 `env.mainnet` is empty until the mainnet escrow exists. `scripts/deploy-mainnet-hosting.sh` refuses to
