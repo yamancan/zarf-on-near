@@ -6,7 +6,7 @@
   let { label, value, unit = 'USDC' }: { label: string; value: string; unit?: string } = $props();
 </script>
 
-<div class="flex items-center gap-3">
+<div class="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
   <span class="sr-only">{label}</span>
   <Mark svg={MARKS.usdc} class="w-10 h-10" />
   <span class="text-5xl font-semibold tracking-tight text-zen-fg tabular-nums">{value}</span>

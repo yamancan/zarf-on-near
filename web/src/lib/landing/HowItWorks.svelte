@@ -32,17 +32,16 @@
 {/snippet}
 
 {#snippet grid()}
-  <!-- RecipientAllocationGrid's header and rows (zarf-kit/create/RecipientAllocationGrid.svelte:130-200), values in place -->
-  <div class="-mx-6 -mt-6">
-    <div class="grid {COLUMNS} items-center gap-2 border-b border-zen-border-subtle bg-zen-fg/[0.02] px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-zen-fg-subtle">
-      <span>#</span><span>Email</span><span class="text-right">Amount</span>
-    </div>
-    <div class="divide-y divide-zen-border-subtle">
+  <!-- The send screen's own title and RecipientAllocationGrid's rows (zarf-kit/create/RecipientAllocationGrid.svelte:130-200):
+       values as plain text (a picture, not inputs), the grid's own hairlines, numbers and columns -->
+  <div class="space-y-6">
+    <div class="text-xl font-semibold">Recipients</div>
+    <div class="-mx-6 divide-y divide-zen-border-subtle border-y border-zen-border-subtle">
       {#each ROWS as r, i (r.email)}
-        <div class="grid {COLUMNS} items-center gap-2 px-3 py-2">
+        <div class="grid {COLUMNS} items-center gap-2 px-3 py-2.5">
           <span class="text-xs tabular-nums text-zen-fg-faint">{i + 1}</span>
-          <span class="truncate px-1.5 py-1 font-mono text-xs text-zen-fg">{r.email}</span>
-          <span class="flex h-8 items-center justify-end rounded-lg border border-zen-border bg-zen-fg/[0.03] px-2.5 font-mono text-xs tabular-nums text-zen-fg">{r.amount}</span>
+          <span class="truncate px-1.5 text-sm text-zen-fg">{r.email}</span>
+          <span class="px-2.5 text-right text-sm tabular-nums text-zen-fg">{r.amount}</span>
         </div>
       {/each}
     </div>
@@ -57,7 +56,7 @@
     left="6 days left"
     amount="25"
     unit={UNIT}
-    modes={TESTNET ? [['existing', 'NEAR Account'], ['new', 'Face ID'], ['chain', 'Other Chain']] : [['existing', 'NEAR Account'], ['chain', 'Other Chain']]}
+    modes={[['existing', 'NEAR Account']]}
     mode="existing"
   />
 {/snippet}
@@ -72,6 +71,7 @@
       </p>
     </div>
     <AmountPanel label="You Received" value="25" unit={UNIT} />
+    <p class="text-xs text-zen-fg-subtle">Zarf paid the network fee; the Zarf contract sent the USDC.</p>
   </div>
 {/snippet}
 
@@ -90,7 +90,7 @@
     <li>
       {@render slice(arrived)}
       <h2 class="text-xl font-semibold mt-6 mb-1.5 tracking-tight text-base-content">USDC Arrives</h2>
-      <p class="text-sm text-zen-fg-muted">In their NEAR account, or on the chain they pick.</p>
+      <p class="text-sm text-zen-fg-muted">{TESTNET ? 'In their NEAR account.' : 'In their NEAR account, or on the chain they pick.'}</p>
     </li>
   </ol>
 </section>
