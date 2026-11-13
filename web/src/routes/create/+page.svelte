@@ -276,10 +276,13 @@
         else await checkByRoot(); // reloaded while the wallet popup was open
       }
       // The backup opens once nothing here is unsettled (a resumed send may have just finished); otherwise it waits.
-      if (backup && f && !result) backupNote = 'A send is still being checked here, so the backup did not open. When it settles, open the backup again from Campaigns.';
-      else if (backup) {
-        if (f) clearFunding();
-        await openBackup(backup);
+      if (backup) {
+        // Decided from the state after the checks: a send still saved and without a campaign is unsettled.
+        if (loadFunding() && !result) backupNote = 'A send is still being checked here, so the backup did not open. When it settles, open the backup again from Campaigns.';
+        else {
+          startOver(); // a settled or refunded send leaves the screen, so the backup (or its error) shows on its own
+          await openBackup(backup);
+        }
       }
     } catch {
       setupError = "Couldn't reach NEAR. Nothing was sent.";
