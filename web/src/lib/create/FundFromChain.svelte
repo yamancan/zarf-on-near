@@ -243,7 +243,7 @@
             tabindex={source === k ? 0 : -1}
             data-source={k}
             disabled={busy}
-            class="flex flex-col items-center gap-1 py-2 rounded-xl border text-[11px] font-medium transition-colors {source === k ? 'border-zen-fg text-zen-fg' : 'border-transparent text-zen-fg-muted hover:text-zen-fg'}"
+            class="flex flex-col items-center gap-1 py-2 rounded-xl text-[11px] font-medium transition-colors {source === k ? 'bg-zen-fg/10 text-zen-fg' : 'text-zen-fg-muted hover:text-zen-fg'}"
             onclick={() => pick(k)}
           ><span class="w-6 h-6 [&>svg]:w-full [&>svg]:h-full" aria-hidden="true">{@html logo}</span><span class="w-full truncate text-center">{label}</span
             >{#if testnet && k !== 'near'}<ZenBadge size="sm">Mainnet</ZenBadge>{/if}</button>

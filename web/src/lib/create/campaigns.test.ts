@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { claimedAmount, outLabel, readSent, saveSent, sentLabel, showPrepay, type SentRecord, formatNear, listCampaignIds, listCampaigns, mapLimit, reclaimable, reclaimOutcome, reclaimTx, RPC_CONCURRENCY, withdrawTx, type CampaignView, type View, sig3 } from './campaigns';
+import { claimedAmount, outLabel, readSent, saveSent, sentLabel, showPrepay, type SentRecord, formatNear, listCampaignIds, listCampaigns, mapLimit, reclaimable, reclaimOutcome, reclaimTx, RPC_CONCURRENCY, withdrawTx, type CampaignView, type View, sig3, stashBackup, takeBackup } from './campaigns';
 
 const campaign = (o: Partial<CampaignView> = {}): CampaignView => ({
   sender: 'alice.testnet', token: 'usdc.testnet', amount: '30000000', merkle_root: 'ab'.repeat(32), deadline_ns: '2000000000000000',
@@ -174,5 +174,21 @@ describe('the saved send record and its /campaigns label (T-024)', () => {
     const broken = { getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); } };
     expect(() => saveSent(broken, 'c', rec())).not.toThrow();
     expect(readSent(broken, 'c').size).toBe(0);
+  });
+});
+
+describe('backup handoff /campaigns → /create (T-033)', () => {
+  it('is read once and gone after', () => {
+    const m = new Map<string, string>();
+    const store = { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k) } as unknown as Storage;
+    expect(takeBackup(store)).toBeNull();
+    stashBackup('{"links":1}', store);
+    expect(takeBackup(store)).toBe('{"links":1}');
+    expect(takeBackup(store)).toBeNull();
+    expect(m.size).toBe(0);
+  });
+  it('a store that throws (site data blocked) reads as no backup', () => {
+    const store = { getItem: () => { throw new Error('SecurityError'); } } as unknown as Storage;
+    expect(takeBackup(store)).toBeNull();
   });
 });

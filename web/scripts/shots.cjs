@@ -458,7 +458,7 @@ const S = {
     if (filter && !new RegExp(filter).test(name)) continue;
     if (!filter && name.startsWith('implicit-')) continue; // needs the flagged server
     for (const theme of (process.env.THEMES || 'dark,light').split(',')) for (const [w, h] of [[390, 844], [1280, 800]].filter(([w]) => (process.env.WIDTHS || '390,1280').split(',').includes(String(w)))) {
-      const ctx = await b.newContext({ viewport: { width: w, height: h }, javaScriptEnabled: name !== 'boot', colorScheme: theme });
+      const ctx = await b.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: process.env.CROPS ? 2 : 1, javaScriptEnabled: name !== 'boot', colorScheme: theme });
       await ctx.addInitScript((t) => localStorage.setItem('zarf_theme', t), theme);
       await ctx.route(/chaindefuser/, (r) => r.abort()); // nothing reaches the real bridge: a page that needs it stubs it itself
       const p = await ctx.newPage();
@@ -467,6 +467,12 @@ const S = {
         const o = (await fn(p, ctx)) || {};
         await (o.page ?? p).evaluate(() => window.scrollTo(0, 0)); // a sticky navbar otherwise lands mid-page in full shots
         await (o.page ?? p).screenshot({ path: `${out}/${name}-${theme}-${w}.png`, fullPage: !!o.full });
+        // CROPS=1 (T-033): a 2x crop of every logo+text pair: each Mark's parent, and the first chain buttons of a grid
+        if (process.env.CROPS) {
+          const q = o.page ?? p;
+          const n = await q.evaluate(() => { const els = new Set([...document.querySelectorAll('[data-mark]')].map((m) => m.closest('button,a,label') ?? m.parentElement)); document.querySelectorAll('[data-source],[data-chain]').forEach((e, i) => i < 4 && els.add(e)); let i = 0; for (const e of els) if (e.getBoundingClientRect().width) e.setAttribute('data-crop', String(i++)); return i; });
+          for (let i = 0; i < n; i++) await q.locator(`[data-crop="${i}"]`).first().screenshot({ path: `${out}/crop-${name}-${theme}-${w}-${i}.png` }).catch(() => {});
+        }
         if (errs.length && theme === 'dark' && w === 390) console.log(name, 'console:', errs.slice(0, 3).join(' | '));
       } catch (e) { console.log(name, theme, w, 'FAIL', String(e).split('\n')[0]); }
       await ctx.close();

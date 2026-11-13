@@ -89,8 +89,11 @@
   <div class="flex items-center gap-3">
     <span class="sr-only">Claim amount</span>
     <Mark svg={MARKS.usdc} class="w-10 h-10" />
-    <span class="text-5xl font-semibold tracking-tight text-zen-fg tabular-nums">{amount}</span>
-    <span class="text-base text-zen-fg-muted">{unit}</span>
+    <!-- Figure and unit trimmed to cap height, so the mark centres on the digits; the unit shares their baseline -->
+    <span class="flex items-baseline gap-2">
+      <span class="text-5xl font-semibold tracking-tight text-zen-fg tabular-nums [text-box:trim-both_cap_alphabetic]">{amount}</span>
+      <span class="text-base text-zen-fg-muted leading-none [text-box:trim-both_cap_alphabetic]">{unit}</span>
+    </span>
   </div>
 
   <div class="space-y-3">
@@ -107,12 +110,12 @@
             data-mode={value}
             onclick={() => onpick(value)}
             class="flex flex-col items-center justify-center gap-1 min-w-0 h-14 px-2 rounded-2xl text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zen-fg/40 {mode === value
-              ? 'bg-zen-bg text-zen-fg shadow-sm'
+              ? 'bg-zen-fg/10 [[data-theme=paper-porcelain]_&]:bg-zen-bg-elevated [[data-theme=paper-porcelain]_&]:shadow-sm text-zen-fg'
               : 'text-zen-fg-muted hover:text-zen-fg'}"
           >
             {#if value === 'existing'}<Mark svg={MARKS.near} class="w-4 h-4" />
             {:else if value === 'new'}{#if text === 'Face ID'}<ScanFace class="w-4 h-4 shrink-0" aria-hidden="true" />{:else}<UserPlus class="w-4 h-4 shrink-0" aria-hidden="true" />{/if}
-            {:else}<span class="inline-flex gap-0.5 shrink-0">{#each CHAIN_MARKS as c (c.key)}<Mark svg={c.logo} class="w-4 h-4" />{/each}</span>{/if}
+            {:else}<span class="inline-flex gap-0.5 shrink-0 transition-opacity {mode === value ? '' : 'opacity-60'}">{#each CHAIN_MARKS as c (c.key)}<Mark svg={c.logo} class="w-4 h-4" />{/each}</span>{/if}
             <span class="truncate">{text}</span>
           </button>
         {/each}

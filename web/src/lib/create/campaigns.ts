@@ -180,3 +180,18 @@ export function sentLabel(r: SentRecord | undefined): string | null {
   const date = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }).format(r.createdAt);
   return `${r.firstEmail}${others ? ` + ${others} ${others === 1 ? 'other' : 'others'}` : ''} · ${date}`;
 }
+
+const BACKUP_KEY = 'zarf-near:open-backup';
+/** /campaigns hands a chosen backup file to /create in this tab only (T-033: the control lives on /campaigns). */
+export const stashBackup = (text: string, store: Storage = sessionStorage) => store.setItem(BACKUP_KEY, text); // throws: blocked or full
+/** Read once and removed at once: the file holds every claim link, so it never lingers in the tab. */
+export function takeBackup(store?: Storage): string | null {
+  try {
+    const s = store ?? sessionStorage;
+    const t = s.getItem(BACKUP_KEY);
+    s.removeItem(BACKUP_KEY);
+    return t;
+  } catch {
+    return null; // site data blocked: /create loads as usual
+  }
+}
