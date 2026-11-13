@@ -23,6 +23,7 @@ if (buildDir) {
     process.exit(2);
   }
 }
-const n = Object.keys(fp.scripts).length, runs = Math.ceil(n / Math.max(1, Number(perRun)));
-console.error(`${n} scripts recorded${buildDir ? ', all identical to the build' : ''}; at ${perRun} per run the watcher re-hashes each within ${runs} run(s) (${runs * 2} min)`);
+const n = Object.keys(fp.scripts).length, per = Math.max(1, Number(perRun));
+const runs = n <= per ? 1 : Math.ceil(n / Math.max(1, per - Math.floor(per / 4))); // the scheduled slice of src/bundle.ts pick()
+console.error(`${n} scripts recorded${buildDir ? ', all identical to the build' : ''}; at ${per} per run the watcher re-hashes each within ${runs} run(s) (${runs * 2} min)`);
 console.log(JSON.stringify(fp, null, 2));
