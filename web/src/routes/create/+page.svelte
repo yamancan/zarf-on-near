@@ -769,11 +769,10 @@
 
 {#snippet stepHeader(title: string, helper: string)}
   <!-- Zarf create step-1:218-253: title and one helper left; token chip and step chips right -->
-  <header class="flex flex-wrap items-start justify-between gap-x-6 gap-y-4">
-    <div class="space-y-2">
-      <h1 id="step-h" bind:this={stepHeading} tabindex="-1" class="text-2xl md:text-3xl font-light tracking-tight text-zen-fg outline-hidden">{title}</h1>
-      {#if helper}<p class="text-sm md:text-base text-zen-fg-muted font-light leading-relaxed">{helper}</p>{/if}
-    </div>
+  <!-- T-034 PUNCH 15: the step is named once, by the strip; the heading stays for screen readers and focus -->
+  <header class="flex flex-wrap items-center gap-x-6 gap-y-4">
+    <h1 id="step-h" bind:this={stepHeading} tabindex="-1" class="sr-only">{title}</h1>
+    {#if helper}<p class="text-sm md:text-base text-zen-fg-muted font-light leading-relaxed">{helper}</p>{/if}
     <div class="flex flex-wrap items-center gap-3">
       {@render usdcChip()}
       <MicroStepProgress segments={STEPS.map((label) => ({ label }))} current={step} />
@@ -1236,7 +1235,6 @@
         <!-- What They See (T-032, owner point 10): the claim page's own card component, inert; nothing in it takes a click -->
         <aside class="w-full min-w-0 lg:flex-1 lg:max-w-2xl lg:sticky lg:top-24" aria-label="What the first recipient sees">
           <div class="mb-4 ml-1 flex items-center gap-1.5 text-sm text-zen-fg-muted"><Eye class="w-4 h-4" aria-hidden="true" />What They See</div>
-          <p class="sr-only">The claim card the first recipient sees: {previewAmount} {UNIT}, then Sign in with Google. A picture, not a form.</p>
           <ZenCard variant="elevated" class="overflow-hidden {parsed.rows.length ? '' : 'opacity-50'}">
             <div class="p-4 sm:p-8">
             <ClaimCard
@@ -1249,7 +1247,7 @@
               modes={previewModes}
               mode="existing"
             >
-              {#snippet body()}<ZenInput aria-label="NEAR account" placeholder={TESTNET ? 'alice.testnet' : 'alice.near'} disabled />{/snippet}
+              {#snippet body()}<ZenInput aria-label="NEAR account" placeholder={TESTNET ? 'yourname.testnet' : 'yourname.near'} disabled />{/snippet}
               {#snippet footer()}<p class="text-xs text-zen-fg-subtle text-center">Use the email this link was sent to.</p>{/snippet}
             </ClaimCard>
             </div>

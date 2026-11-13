@@ -161,10 +161,9 @@
   class="relative w-full py-24 md:py-32 flex flex-col items-center justify-center overflow-hidden bg-transparent hero-container"
 >
   <!-- 1. Wave grid (spotlight) -->
-  <div class="absolute inset-0 pointer-events-none z-0 wave-grid-spotlight"></div>
+  <div class="absolute inset-0 pointer-events-none z-0 wave-grid-spotlight" aria-hidden="true"></div>
 
   <!-- 2. Data points canvas -->
-  <p class="sr-only">Decorative background: hashed placeholders that reveal "Private Claim" labels under the cursor. No interactive content.</p>
   <canvas bind:this={canvas} aria-hidden="true" class="absolute inset-0 w-full h-full pointer-events-none z-10"></canvas>
 
   <!-- 3. Text backdrop: blurs the canvas behind the text, faded at the edges by a mask -->
@@ -203,7 +202,7 @@
     </div>
 
     <!-- T-032: on testnet one honest line on what pays here; on mainnet the unaudited note (T-001) -->
-    {#if TESTNET}<p class="text-xs text-zen-fg-subtle max-w-md">Testnet: Test USDC on NEAR. Other chains run on mainnet.</p>
+    {#if TESTNET}<p class="text-xs text-zen-fg-subtle max-w-md">On testnet, claims pay test USDC on NEAR.</p>
     {:else}<p class="text-xs text-zen-fg-subtle max-w-md">{UNAUDITED_LINE}</p>{/if}
   </div>
 

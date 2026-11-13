@@ -115,6 +115,13 @@
     guideOpen = false;
     document.getElementById('dest')?.focus();
   }
+  // T-034 PUNCH 2: one line under a disabled Sign in says what unlocks it
+  const whyOff = $derived(
+    !link || check !== 'ok' || busy ? ''
+      : mode === 'chain' ? 'Pick a chain and paste your address first.'
+      : mode === 'new' ? 'Create your Face ID account first.'
+      : acct?.state === 'found' ? 'Confirm the account above first.' : 'Enter your NEAR account first.',
+  );
   const ready = $derived(
     !!link && check === 'ok' && !busy &&
       (mode === 'chain' ? !!payout : isValidAccountId(destination) && (mode === 'existing' ? accountOk : passkeyPrf === true || (exported && confirmed))),
@@ -369,7 +376,7 @@
               id="dest"
               aria-label="NEAR account"
               bind:value={typed}
-              placeholder={network === 'mainnet' ? 'alice.near' : 'alice.testnet'}
+              placeholder={network === 'mainnet' ? 'yourname.near' : 'yourname.testnet'}
               autocomplete="off"
               autocapitalize="off"
               spellcheck={false}
@@ -402,10 +409,7 @@
                   <ZenButton variant="tonal" size="xs" onclick={useWallet} disabled={walletNote === 'Opening your wallet…'}>
                     {#snippet iconLeft()}<Wallet class="w-3.5 h-3.5" />{/snippet}Use My Wallet
                   </ZenButton>
-                  {#if passkeyOn}
-                    <!-- No account yet: a Face ID wallet, in this page (blue-team gap 3), not a trip to another wallet -->
-                    <ZenButton variant="ghost" size="xs" onclick={() => pick('new')}>Use Face ID Instead</ZenButton>
-                  {:else}
+                  {#if !passkeyOn}
                     <!-- No account yet: Meteor in a new tab, three steps here; this tab keeps the claim (T-002) -->
                     <ZenButton variant="ghost" size="xs" onclick={() => ((guideOpen = true), window.open(METEOR, '_blank', 'noopener,noreferrer'))}>
                       Get a NEAR Account
@@ -447,7 +451,7 @@
           {/snippet}
           {#snippet footer()}
           {#if busy}<Note tone="pending">{busy}</Note>{/if}
-          {#if !(mode === 'chain' && network !== 'mainnet')}<p class="text-xs text-zen-fg-subtle text-center">Use the email this link was sent to.</p>{/if}
+          {#if !(mode === 'chain' && network !== 'mainnet')}<p class="text-xs text-zen-fg-subtle text-center">{!ready && whyOff ? whyOff : 'Use the email this link was sent to.'}</p>{/if}
           <!-- T-001: the unaudited note stays visible on mainnet -->
           {#if network === 'mainnet'}<p class="text-xs text-zen-fg-subtle text-center">{UNAUDITED_LINE}</p>{/if}
           {#if error}<Note tone="error" center>{error}</Note>{/if}

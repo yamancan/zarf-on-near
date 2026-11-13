@@ -9,7 +9,6 @@
   import type { Snippet } from 'svelte';
   import { tick } from 'svelte';
   import { Info, ScanFace, UserPlus } from 'lucide-svelte';
-  import Avatar from '$lib/Avatar.svelte';
   import GoogleG from '$lib/GoogleG.svelte';
   import Mark from '$lib/Mark.svelte';
   import { MARKS, PAYOUT_CHAINS } from '$lib/chains';
@@ -72,7 +71,7 @@
   <div class="min-w-0">
     {#if preview}<div class="text-xl font-semibold">{title}</div>{:else}<h1 class="text-xl font-semibold">{title}</h1>{/if}
     <p class="text-sm text-zen-fg-muted font-light mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-      <span class="inline-flex items-center gap-1.5 min-w-0">{#if sender}<Avatar name={sender} /><span class="font-mono truncate">{sender}</span>{:else}From you{/if}</span>
+      <span class="inline-flex items-center gap-1.5 min-w-0">{#if sender}<span class="truncate" title={sender}>From {sender}</span>{:else}From you{/if}</span>
       <span class="inline-flex items-center gap-1.5 whitespace-nowrap">
         {#if left}<span class="tabular-nums" title={deadline ? `Claim by ${deadline}` : undefined}>{left}</span>{/if}
         {#if !preview}
