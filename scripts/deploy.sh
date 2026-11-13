@@ -22,7 +22,8 @@
 #   OWNER_ON_MAC=1   write the owner kit instead of signing here (forced on mainnet)
 #   KIT_DIR          default <repo>/owner-kit-$NETWORK
 #   OWNER_SIGN       how the kit signs as OWNER_ID: sign-with-keychain (default) or 'sign-with-ledger usb'
-#   ESCROW_NEAR, RELAYER_NEAR   what the kit funds the two new accounts with (default 3.5 and 1 NEAR)
+#   ESCROW_NEAR, RELAYER_NEAR   what the kit funds the two new accounts with, with the unit as near-cli
+#                    takes it (default '3.5 NEAR' and '1 NEAR')
 #   VERIFY_ONLY=1    read-only: check the deployed escrow and relayer against this env, sign nothing
 #   EXPECT_CODE_HASH base58 code hash the build (and VERIFY_ONLY) must match
 #   GUARDIAN_ID      account that can only delay (cancel, freeze, drop a not-yet-active key)
@@ -240,6 +241,9 @@ if [[ ${OWNER_ON_MAC:-} == 1 ]]; then
     [[ ${DRY_RUN:-} == 1 ]] || { echo "missing $wasm" >&2; exit 66; }
     wasm_sha="<sha256 of the release wasm>"
   fi
+  for v in "${ESCROW_NEAR:-3.5 NEAR}" "${RELAYER_NEAR:-1 NEAR}"; do
+    [[ $v =~ ^[0-9]+(\.[0-9]+)?\ NEAR$ ]] || { echo "ESCROW_NEAR/RELAYER_NEAR must look like '3.5 NEAR', got '$v'" >&2; exit 64; }
+  done
   R=$(relayer_pubkey)
   mkdir -p "$kit"
   [[ -s $wasm ]] && cp "$wasm" "$kit/zarf_near.wasm"

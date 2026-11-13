@@ -107,9 +107,13 @@ funds `<owner>.near` with about 5.0 NEAR and the guardian with 0.1 NEAR.
   (code hash and access keys), and
   `near contract call-function as-read-only escrow.<owner>.near get_config json-args '{}' network-config mainnet now`
   (expect `"network":"mainnet"`, `"upgrade_delay_ns":"3600000000000"`, the guardian's account).
-- The owner key was never on the deploy host. Upgrades, settings and key changes are signed on the
-  owner's machine, so nothing on the deploy host can move escrowed funds: it holds only S (signs claims
-  for the verifier, as Mode W already trusts) and R (can only call `claim`).
+- The owner key was never on the deploy host. Upgrades, settings, owner and key changes are signed on
+  the owner's machine, off the deploy host. The deploy host holds only S (the verifier's signing seed) and R (can only call `claim`).
+- **Residual, accepted with Mode W:** S on the deploy host (and in the verifier Worker) can still move funds
+  through forged claims. `claim` pays any destination that carries a valid S signature, so whoever holds S
+  can claim every unclaimed allocation of every live campaign to their own account, given the claim links
+  or the leaf data. The guardian and the upgrade watcher cannot stop that; only `remove_agent(S)` from the
+  owner's machine does, after which live campaigns continue on S2.
 
 ## Posture
 
