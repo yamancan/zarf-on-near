@@ -348,8 +348,14 @@ const JS = `(() => {
     busy(true);
     show([el('p', { className: 'sr-only' }, 'Creating your campaign on NEAR testnet…')]);
     try {
-      const res = await fetch('/faucet', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: f.email.value, turnstile }) });
+      // The recovery token from this browser's first answer for this email (red team #1): without it a repeat gets
+      // no link back. Kept per typed email in localStorage; the server compares it with a hash.
+      const rkey = 'zarf_faucet_recovery:' + f.email.value.trim().toLowerCase();
+      let recovery = null;
+      try { recovery = localStorage.getItem(rkey); } catch {}
+      const res = await fetch('/faucet', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: f.email.value, turnstile, recovery }) });
       const body = await res.json().catch(() => ({}));
+      if (res.ok && body.recovery_token) { try { localStorage.setItem(rkey, body.recovery_token); } catch {} }
       if (!res.ok) {
         const [tone, text] = MESSAGES[body.error] || ['error', 'Something went wrong. Please try again in a minute.'];
         if (body.error === 'BAD_EMAIL') email.setAttribute('aria-invalid', 'true');
@@ -363,6 +369,14 @@ const JS = `(() => {
         const title = el('h2', { tabIndex: -1 }, 'Demo only: no link was created');
         ask.hidden = true;
         show([title, note('wait', 'This faucet is in demo mode. Nothing was created on NEAR, so there is no link to claim.')]);
+        title.focus();
+        return;
+      }
+      // A link was made for this email today, in another browser (or this one's storage was cleared): not shown here.
+      if (body.reshown && !body.claim_url) {
+        const title = el('h2', { tabIndex: -1 }, 'Already Sent Today');
+        ask.hidden = true;
+        show([title, note('wait', 'This email got its link today in another browser. Open it there; a new one is possible tomorrow.')]);
         title.focus();
         return;
       }

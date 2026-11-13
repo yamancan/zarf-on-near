@@ -134,23 +134,41 @@ describe('handleFaucet', () => {
       .toEqual({ status: 503, body: { error: 'CREATE_FAILED' } });
     const again = await handleFaucet({ email: 'judge@gmail.com' }, 'ip', deps({ kv: flaky }));
     expect(again.status).toBe(200);
-    // Now the email has its link: asking again shows that same link.
-    expect((await handleFaucet({ email: 'judge@gmail.com' }, 'ip2', deps({ kv: flaky }))).body).toEqual({ ...again.body, reshown: true });
+    // Now the email has its link: asking again with its recovery token shows that same link.
+    const { recovery_token, ...link } = again.body;
+    expect((await handleFaucet({ email: 'judge@gmail.com', recovery: recovery_token }, 'ip2', deps({ kv: flaky }))).body).toEqual({ ...link, reshown: true });
   });
 
-  it('asking again with the same email shows the same link, and spends no funds or quota', async () => {
+  it('asking again with the same email and its recovery token shows the same link, and spends no funds or quota', async () => {
     let creates = 0;
     const creator: CampaignCreator = { live: true, create: async () => (creates++, { campaignId: '8', txHash: 'tx' }) };
     const d = deps({ creator });
     const first = await handleFaucet({ email: 'judge@gmail.com' }, 'ip', d);
+    const { recovery_token, ...link } = first.body;
+    expect(recovery_token).toMatch(/^[0-9a-f]{32}$/);
     const kv = d.kv as ReturnType<typeof memKv>;
     const before = new Map(kv.m);
     for (const [email, ip] of [['judge@gmail.com', 'ip'], [' Judge@Gmail.com ', 'other-ip']]) {
-      const again = await handleFaucet({ email }, ip, d);
-      expect(again).toEqual({ status: 200, body: { ...first.body, reshown: true } });
+      const again = await handleFaucet({ email, recovery: recovery_token }, ip, d);
+      expect(again).toEqual({ status: 200, body: { ...link, reshown: true } });
     }
     expect(creates).toBe(1);
     expect(kv.m).toEqual(before); // no counter moved
+  });
+
+  it('red team #1: a repeat without the recovery token learns only that a link was issued, never the link', async () => {
+    let creates = 0;
+    const creator: CampaignCreator = { live: true, create: async () => (creates++, { campaignId: '8', txHash: 'tx' }) };
+    const d = deps({ creator });
+    const first = await handleFaucet({ email: 'judge@gmail.com' }, 'ip', d);
+    for (const recovery of [undefined, '', 'f'.repeat(32), String(first.body.commitment), 'x'.repeat(10_000), 7]) {
+      const r = await handleFaucet({ email: 'judge@gmail.com', recovery }, 'other-ip', d);
+      expect(r).toEqual({ status: 200, body: { reshown: true } });
+    }
+    expect(creates).toBe(1);
+    // The token is not stored as is: the sealed record holds only its hash.
+    const dump = JSON.stringify([...(d.kv as ReturnType<typeof memKv>).m]);
+    expect(dump).not.toContain(String(first.body.recovery_token));
   });
 
   it('never shows one email\'s link to another email, nor under another key, nor on another day', async () => {
@@ -372,7 +390,9 @@ describe('worker', () => {
     net({ turnstile: 'failed' });
     expect(await post(env, { email: 'judge@gmail.com', turnstile: 'forged' }, local)).toEqual({ status: 403, body: { error: 'TURNSTILE_FAILED' } });
     net();
-    expect((await post(env, { email: 'judge@gmail.com', turnstile: 't' }, local)).body).toEqual({ ...first.body, reshown: true });
+    const { recovery_token, ...link } = first.body as Record<string, unknown>;
+    expect((await post(env, { email: 'judge@gmail.com', turnstile: 't', recovery: recovery_token }, local)).body).toEqual({ ...link, reshown: true });
+    expect((await post(env, { email: 'judge@gmail.com', turnstile: 't' }, local)).body).toEqual({ reshown: true });
   });
 
   it('refuses a token issued for another hostname', async () => {
