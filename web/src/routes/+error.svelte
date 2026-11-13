@@ -1,7 +1,7 @@
 <script lang="ts">
   // After the main claim app's +error.svelte: icon + mono status, one title, one line, one way home.
   import { page } from '$app/state';
-  import { AlertTriangle, SearchX } from 'lucide-svelte';
+  import { AlertTriangle } from 'lucide-svelte';
   import Medallion from '$lib/Medallion.svelte';
   import ZenButton from '$lib/zarf-kit/components/ui/ZenButton.svelte';
   import ZenCard from '$lib/zarf-kit/components/ui/ZenCard.svelte';
@@ -14,7 +14,6 @@
   <ZenCard variant="elevated" padding="lg">
     <div class="flex flex-col items-center text-center space-y-6 py-2">
       {#if page.status === 404}
-        <Medallion icon={SearchX} tone="muted" />
         <div class="space-y-2">
           <h1 class="text-xl font-bold">Page Not Found</h1>
           <p class="text-sm text-zen-fg-muted max-w-xs">Following a claim link? Open it in full from your message.</p>
@@ -26,7 +25,7 @@
           <p class="text-sm text-zen-fg-muted max-w-xs">Try again in a minute.</p>
         </div>
       {/if}
-      <a href="/" class="inline-block"><ZenButton tabindex={-1} variant="secondary">What Is Zarf?</ZenButton></a>
+      <a href="/" class="inline-block"><ZenButton tabindex={-1} variant="secondary">Go to Zarf</ZenButton></a>
     </div>
   </ZenCard>
 </div>

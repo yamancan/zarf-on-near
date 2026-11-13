@@ -7,7 +7,7 @@
   import ClaimRecord from '$lib/ClaimRecord.svelte';
   import { canRetry, ClaimError, describeError, errorCode, failureHeading, getClaimState, isUnmapped, relayAndSettle, requestSignature, starterLine, submitClaim } from '$lib/services';
   import { formatAmount } from '$lib/create/recipients';
-  import { AlertTriangle, ArrowUpRight, Check, CheckCircle2, ChevronDown, Clock, ExternalLink, Loader2, Mail, Undo2 } from 'lucide-svelte';
+  import { AlertTriangle, ArrowUpRight, Check, CheckCircle2, ChevronDown, Clock, ExternalLink, Loader2, Undo2 } from 'lucide-svelte';
   import AmountPanel from '$lib/AmountPanel.svelte';
   import Avatar from '$lib/Avatar.svelte';
   import Steps from '$lib/Steps.svelte';
@@ -292,20 +292,19 @@
       {:else if stored}
         <ClaimRecord r={stored} amount={stored.amount} {contract} campaign={campaignId} commitment={commitmentId} />
       {:else if !resumed && (!ok || !attempt)}
-        <Medallion icon={Mail} tone="muted" />
         {#if claimStartedHere(attempt, campaignId, commitmentId)}
           <!-- Reloaded mid-claim: the sign-in was in memory only; the claim page reads where it stands on chain -->
           <h1 class="text-xl font-bold">Page Reloaded</h1>
           <p class="text-sm text-zen-fg-muted max-w-xs">Your claim may still be on its way. Open it to see where it stands.</p>
         {:else}
-          <h1 class="text-xl font-bold">Nothing to Show Yet</h1>
-          <p class="text-sm text-zen-fg-muted max-w-xs">This page shows your claim after you sign in with Google.</p>
-          {#if passkeyOn}<PasskeyAccount label="Claimed with Face ID? Open Your Account" />{/if}
+          <h1 class="text-xl font-bold">No Claim Here Yet</h1>
+          <p class="text-sm text-zen-fg-muted max-w-xs">Open the claim link from your message.</p>
+          {#if passkeyOn}<PasskeyAccount quiet label="Already Claimed with Face ID? Open Your Account" />{/if}
         {/if}
         {#if canGoBack}
           {@render back()}
         {:else}
-          <a href="/" class="inline-block"><ZenButton tabindex={-1} variant="secondary">What Is Zarf?</ZenButton></a>
+          <a href="/" class="text-xs text-zen-fg-subtle underline underline-offset-2 hover:text-zen-fg">About Zarf</a>
         {/if}
       {:else if payout}
         {@const outcome = bridgeView?.outcome ?? 'in-transit'}

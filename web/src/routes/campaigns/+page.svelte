@@ -9,13 +9,12 @@
   import { nearView } from '$lib/services';
   import { deadlineText, timeLeft } from '$lib/claim';
   import { UNIT } from '$lib/network';
-  import { ArrowDownToLine, ArrowUpRight, ChevronDown, FolderOpen, Info, Plus, Send, Wallet } from 'lucide-svelte';
+  import { ArrowDownToLine, ArrowUpRight, ChevronDown, FolderOpen, Info, Plus } from 'lucide-svelte';
   import { goto } from '$app/navigation';
   import Avatar from '$lib/Avatar.svelte';
   import { titleCase } from '$lib/text';
   import Tooltip from '$lib/zarf-kit/components/ui/Tooltip.svelte';
   import ZenBadge from '$lib/zarf-kit/components/ui/ZenBadge.svelte';
-  import Medallion from '$lib/Medallion.svelte';
   import Note from '$lib/Note.svelte';
   import PageHeader from '$lib/zarf-kit/components/ui/PageHeader.svelte';
   import ZenAlert from '$lib/zarf-kit/components/ui/ZenAlert.svelte';
@@ -178,7 +177,7 @@
           <ZenButton variant="ghost" size="sm" disabled={!!busy} onclick={async () => { await wallet?.signOut(); account = null; rows = null; }}>Disconnect</ZenButton>
         </span>
       {/if}
-    <a href="/create" class="inline-block"><ZenButton tabindex={-1} variant="primary" size="lg">
+    <a href="/create" class="inline-block"><ZenButton tabindex={-1} variant="secondary">
       {#snippet iconLeft()}<Plus class="w-4 h-4" />{/snippet}New Send
     </ZenButton></a>
     </div>
@@ -201,11 +200,7 @@
   {:else if !account}
     <ZenCard variant="elevated" padding="lg" class="max-w-lg mx-auto">
       <div class="flex flex-col items-center text-center space-y-6 py-2">
-        <Medallion icon={Wallet} />
-        <div class="space-y-2">
-          <h2 class="text-xl font-bold">Connect Wallet</h2>
-          <p class="text-sm text-zen-fg-muted max-w-xs">The wallet you sent from.</p>
-        </div>
+        <p class="text-sm text-zen-fg-muted max-w-xs">Connect the wallet you paid from to see your sends and any unclaimed USDC.</p>
         <ZenButton variant="primary" onclick={connect} disabled={!walletReady}>Connect Wallet</ZenButton>
         {#if walletError}<Note tone="error">{walletError}</Note>{/if}
       </div>
@@ -220,7 +215,6 @@
   {:else if rows.length === 0}
     <ZenCard variant="elevated" padding="lg" class="max-w-lg mx-auto">
       <div class="flex flex-col items-center text-center space-y-6 py-2">
-        <Medallion icon={Send} tone="muted" />
         <div class="space-y-2">
           <h2 class="text-xl font-bold">No Campaigns Yet</h2>
           <p class="text-sm text-zen-fg-muted">Nothing sent from <span class="font-mono">{account}</span> so far.</p>

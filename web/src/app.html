@@ -9,19 +9,22 @@
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <meta name="theme-color" content="#F8F8FA" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#0A0A0B" media="(prefers-color-scheme: dark)" />
-    <!-- Link previews: every route is the same shell (ssr = false), so a claim link previews as this. -->
+    <!-- Link previews: every route is the same shell (ssr = false), so a claim link previews as this. The image URL is
+         absolute (X and most crawlers ignore a relative og:image); the words follow the landing hero (T-034). -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Zarf" />
-    <meta property="og:title" content="Zarf: tokens sent to an email" />
-    <meta property="og:description" content="Claim them with a Google sign-in. The email never goes on chain." />
-    <meta property="og:image" content="/og.png" />
+    <meta property="og:url" content="https://near.zarf.to/" />
+    <meta property="og:title" content="Send USDC to any email, from any chain." />
+    <meta property="og:description" content="They claim with Gmail or Google Workspace. The email never goes on chain." />
+    <meta property="og:image" content="https://near.zarf.to/og.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="Zarf: send tokens to an email." />
+    <meta property="og:image:alt" content="Zarf: Send USDC to any email. They claim with Google." />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Zarf: tokens sent to an email" />
-    <meta name="twitter:description" content="Claim them with a Google sign-in. The email never goes on chain." />
-    <meta name="twitter:image" content="/og.png" />
+    <meta name="twitter:site" content="@zarfto" />
+    <meta name="twitter:title" content="Send USDC to any email, from any chain." />
+    <meta name="twitter:description" content="They claim with Gmail or Google Workspace. The email never goes on chain." />
+    <meta name="twitter:image" content="https://near.zarf.to/og.png" />
     <!-- Theme before first paint, as the main claim app's app.html: the saved choice, else dark (saved). -->
     <script nonce="%sveltekit.nonce%">
       (function () {

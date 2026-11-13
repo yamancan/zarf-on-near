@@ -10,7 +10,8 @@
   import { accountBalances, formatNear, unlockPasskeyAccount } from '$lib/passkey';
   import { keyFile, type ImplicitAccount } from '$lib/implicit';
 
-  let { expected = '', label = 'Open My Account with Face ID' }: { expected?: string; label?: string } = $props();
+  // quiet: a text-weight entry where the page's main action is elsewhere (an empty receipt, T-034)
+  let { expected = '', label = 'Open My Account with Face ID', quiet = false }: { expected?: string; label?: string; quiet?: boolean } = $props();
   let opened = $state<{ id: string; near: bigint; token: bigint } | null>(null);
   let unlocked = $state.raw<ImplicitAccount | null>(null); // the re-derived key, kept only for "Download Key" (B5)
   let saved = $state(false);
@@ -65,6 +66,6 @@
     {/if}
   </div>
 {:else}
-  <ZenButton variant="secondary" class="w-full" disabled={opening} onclick={open}>{label}</ZenButton>
+  <ZenButton variant={quiet ? 'ghost' : 'secondary'} size={quiet ? 'sm' : 'md'} class={quiet ? '' : 'w-full'} disabled={opening} onclick={open}>{label}</ZenButton>
   {#if error}<Note tone="error">{error}</Note>{/if}
 {/if}
