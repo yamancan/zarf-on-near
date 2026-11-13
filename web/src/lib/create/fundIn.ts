@@ -4,16 +4,17 @@
 // 1Click has no testnet: on testnet only dry quotes (live mainnet prices, no deposit address) are shown.
 
 import {
-  describeStatus, MAX_CROSS_CHAIN_PAYOUT, MAX_LOSS_BPS, NEAR_USDC_ASSET, ONECLICK_API, PAYOUT_CHAINS, QuoteError,
-  SLIPPAGE_BPS, type PayoutChain, type PayoutStatus, type StatusView,
+  describeStatus, MAX_CROSS_CHAIN_PAYOUT, MAX_LOSS_BPS, NEAR_USDC_ASSET, ONECLICK_API, QuoteError,
+  SLIPPAGE_BPS, type PayoutStatus, type StatusView,
 } from '../intents';
+import { PAYOUT_CHAINS, type PayoutChain } from '../chains';
 import { middle } from '../claim';
 import { SignatureError, verifyQuoteSignature } from '../oneclickSig';
 
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 const defaultFetch: Fetch = (u, i) => fetch(u, i);
 
-/** The chains a send can be funded from: the payout leg's pinned Circle USDC chains (PAYOUT_CHAINS). */
+/** The chains a send can be funded from: the payout leg's pinned Circle USDC chains (PAYOUT_CHAINS in lib/chains.ts). */
 export const FUNDING_CHAINS: PayoutChain[] = PAYOUT_CHAINS;
 const NEAR_USDC_DECIMALS = 6;
 export const FUNDING_LIFETIME_MS = 60 * 60_000; // the request deadline: after it 1Click refunds a late deposit
