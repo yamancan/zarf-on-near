@@ -76,7 +76,9 @@ describe('patched NEAR Connect loader: integrity pin (patches/@hot-labs__near-co
     const pin = await sha(code);
     const unhandled: unknown[] = [];
     const onUnhandled = (e: unknown) => void unhandled.push(e);
-    process.on('unhandledRejection', onUnhandled);
+    type Proc = { on(e: string, f: (x: unknown) => void): void; off(e: string, f: (x: unknown) => void): void };
+    const proc = (globalThis as unknown as { process: Proc }).process; // web has no @types/node
+    proc.on('unhandledRejection', onUnhandled);
     try {
       vi.stubGlobal('fetch', async () => new Response('down', { status: 503 }));
       expect(await executor(pin, code).self.loadCode()).toBe(code);
@@ -85,7 +87,7 @@ describe('patched NEAR Connect loader: integrity pin (patches/@hot-labs__near-co
       await new Promise((r) => setTimeout(r, 20));
       expect(unhandled).toEqual([]);
     } finally {
-      process.off('unhandledRejection', onUnhandled);
+      proc.off('unhandledRejection', onUnhandled);
     }
   });
 });
