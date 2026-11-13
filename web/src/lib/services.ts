@@ -174,7 +174,8 @@ const BACKOFF_MS = [1000, 2000, 3000, 5000, 8000];
 /**
  * For a relayer 202: polls claim_state until it settles, or `timeoutMs` passes. A node that has not
  * seen the tx yet still says "unclaimed", so that is final only once "pending" was seen or after
- * `graceMs`. A failed read or an unexpected value counts as pending: never a false success or failure.
+ * `graceMs`. A failed read or an unexpected value is unknown (red team #10): it keeps polling but never counts as
+ * "pending seen", so it cannot cut the grace short. Never a false success or failure.
  */
 export async function settleClaim(
   read: () => Promise<ClaimState>,
@@ -184,7 +185,7 @@ export async function settleClaim(
   const end = start + timeoutMs;
   let sawPending = false;
   for (let i = 0; ; i++) {
-    const state = await read().catch(() => 'pending' as const);
+    const state: ClaimState | null = await read().catch(() => null); // a failed read: unknown, not pending
     if (state === 'claimed') return state;
     if (state === 'unclaimed' && (sawPending || now() - start >= graceMs)) return state;
     if (state === 'pending') sawPending = true;

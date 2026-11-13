@@ -3,7 +3,7 @@
   import { page } from '$app/state';
   import { env } from '$env/dynamic/public';
   import {
-    INCOMPLETE_LINE, classifyDestination, claimState, confirmRemembered, isEthAccount, typedBefore, type Receipt, missingAccountLine, nearAccountReady, type AccountCheck, deadlineText, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isValidAccountId, loadAttempt, loadReceipt,
+    INCOMPLETE_LINE, classifyDestination, confirmRemembered, isEthAccount, typedBefore, type Receipt, missingAccountLine, nearAccountReady, type AccountCheck, deadlineText, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isValidAccountId, loadAttempt, loadReceipt,
     middle, newAttemptId, parseLinkFragment, saveAttempt, timeLeft, type LinkSecret,
   } from '$lib/claim';
   import { rootFromProof } from '$lib/merkle';
@@ -274,7 +274,7 @@
       clientId,
       redirectUri: `${location.origin}/auth/google`,
       nonce: await destinationNonce(to),
-      state: claimState(campaign, commitment, attemptId),
+      state: attemptId, // the id alone; campaign and commitment stay in this tab (red team #5)
     });
   }
 </script>

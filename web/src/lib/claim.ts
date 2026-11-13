@@ -110,9 +110,12 @@ export function parseLinkFragment(hash: string): LinkSecret | null {
 /** The link's fragment for one recipient (the order of spec/vectors.json `links`). */
 export const linkFragment = (l: LinkSecret): string => `s=${l.salt}&a=${l.amount}&p=${encodeProof(l.proof)}`;
 
-/** OAuth `state`: the claim plus a random per-attempt value, so a callback from another attempt is refused. */
-export const claimState = (campaign: string, commitment: string, attemptId: string): string =>
-  `${campaign}/${commitment}/${attemptId}`;
+/**
+ * OAuth `state` is the random per-attempt id alone (red team #5): Google never learns which link is being claimed.
+ * The campaign and commitment stay in this tab's sessionStorage (saveAttempt). A callback matches only the attempt
+ * this tab started, and only one with a destination.
+ */
+export const stateMatches = (a: Attempt | null, state: string): a is Attempt => !!a?.destination && !!a.attemptId && a.attemptId === state;
 
 export const newAttemptId = (): string => hex(crypto.getRandomValues(new Uint8Array(16)));
 

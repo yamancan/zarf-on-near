@@ -138,12 +138,21 @@ describe('settleClaim (after the relayer returns a hash)', () => {
     expect(c.elapsed()).toBeLessThanOrEqual(60_000);
     expect(c.elapsed()).toBeGreaterThan(50_000);
   });
-  it('treats an unexpected value as still pending', async () => {
-    expect(await settleClaim(reads('weird' as ClaimState, 'unclaimed'), clock())).toBe('unclaimed');
+  it('an unexpected value is unknown: a later unclaimed still waits out the grace', async () => {
+    const c = clock();
+    expect(await settleClaim(reads('weird' as ClaimState, 'unclaimed'), c)).toBe('unclaimed');
+    expect(c.elapsed()).toBeGreaterThanOrEqual(19_000);
   });
-  it('treats a failed read as still pending', async () => {
+  it('a failed read keeps polling and gives up as pending, never as a result', async () => {
     expect(await settleClaim(reads(new Error('rpc'), 'claimed'), clock())).toBe('claimed');
     expect(await settleClaim(reads(new Error('rpc')), clock())).toBe('pending');
+  });
+  it('red team #10: a failed read does not count as "pending seen", so a lagging unclaimed is not believed', async () => {
+    // Before: the error counted as pending, the next lagging "unclaimed" ended the poll after 1 s as Not Claimed.
+    expect(await settleClaim(reads(new Error('rpc'), 'unclaimed', 'pending', 'claimed'), clock())).toBe('claimed');
+    const c = clock();
+    expect(await settleClaim(reads(new Error('rpc'), 'unclaimed'), c)).toBe('unclaimed');
+    expect(c.elapsed()).toBeGreaterThanOrEqual(19_000);
   });
   it('a relayer "paid" (claim_paid event) is claimed at once, even if a lagging node says unclaimed', async () => {
     const read = vi.fn(reads('unclaimed'));

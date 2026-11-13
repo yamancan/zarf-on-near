@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { claimedAmount, formatNear, listCampaignIds, listCampaigns, mapLimit, reclaimable, reclaimOutcome, reclaimTx, RPC_CONCURRENCY, withdrawTx, type CampaignView, type View, sig3 } from './campaigns';
+import { claimedAmount, outLabel, showPrepay, formatNear, listCampaignIds, listCampaigns, mapLimit, reclaimable, reclaimOutcome, reclaimTx, RPC_CONCURRENCY, withdrawTx, type CampaignView, type View, sig3 } from './campaigns';
 
 const campaign = (o: Partial<CampaignView> = {}): CampaignView => ({
   sender: 'alice.testnet', token: 'usdc.testnet', amount: '30000000', merkle_root: 'ab'.repeat(32), deadline_ns: '2000000000000000',
@@ -37,6 +37,23 @@ describe('claimedAmount', () => {
   it('is amount minus balance minus in_flight', () => {
     expect(claimedAmount({ amount: '100', balance: '60', in_flight: '15' } as CampaignView)).toBe(25n);
   });
+});
+
+describe('outLabel (red team #6)', () => {
+  const c = { amount: '100', balance: '0', in_flight: '0', deadline_ns: '2000000000' } as CampaignView; // deadline at 2,000 ms
+  it('before the deadline only claims can move funds out: "claimed"', () => expect(outLabel(c, 1999)).toBe('claimed'));
+  it('a fully reclaimed campaign after the deadline never reads as claimed', () => {
+    expect(claimedAmount(c)).toBe(100n);
+    expect(outLabel(c, 2001)).toBe('left escrow');
+  });
+  it('the deadline itself still counts as open (reclaim needs now > deadline)', () => expect(outLabel(c, 2000)).toBe('claimed'));
+});
+
+describe('showPrepay (red team #9)', () => {
+  it('no campaign but NEAR left from an aborted first send: the balance and Withdraw show', () => expect(showPrepay([], '5000')).toBe(true));
+  it('no campaign and nothing to withdraw: no row', () => expect(showPrepay([], '0')).toBe(false));
+  it('with campaigns it shows even at 0', () => expect(showPrepay([{}], '0')).toBe(true));
+  it('not read yet: no row', () => expect(showPrepay(null, '5000')).toBe(false));
 });
 
 describe('reclaimable', () => {
