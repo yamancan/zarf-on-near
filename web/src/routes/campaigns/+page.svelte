@@ -174,7 +174,7 @@
   {:else if !account}
     <ZenCard variant="elevated" padding="lg" class="max-w-lg mx-auto">
       <div class="flex flex-col items-center text-center space-y-6 py-2">
-        <p class="text-sm text-zen-fg-muted max-w-xs">Connect the wallet you sent from to see your sends and take back what is left.</p>
+        <p class="text-sm text-zen-fg-muted max-w-xs">Connect the wallet you paid from to see your sends and any unclaimed USDC.</p>
         <ZenButton variant="primary" onclick={connect} disabled={!walletReady}>Connect Wallet</ZenButton>
         {#if walletError}<Note tone="error">{walletError}</Note>{/if}
       </div>

@@ -298,8 +298,8 @@
           <p class="text-sm text-zen-fg-muted max-w-xs">Your claim may still be on its way. Open it to see where it stands.</p>
         {:else}
           <h1 class="text-xl font-bold">No Claim Here Yet</h1>
-          <p class="text-sm text-zen-fg-muted max-w-xs">Open the claim link from your message to claim. This page then shows the payment.</p>
-          {#if passkeyOn}<PasskeyAccount label="Claimed with Face ID? Open Your Account" />{/if}
+          <p class="text-sm text-zen-fg-muted max-w-xs">Open the claim link from your message.</p>
+          {#if passkeyOn}<PasskeyAccount quiet label="Already Claimed with Face ID? Open Your Account" />{/if}
         {/if}
         {#if canGoBack}
           {@render back()}
