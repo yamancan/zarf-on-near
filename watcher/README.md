@@ -6,11 +6,17 @@ A Cloudflare cron Worker that runs every 2 minutes and sends an alert to `ALERT_
   - a proposed upgrade (`pending_upgrade`: code sha256, source, the time it can be applied, or "being applied now"),
   - a proposed owner change (`pending_owner`), or an owner other than `EXPECTED_OWNER`,
   - a verifier key added to or removed from `owner_keys`, compared with `EXPECTED_SIGNERS`;
+- **the escrow account itself**, read from the protocol and not from the contract (`view_account`,
+  `view_access_key_list`): a code hash other than `EXPECTED_CODE_HASH`, or any access key. This still pages
+  when an applied upgrade makes `watch()` show the old values;
 - **the live claim page** (`CLAIM_PAGE_URL`) differs from `expected/<network>.json`. That file holds the
   sha256 of its HTML (per-request CSP nonces removed) and of every same-origin script it loads, followed
-  through static and dynamic imports: a changed, added or missing script is reported by path;
-- **it cannot check**: the RPC or the page cannot be read, the config is empty, or the page loads more
-  scripts than `MAX_SCRIPTS`. Silence means "checked and clean", never "could not look".
+  through static and dynamic imports, however many (recorded at deploy, under Node). Each run reads the HTML
+  and re-hashes `SCRIPTS_PER_RUN` of the recorded scripts, the next slice each run, so every script is
+  re-hashed within ceil(scripts / `SCRIPTS_PER_RUN`) runs (47 scripts: 2 runs, 4 min). A changed HTML, a
+  changed or unserved script, or any script a fetched file names that is not recorded, is reported by path;
+- **it cannot check**: the RPC or the page cannot be read, or the config is empty. Silence means "checked
+  and clean", never "could not look".
 
 An alert repeats on every run while its condition holds (a pending upgrade pages every 2 minutes until it is
 applied or cancelled). The upgrade delay is 10 min on testnet and at most 1 h on mainnet, so somebody must
@@ -29,15 +35,14 @@ active yet. `guardian_id` is set at `new` and cannot be added later. The testnet
 | `NEAR_RPC_URL` | `https://test.rpc.fastnear.com` |
 | `EXPECTED_OWNER` | `zarf-near-owner-1111.testnet` |
 | `EXPECTED_SIGNERS` | the relayer's `VERIFIER_SIGNERS` (hex, comma-separated) |
+| `EXPECTED_CODE_HASH` | `5GdxDSB4sGW9Ewod4Q4Na613C2sLQjVfFjLbbZbKt6N8` (`view_account`, base58). An honest upgrade changes it here too |
 | `CLAIM_PAGE_URL` | `https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev/claim/1/0` |
-| `MAX_SCRIPTS` | `44`: the free plan's 50 subrequests per run, less the page, the views and the alert |
+| `SCRIPTS_PER_RUN` | `40`: the free plan's 50 subrequests per run, less 4 RPC reads with one retry each, the page and the alert |
 | `ALERT_WEBHOOK_URL` | **secret, the owner sets it**: a Slack or Discord incoming-webhook URL. The body is `{"text": …, "content": …}` |
 
 `env.mainnet` is empty until the mainnet escrow exists. `scripts/deploy-mainnet-hosting.sh` refuses to
-deploy until it names the same contract and signers as the relayer.
-
-If the claim page grows past 44 scripts, every run alerts `CANNOT CHECK THE CLAIM PAGE: … more than 44 scripts`.
-At that point, either raise `MAX_SCRIPTS` (this needs Workers Paid) or check fewer scripts.
+deploy until it names the same contract and signers as the relayer and sets `EXPECTED_CODE_HASH`, and until
+the mainnet watcher has its `ALERT_WEBHOOK_URL` secret.
 
 ## Honest deploys are not alerts
 

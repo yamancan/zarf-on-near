@@ -1,5 +1,11 @@
 // Fingerprint of the live claim page: its HTML (CSP nonces removed) and every same-origin script it
 // loads, followed through static and dynamic imports. No imports: scripts/fingerprint.ts runs this under Node.
+//
+// Two halves (T-026). At deploy, scripts/fingerprint.ts crawls every script with no subrequest limit and
+// records them all (watcher/expected/<network>.json), after checking each one against the local build. Each
+// cron run can only fetch so much (free Workers: 50 subrequests), so checkPage() re-reads the HTML and
+// re-hashes a rotating window of the recorded scripts: every script is re-hashed within
+// ceil(scripts / perRun) runs, and anything a fetched file names that is not recorded is reported at once.
 
 export interface Fingerprint {
   page: string;
@@ -12,6 +18,7 @@ type Fetcher = (url: string) => Promise<Response>;
 
 const hex = (b: ArrayBuffer) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join('');
 export const sha256 = async (data: ArrayBuffer | Uint8Array): Promise<string> => hex(await crypto.subtle.digest('SHA-256', data as BufferSource));
+const htmlHash = (html: string) => sha256(new TextEncoder().encode(normalizeHtml(html)));
 
 /** The per-request CSP nonce is the only part of the HTML that changes between two fetches. */
 export const normalizeHtml = (html: string): string => html.replace(/ nonce="[^"]*"/g, '');
@@ -30,17 +37,21 @@ export function scriptRefs(text: string, base: string): string[] {
   return [...out];
 }
 
-export async function fingerprint(pageUrl: string, fetcher: Fetcher, maxScripts: number): Promise<Fingerprint> {
+async function getPage(pageUrl: string, fetcher: Fetcher): Promise<{ page: URL; html: string }> {
   const page = new URL(pageUrl);
   const res = await fetcher(page.href);
   if (!res.ok) throw new Error(`${page.pathname}: HTTP ${res.status}`);
-  const html = await res.text();
+  return { page, html: await res.text() };
+}
+
+/** The whole page, every script (deploy time, under Node). More than `maxScripts` is an error, never a partial list. */
+export async function fingerprint(pageUrl: string, fetcher: Fetcher, maxScripts = 2000): Promise<Fingerprint> {
+  const { page, html } = await getPage(pageUrl, fetcher);
   const scripts: Record<string, string> = {};
   const queue = scriptRefs(html, page.href);
   for (let p = queue.shift(); p !== undefined; p = queue.shift()) {
     if (p in scripts) continue;
-    // Free Workers allow 50 subrequests per run: 44 scripts + page + 2 views (+2 retries) + 1 alert. Too many must alert, never pass.
-    if (Object.keys(scripts).length >= maxScripts) throw new Error(`the page loads more than ${maxScripts} scripts; raise MAX_SCRIPTS (needs Workers Paid above 44)`);
+    if (Object.keys(scripts).length >= maxScripts) throw new Error(`the page loads more than ${maxScripts} scripts`);
     const url = new URL(p, page.origin).href;
     const r = await fetcher(url);
     if (!r.ok) throw new Error(`${p}: HTTP ${r.status}`);
@@ -49,17 +60,37 @@ export async function fingerprint(pageUrl: string, fetcher: Fetcher, maxScripts:
     queue.push(...scriptRefs(new TextDecoder().decode(body), url));
   }
   const sorted = Object.fromEntries(Object.entries(scripts).sort(([a], [b]) => (a < b ? -1 : 1)));
-  return { page: page.pathname, html: await sha256(new TextEncoder().encode(normalizeHtml(html))), scripts: sorted };
+  return { page: page.pathname, html: await htmlHash(html), scripts: sorted };
 }
 
-export function bundleFindings(live: Fingerprint, ex: Fingerprint | null): string[] {
+/**
+ * The `perRun` recorded paths that run number `run` re-hashes: consecutive in sorted order, starting where the
+ * previous run stopped, so any ceil(n / perRun) consecutive runs cover every path.
+ */
+export function rotation(paths: string[], perRun: number, run: number): string[] {
+  if (!(perRun >= 1)) throw new Error(`scripts per run must be at least 1, got ${perRun}`);
+  if (paths.length <= perRun) return paths;
+  const start = (((run * perRun) % paths.length) + paths.length) % paths.length;
+  return Array.from({ length: perRun }, (_, i) => paths[(start + i) % paths.length]);
+}
+
+/** One cron run's check of the live page against the record: HTML every run, `perRun` scripts per run. */
+export async function checkPage(pageUrl: string, fetcher: Fetcher, ex: Fingerprint | null, perRun: number, run: number): Promise<string[]> {
   if (!ex) return ['NO EXPECTED FINGERPRINT for this network: run scripts/deploy-web.sh to record one'];
-  const f: string[] = [];
-  if (live.html !== ex.html) f.push(`CLAIM PAGE HTML CHANGED: ${live.page}`);
-  for (const [p, h] of Object.entries(live.scripts)) {
-    if (!(p in ex.scripts)) f.push(`SCRIPT ADDED: ${p}`);
-    else if (ex.scripts[p] !== h) f.push(`SCRIPT CHANGED: ${p}`);
+  const { page, html } = await getPage(pageUrl, fetcher);
+  const f = new Set<string>();
+  if ((await htmlHash(html)) !== ex.html) f.add(`CLAIM PAGE HTML CHANGED: ${page.pathname}`);
+  for (const p of scriptRefs(html, page.href)) if (!(p in ex.scripts)) f.add(`SCRIPT ADDED: ${p} (named by the page)`);
+  for (const p of rotation(Object.keys(ex.scripts).sort(), perRun, run)) {
+    const url = new URL(p, page.origin).href;
+    const r = await fetcher(url);
+    if (!r.ok) {
+      f.add(`SCRIPT NOT SERVED: ${p} (HTTP ${r.status})`);
+      continue;
+    }
+    const body = await r.arrayBuffer();
+    if ((await sha256(body)) !== ex.scripts[p]) f.add(`SCRIPT CHANGED: ${p}`);
+    for (const q of scriptRefs(new TextDecoder().decode(body), url)) if (!(q in ex.scripts)) f.add(`SCRIPT ADDED: ${q} (imported by ${p})`);
   }
-  for (const p of Object.keys(ex.scripts)) if (!(p in live.scripts)) f.push(`SCRIPT GONE: ${p}`);
-  return f;
+  return [...f];
 }

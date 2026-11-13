@@ -20,7 +20,10 @@ url=$(NET=$net node -e '
 
 out=watcher/expected/$net.json
 for i in $(seq 12); do # the edge can serve the previous version for a few seconds
-  if node watcher/scripts/fingerprint.ts "$url" 44 web/.svelte-kit/output/client >"$out.tmp"; then mv "$out.tmp" "$out"; break; fi
+  # Records every script, however many (the watcher re-hashes 40 per run, rotating); exits 2 unless each live
+  # script is byte-identical to this tree's build. Builds are not reproducible (SvelteKit names each build), so
+  # this must be the tree that was just deployed.
+  if node watcher/scripts/fingerprint.ts "$url" 40 web/.svelte-kit/output/client >"$out.tmp"; then mv "$out.tmp" "$out"; break; fi
   rm -f "$out.tmp"
   [[ $i == 12 ]] && die "the live claim page never matched the local build: do not trust it; the watcher keeps the old list"
   sleep 5

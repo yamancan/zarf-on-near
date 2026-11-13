@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
-import { contractFindings, type WatchView } from '../src/contract.ts';
-import { bundleFindings, fingerprint, normalizeHtml, scriptRefs } from '../src/bundle.ts';
+import { accountFindings, contractFindings, type WatchView } from '../src/contract.ts';
+import { checkPage, fingerprint, normalizeHtml, rotation, scriptRefs, type Fingerprint } from '../src/bundle.ts';
 import { alert, EXPECTED, run, type Env } from '../src/index.ts';
 import clean from './fixtures/watch-clean.json';
 import proposed from './fixtures/watch-proposed.json';
 import cancelled from './fixtures/watch-cancelled.json';
 import expectedLocal from './local/expected.json';
-import { siteResponse, viewResponse, type Variant } from './fixtures/site.ts';
+import { CODE_HASH, KEYLESS, rpcResponse, siteResponse, type AccountFixture, type Variant } from './fixtures/site.ts';
 
 const OWNER = 'zarf-near-owner-1111.testnet';
 const SIGNER = '2d10ebec1ec795cef82b8d357cc60d39d9119b99908741660b632fc5cf0d4e32';
@@ -15,13 +15,13 @@ const ORIGIN = 'https://claim.example';
 
 const env: Env = {
   NETWORK: 'testnet', CONTRACT_ID: 'zarf-near-1112.testnet', NEAR_RPC_URL: 'https://rpc.example', EXPECTED_OWNER: OWNER,
-  EXPECTED_SIGNERS: SIGNER, CLAIM_PAGE_URL: `${ORIGIN}/claim/1/0`, ALERT_WEBHOOK_URL: 'https://hooks.example/x',
+  EXPECTED_SIGNERS: SIGNER, EXPECTED_CODE_HASH: CODE_HASH, CLAIM_PAGE_URL: `${ORIGIN}/claim/1/0`, ALERT_WEBHOOK_URL: 'https://hooks.example/x',
 };
 
 /** A fetcher answering the RPC with `watch` and the claim origin with one site variant. */
-const world = (watch: unknown, v: Variant, owner = OWNER) =>
+const world = (watch: unknown, v: Variant, owner = OWNER, account: AccountFixture = KEYLESS) =>
   vi.fn(async (url: string, init?: RequestInit) => {
-    if (url === env.NEAR_RPC_URL) return viewResponse(JSON.parse(String(init!.body)).params.method_name === 'watch' ? watch : owner);
+    if (url === env.NEAR_RPC_URL) return rpcResponse(String(init!.body), { watch, get_owner: owner }, account);
     return siteResponse(v, new URL(url).pathname);
   });
 const site = (v: Variant) => (url: string) => Promise.resolve(siteResponse(v, new URL(url).pathname));
@@ -49,28 +49,37 @@ describe('watch(): recorded outputs', () => {
   });
 });
 
-describe('claim page fingerprint: bundle fixtures', () => {
+const PAGE = `${ORIGIN}/claim/1/0`;
+const EXP = expectedLocal as Fingerprint;
+
+/** A page that loads `n` chunks (one per line of HTML), and counts every request. */
+function bigSite(n: number) {
+  const chunk = (i: number) => `/_app/immutable/chunks/k${i}.js`;
+  const calls: string[] = [];
+  const fetcher = async (url: string) => {
+    const p = new URL(url).pathname;
+    calls.push(p);
+    if (p === '/claim/1/0') return new Response(Array.from({ length: n }, (_, i) => `<link rel="modulepreload" href="${chunk(i)}">`).join('\n'));
+    const i = Number(/k(\d+)\.js$/.exec(p)?.[1] ?? NaN);
+    return Number.isInteger(i) && i < n ? new Response(`export const v=${i};`) : new Response('nf', { status: 404 });
+  };
+  return { fetcher, calls };
+}
+
+describe('claim page fingerprint (deploy time): every script, any number', () => {
   it('ignores the per-request nonce and follows static and dynamic imports', async () => {
-    const fp = await fingerprint(`${ORIGIN}/claim/1/0`, site('same'), 44);
-    expect(fp).toEqual(await fingerprint(`${ORIGIN}/claim/1/0`, site('same'), 44)); // two fetches, two nonces
+    const fp = await fingerprint(PAGE, site('same'));
+    expect(fp).toEqual(await fingerprint(PAGE, site('same'))); // two fetches, two nonces
     expect(Object.keys(fp.scripts)).toEqual([
       '/_app/immutable/chunks/c.C1.js', '/_app/immutable/entry/app.B1.js', '/_app/immutable/entry/start.A1.js', '/_app/immutable/nodes/0.D1.js',
     ]);
     expect(fp).toEqual(expectedLocal); // the local wrangler run's expected list is this fixture's
   });
-  it('same: nothing to report', async () => {
-    expect(bundleFindings(await fingerprint(`${ORIGIN}/claim/1/0`, site('same'), 44), expectedLocal)).toEqual([]);
+  it('records a page with 100 scripts (the free-plan cap of 44 no longer applies here)', async () => {
+    expect(Object.keys((await fingerprint(PAGE, bigSite(100).fetcher)).scripts)).toHaveLength(100);
   });
-  it('changed script: reported by path', async () => {
-    expect(bundleFindings(await fingerprint(`${ORIGIN}/claim/1/0`, site('changed'), 44), expectedLocal)).toEqual(['SCRIPT CHANGED: /_app/immutable/chunks/c.C1.js']);
-  });
-  it('extra script: reported, with the importer that changed to load it', async () => {
-    expect(bundleFindings(await fingerprint(`${ORIGIN}/claim/1/0`, site('extra'), 44), expectedLocal)).toEqual([
-      'SCRIPT ADDED: /_app/immutable/chunks/x.E1.js', 'SCRIPT CHANGED: /_app/immutable/nodes/0.D1.js',
-    ]);
-  });
-  it('more scripts than the subrequest budget is an alert, not a partial pass', async () => {
-    await expect(fingerprint(`${ORIGIN}/claim/1/0`, site('same'), 3)).rejects.toThrow('more than 3 scripts');
+  it('a runaway page is an error, never a partial list', async () => {
+    await expect(fingerprint(PAGE, site('same'), 3)).rejects.toThrow('more than 3 scripts');
   });
   it('only same-origin .js references count', () => {
     expect(scriptRefs('import("./a.js");x="https://cdn.example/b.js";y="../c.js";z="d.css"', `${ORIGIN}/_app/immutable/entry/s.js`)).toEqual([
@@ -78,16 +87,87 @@ describe('claim page fingerprint: bundle fixtures', () => {
     ]);
     expect(normalizeHtml('<script nonce="abc==">')).toBe('<script>');
   });
-  it('the testnet expected list is recorded and mainnet has none yet', () => {
+  it('the testnet expected list is recorded and mainnet has none yet', async () => {
     expect(Object.keys(EXPECTED.testnet!.scripts).length).toBeGreaterThan(0);
     expect(EXPECTED.mainnet).toBeNull();
-    expect(bundleFindings(expectedLocal, null)[0]).toMatch(/^NO EXPECTED FINGERPRINT/);
+    expect((await checkPage(PAGE, site('same'), null, 40, 0))[0]).toMatch(/^NO EXPECTED FINGERPRINT/);
+  });
+});
+
+describe('claim page check (each cron run): HTML every run, scripts in rotation', () => {
+  it('rotation: any ceil(n/perRun) consecutive runs cover every script, whatever the start', () => {
+    for (let n = 1; n <= 60; n++) {
+      const paths = Array.from({ length: n }, (_, i) => `p${String(i).padStart(2, '0')}`);
+      for (const per of [1, 7, 40, 44]) {
+        for (const start of [0, 5, 29_574_123]) {
+          const seen = new Set<string>();
+          for (let r = start; r < start + Math.ceil(n / per); r++) {
+            const w = rotation(paths, per, r);
+            expect(w.length).toBe(Math.min(n, per));
+            w.forEach((p) => seen.add(p));
+          }
+          expect(seen.size).toBe(n);
+        }
+      }
+    }
+    expect(() => rotation(['a'], 0, 0)).toThrow('at least 1');
+  });
+  it('a 100-script page stays inside the free-plan budget: the page and 40 scripts per run', async () => {
+    const big = bigSite(100);
+    const rec = await fingerprint(PAGE, big.fetcher);
+    big.calls.length = 0;
+    expect(await checkPage(PAGE, big.fetcher, rec, 40, 7)).toEqual([]);
+    expect(big.calls).toHaveLength(41);
+  });
+  it('same: nothing to report, in every run', async () => {
+    for (const r of [0, 1, 2, 3]) expect(await checkPage(PAGE, site('same'), EXP, 1, r)).toEqual([]);
+  });
+  it('changed script: reported in the run that re-hashes it, at the latest within ceil(n/perRun) runs', async () => {
+    expect(await checkPage(PAGE, site('changed'), EXP, 40, 0)).toEqual(['SCRIPT CHANGED: /_app/immutable/chunks/c.C1.js']);
+    const hits: string[][] = [];
+    for (const r of [0, 1, 2, 3]) hits.push(await checkPage(PAGE, site('changed'), EXP, 1, r));
+    expect(hits.flat()).toEqual(['SCRIPT CHANGED: /_app/immutable/chunks/c.C1.js']);
+  });
+  it('extra script: the changed importer and the new file it names', async () => {
+    expect(await checkPage(PAGE, site('extra'), EXP, 40, 0)).toEqual([
+      'SCRIPT CHANGED: /_app/immutable/nodes/0.D1.js', 'SCRIPT ADDED: /_app/immutable/chunks/x.E1.js (imported by /_app/immutable/nodes/0.D1.js)',
+    ]);
+  });
+  it('a changed page is reported every run, with any unrecorded script it names', async () => {
+    const swapped = async (url: string) => {
+      const r = siteResponse('same', new URL(url).pathname);
+      return new URL(url).pathname === '/claim/1/0' ? new Response((await r.text()) + '<script type="module" src="/_app/evil.js"></script>') : r;
+    };
+    expect(await checkPage(PAGE, swapped, EXP, 1, 2)).toEqual(['CLAIM PAGE HTML CHANGED: /claim/1/0', 'SCRIPT ADDED: /_app/evil.js (named by the page)']);
+  });
+  it('a recorded script that is no longer served is reported', async () => {
+    const gone = async (url: string) => (url.endsWith('/c.C1.js') ? new Response('nf', { status: 404 }) : siteResponse('same', new URL(url).pathname));
+    expect(await checkPage(PAGE, gone, EXP, 40, 0)).toEqual(['SCRIPT NOT SERVED: /_app/immutable/chunks/c.C1.js (HTTP 404)']);
+  });
+});
+
+describe('the escrow account itself (view_account, view_access_key_list)', () => {
+  it('expected code hash and no keys: nothing', () => {
+    expect(accountFindings(KEYLESS, CODE_HASH)).toEqual([]);
+  });
+  it('a different code hash pages, even when watch() looks clean', async () => {
+    expect(accountFindings({ ...KEYLESS, code_hash: '11111111111111111111111111111111' }, CODE_HASH)).toEqual([`CODE HASH CHANGED: 11111111111111111111111111111111 (expected ${CODE_HASH})`]);
+    expect(await run(env, EXP, world(clean, 'same', OWNER, { ...KEYLESS, code_hash: 'Hx' }))).toEqual([`CODE HASH CHANGED: Hx (expected ${CODE_HASH})`]);
+  });
+  it('any access key pages, full access or function call', () => {
+    const keys = [
+      { public_key: 'ed25519:AAA', access_key: { nonce: 1, permission: 'FullAccess' } },
+      { public_key: 'ed25519:BBB', access_key: { nonce: 1, permission: { FunctionCall: { allowance: null, receiver_id: 'x', method_names: [] } } } },
+    ];
+    expect(accountFindings({ ...KEYLESS, keys }, CODE_HASH)).toEqual(['ACCESS KEY ON THE ESCROW: ed25519:AAA (full access)', 'ACCESS KEY ON THE ESCROW: ed25519:BBB (function call)']);
   });
 });
 
 describe('run + alert', () => {
-  it('clean contract and same bundle: nothing', async () => {
-    expect(await run(env, expectedLocal, world(clean, 'same'))).toEqual([]);
+  it('clean contract, keyless account with the expected code and same bundle: nothing, in 9 requests', async () => {
+    const w = world(clean, 'same');
+    expect(await run(env, EXP, w)).toEqual([]);
+    expect(w).toHaveBeenCalledTimes(4 + 1 + 4); // watch, get_owner, view_account, access keys; the page; its 4 recorded scripts
   });
   it('proposed upgrade and a changed script land in one alert', async () => {
     const f = await run(env, expectedLocal, world(proposed, 'changed'));
@@ -102,7 +182,7 @@ describe('run + alert', () => {
   it('a run that cannot read is an alert', async () => {
     const down = vi.fn(async () => { throw new Error('rpc down'); });
     expect(await run(env, expectedLocal, down)).toEqual([
-      'CANNOT READ zarf-near-1112.testnet: rpc down', 'CANNOT CHECK THE CLAIM PAGE: rpc down',
+      'CANNOT READ zarf-near-1112.testnet: rpc down', 'CANNOT READ THE ACCOUNT zarf-near-1112.testnet: rpc down', 'CANNOT CHECK THE CLAIM PAGE: rpc down',
     ]);
   });
   it('empty config is an alert; a missing webhook throws so the cron run shows failed', async () => {

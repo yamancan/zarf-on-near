@@ -31,3 +31,23 @@ export function contractFindings(w: WatchView, owner: string, ex: ContractExpect
   for (const s of ex.signers) if (!live.has(s)) f.push(`VERIFIER KEY REMOVED: ${s}`);
   return f;
 }
+
+/** What view_account and view_access_key_list say about the escrow account itself (blue-team B2). */
+export interface AccountView {
+  code_hash: string;
+  keys: { public_key: string; access_key: { permission: unknown } }[];
+}
+
+/**
+ * Read from the protocol, not from the contract: a deployed upgrade whose watch() still shows the old values,
+ * or a key that could deploy code without the timelock, pages here even if the escrow's own views say nothing.
+ */
+export function accountFindings(a: AccountView, expectedCodeHash: string): string[] {
+  const f: string[] = [];
+  if (a.code_hash !== expectedCodeHash) f.push(`CODE HASH CHANGED: ${a.code_hash} (expected ${expectedCodeHash})`);
+  for (const k of a.keys) {
+    const p = k.access_key.permission;
+    f.push(`ACCESS KEY ON THE ESCROW: ${k.public_key} (${p === 'FullAccess' ? 'full access' : 'function call'})`);
+  }
+  return f;
+}
