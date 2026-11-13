@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkGrid, gmailAccount, gridRules, isGmail, parsePaste, type GridRow } from './grid';
+import { checkGrid, emailError, gmailAccount, googleWarning, gridRules, isGmail, parsePaste, type GridRow } from './grid';
 import { parseRecipients, sendCapError } from './recipients';
 
 const r = (email: string, amount: string): GridRow => ({ email, amount });
@@ -112,5 +112,21 @@ describe("gridRules: Zarf's grid flags the rows checkGrid refuses (T-024)", () =
     // Zarf marks both rows of a twin pair (row 1 "Same recipient as row 3"); the gate refuses the later one. Fixing
     // either clears both, so the only extra rows are first halves of pairs.
     expect(zarf).toEqual([1, ...ours]);
+  });
+});
+
+describe('Gmail or Google Workspace only (red team #2)', () => {
+  it('refuses known consumer mail providers: the verifier can never accept them', () => {
+    for (const e of ['a@outlook.com', 'a@hotmail.co.uk', 'a@live.fr', 'a@yahoo.com', 'a@yahoo.com.tr', 'a@ymail.com', 'a@msn.com', 'a@icloud.com', 'a@me.com', 'a@mac.com', 'a@proton.me', 'a@protonmail.com', 'a@protonmail.ch', 'a@pm.me', 'A@Outlook.COM'])
+      expect(emailError(e), e).toBe('This provider cannot claim: use Gmail or Google Workspace');
+    for (const e of ['a@gmail.com', 'a@googlemail.com', 'a@acme.com', 'a@liveops.io', 'a@outlook.acme.com', 'a@yahoo-team.com'])
+      expect(emailError(e), e).toBeNull();
+    expect(checkGrid([{ email: 'a@outlook.com', amount: '1' }]).rows).toEqual([]); // the gate refuses it, not only the paint
+  });
+  it('warns on every other non-Gmail row, by line; silent when all are Gmail', () => {
+    expect(googleWarning([{ email: 'a@gmail.com', line: 1 }, { email: 'b@googlemail.com', line: 2 }])).toBeNull();
+    expect(googleWarning([{ email: 'a@gmail.com', line: 1 }, { email: 'b@acme.com', line: 2 }])).toBe(
+      'Recipients must use Gmail or Google Workspace. Row 2 is not Gmail: any other address can never claim, and its share waits until the deadline.');
+    expect(googleWarning([{ email: 'b@acme.com', line: 2 }, { email: 'c@acme.org', line: 4 }])).toMatch(/^Recipients must use Gmail or Google Workspace\. Rows 2, 4 are not Gmail/);
   });
 });

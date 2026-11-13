@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { claimedAmount, formatNear, listCampaignIds, listCampaigns, mapLimit, reclaimable, reclaimOutcome, reclaimTx, RPC_CONCURRENCY, withdrawTx, type CampaignView, type View, sig3 } from './campaigns';
+import { claimedAmount, readSent, saveSent, sentLabel, type SentRecord, formatNear, listCampaignIds, listCampaigns, mapLimit, reclaimable, reclaimOutcome, reclaimTx, RPC_CONCURRENCY, withdrawTx, type CampaignView, type View, sig3 } from './campaigns';
 
 const campaign = (o: Partial<CampaignView> = {}): CampaignView => ({
   sender: 'alice.testnet', token: 'usdc.testnet', amount: '30000000', merkle_root: 'ab'.repeat(32), deadline_ns: '2000000000000000',
@@ -124,5 +124,38 @@ describe('sig3 (design spec G6f: 3 significant digits in view)', () => {
   it('1000 and above is whole NEAR, also when rounding reaches it', () => {
     expect(sig3(y(999.6), true)).toBe('1,000');
     expect(sig3(y(12345.6))).toBe('12,346');
+  });
+});
+
+describe('the saved send record and its /campaigns label (T-024)', () => {
+  const mem = () => {
+    const m = new Map<string, string>();
+    return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), m };
+  };
+  const rec = (o: Partial<SentRecord> = {}): SentRecord => ({ campaignId: '12', firstEmail: 'ana@gmail.com', count: 5, createdAt: Date.UTC(2026, 10, 14, 9), ...o });
+  it('saves {campaignId, firstEmail, count, createdAt} per contract and reads it back', () => {
+    const s = mem();
+    saveSent(s, 'zarf-near.testnet', rec());
+    saveSent(s, 'zarf-near.testnet', rec({ campaignId: '13', count: 1 }));
+    saveSent(s, 'other.testnet', rec({ campaignId: '12', firstEmail: 'x@gmail.com' }));
+    const got = readSent(s, 'zarf-near.testnet');
+    expect([...got.keys()]).toEqual(['12', '13']);
+    expect(got.get('12')).toEqual(rec());
+  });
+  it('labels it "first email + N others · date"', () => {
+    expect(sentLabel(rec())).toBe('ana@gmail.com + 4 others · 14 Nov 2026');
+    expect(sentLabel(rec({ count: 2 }))).toBe('ana@gmail.com + 1 other · 14 Nov 2026');
+    expect(sentLabel(rec({ count: 1 }))).toBe('ana@gmail.com · 14 Nov 2026');
+  });
+  it('falls back (null: the amount line) with no record, a broken one, or storage that throws', () => {
+    expect(sentLabel(readSent(mem(), 'c').get('12'))).toBeNull();
+    const s = mem();
+    s.m.set('zarf-near:sent:c', '{not json');
+    expect(readSent(s, 'c').size).toBe(0);
+    s.m.set('zarf-near:sent:c', JSON.stringify({ '12': { ...rec(), count: 0 }, '13': { ...rec(), campaignId: '99' } }));
+    expect(readSent(s, 'c').size).toBe(0);
+    const broken = { getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); } };
+    expect(() => saveSent(broken, 'c', rec())).not.toThrow();
+    expect(readSent(broken, 'c').size).toBe(0);
   });
 });

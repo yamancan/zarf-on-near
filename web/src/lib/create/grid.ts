@@ -26,6 +26,18 @@ export const isGmail = (email: string) => /@(gmail|googlemail)\.com$/i.test(emai
 
 const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
+// The verifier accepts only Gmail or the token's own Workspace domain (verifier/src/googleIdToken.ts isGoogleAuthoritative):
+// a Google account made on a consumer mail address can never claim, so these are refused outright (red team #2).
+const CONSUMER_MAIL = /@((outlook|hotmail|live|yahoo)\.(com|[a-z]{2}|co\.[a-z]{2}|com\.[a-z]{2})|(msn|ymail|icloud|me|mac|protonmail)\.com|proton\.me|protonmail\.ch|pm\.me)$/;
+
+/** The warning every non-Gmail row gets before funding: it may be Workspace, which we cannot tell. Null when all are Gmail. */
+export function googleWarning(rows: readonly { email: string; line: number }[]): string | null {
+  const other = rows.filter((r) => !isGmail(r.email)).map((r) => r.line);
+  if (!other.length) return null;
+  const which = other.length === 1 ? `Row ${other[0]} is` : `Rows ${other.join(', ')} are`;
+  return `Recipients must use Gmail or Google Workspace. ${which} not Gmail: any other address can never claim, and its share waits until the deadline.`;
+}
+
 /** One row's email on its own (twins are checkGrid's): null when usable. */
 export function emailError(raw: string): string | null {
   if (!raw.trim()) return 'Add an email';
@@ -39,6 +51,7 @@ export function emailError(raw: string): string | null {
   if (!ADDR_SPEC.test(email)) return 'Not an email';
   // Google never puts a +tag Gmail alias in the id_token, so such a row could never be claimed.
   if (/^[^@]*\+[^@]*@(gmail|googlemail)\.com$/.test(email)) return 'Gmail +alias: use the sign-in address';
+  if (CONSUMER_MAIL.test(email)) return 'This provider cannot claim: use Gmail or Google Workspace';
   return null;
 }
 

@@ -2,18 +2,18 @@
   import { onMount, tick } from 'svelte';
   import { env } from '$env/dynamic/public';
   import { buildDraft, claimLink, LONG_LINKS_ABOVE, mailtoHref, messageText, readRecoveryFile, recoveryFile, type Draft } from '$lib/create/campaign';
-  import { getAccount, getCampaignByRoot, getCampaignView, getConfig, getGasPrice, getPrepayBalance, getStorageCosts, txOutcome, type ContractConfig } from '$lib/create/chain';
+  import { saveSent } from '$lib/create/campaigns';
+  import { getAccount, getCampaignByRoot, getCampaignView, getConfig, getGasPrice, getHeight, getPrepayBalance, getStorageCosts, txOutcome, type ContractConfig } from '$lib/create/chain';
   import {
     AccountChanged, attachedGas, checkCreation, fundCampaign, fundsShort, LookupPending, mayCreate, minDeadlineMs, nearNeeded, NotCreated, NotSent, OutcomeUnclear, ownerKeySlack,
-    prepayShortfall, readMarker, releaseAfterReject, resolveByRoot, sendHooks, settleAfterUncertain, spendableNear, WAITING_FOR_WALLET, walletWaitNote,
+    prepayShortfall, readMarker, releaseAfterReject, resolveByRoot, sendHooks, spendableNear, WAITING_FOR_WALLET, walletWaitNote,
     type StorageCosts, type UnresolvedMarker,
   } from '$lib/create/funding';
   import { saveFile } from '$lib/create/publish';
   import { formatAmount, sendCapError } from '$lib/create/recipients';
-  import { checkGrid, gridRules, isBlankRow, parsePaste, type GridRow } from '$lib/create/grid';
+  import { checkGrid, googleWarning, gridRules, isBlankRow, parsePaste, type GridRow } from '$lib/create/grid';
   import RecipientAllocationGrid from '$lib/zarf-kit/create/RecipientAllocationGrid.svelte';
   import RecipientImportControls from '$lib/zarf-kit/create/RecipientImportControls.svelte';
-  import { mayNotSignIn } from '$lib/create/googleSignIn';
   import { nearConnectWallet, type SenderWallet } from '$lib/create/wallet';
   import { deadlineText, timeLeft } from '$lib/claim';
   import { formatNear, sig3 } from '$lib/create/campaigns';
@@ -70,15 +70,7 @@
     gridRows = [{ email: '', amount: '' }];
     skipped = [];
   }
-  // Rows whose address may not sign in with Google: a calm hint, never a block. Debounced so typing a domain doesn't query each prefix.
-  let notGoogle = $state<Set<string>>(new Set());
-  $effect(() => {
-    const emails = parsed.rows.map((r) => r.email);
-    let live = true;
-    const t = setTimeout(() => mayNotSignIn(emails).then((s) => live && (notGoogle = s)), 500);
-    return () => { live = false; clearTimeout(t); };
-  });
-  const unsure = $derived(parsed.rows.filter((r) => notGoogle.has(r.email)));
+  const notGmail = $derived(googleWarning(parsed.rows)); // red team #2: shown before funding, never a block
   let config = $state<ContractConfig | null>(null);
   let setupError = $state('');
   let setupRetry = $state(false);
@@ -105,6 +97,10 @@
   // safe (E132 refunds a duplicate), a new draft is not. Unpinned only by a campaign or a proven refund.
   let pinned = $state(false);
   let hadUncertain = false;
+  // A send that may have gone out with no outcome: the chain height when it was lost (null: not read yet). The draft
+  // stays pinned until that send can no longer land (funding.ts releaseAfterReject, red team #13).
+  let lostAt: number | null | undefined = undefined;
+  const HELD = 'An earlier send of this list may still land for up to a day, so until then only this list can be sent. Sending it again is safe.';
   // Other tabs: an unresolved send there means a new draft here could fund twice.
   const MARKER_KEY = 'zarf-near:unresolved';
   let otherTab = $state<UnresolvedMarker | null>(null);
@@ -131,11 +127,12 @@
     deadline: string;
     campaignId?: string;
     uncertain?: boolean; // a send whose outcome was lost happened for this draft
+    lostAt?: number | null; // see lostAt
   }
   /** True if persisted. Before a send it must succeed (see beforeSend); later writes are best effort. */
   const saveFunding = (f: Funding): boolean => {
     try {
-      sessionStorage.setItem(FUNDING_KEY, JSON.stringify(f));
+      sessionStorage.setItem(FUNDING_KEY, JSON.stringify({ ...f, lostAt }));
       return true;
     } catch {
       return false;
@@ -259,6 +256,7 @@
         sentFrom = f.sender;
         pinned = true;
         hadUncertain = !!f.uncertain;
+        lostAt = f.lostAt ?? (f.uncertain || !f.txHash ? null : undefined); // no hash: reloaded while the wallet was open
         if (f.campaignId) result = { campaignId: f.campaignId, txHash: f.txHash ?? '' };
         else if (f.txHash) await check(f.txHash);
         else await checkByRoot(); // reloaded while the wallet popup was open
@@ -343,8 +341,14 @@
   async function created(r: { campaignId: string; txHash: string }) {
     result = r;
     txState = null;
+    lostAt = undefined; // the root is taken: a lost send of it can only be refunded (E132)
     setMarker(null);
     saveFunding({ txHash: r.txHash, sender: sentFrom ?? account!, draft: draft!, deadline, campaignId: r.campaignId });
+    try {
+      saveSent(localStorage, contract!, { campaignId: r.campaignId, firstEmail: draft!.recipients[0].email, count: draft!.recipients.length, createdAt: Date.now() });
+    } catch {
+      // no localStorage: /campaigns shows the amount line
+    }
   }
 
   const byRoot = () => ({
@@ -361,6 +365,10 @@
     txState = 'checking';
     busy = 'Checking whether the campaign exists…';
     try {
+      if (lostAt === null) {
+        lostAt = await getHeight(rpc!).catch(() => null); // unread: taken again at release, later, which only holds longer
+        if (lostAt !== null && draft && sentFrom) saveFunding({ txHash: null, sender: sentFrom, draft, deadline, uncertain: hadUncertain });
+      }
       const id = await resolveByRoot(byRoot(), { merkleRoot: draft!.merkleRoot, total: draft!.total });
       if (id) {
         await created({ campaignId: id, txHash: sentTx ?? '' });
@@ -398,13 +406,14 @@
       // Proven for this tx: the tokens are back (or never left).
       const msg = ERRORS[e.code] ?? `The contract refused it (${e.code}).`;
       errorCode = e.code;
-      if (hadUncertain) void unpinAfterSecondLook(msg);
+      if (hadUncertain || lostAt !== undefined) void unpinAfterSecondLook(msg);
       else unpin(msg);
     } else if (sentTx) {
       txState = 'checking';
     } else {
       // SendUncertain or any other failure without a hash: remember it, then ask the contract.
       hadUncertain = true;
+      lostAt ??= null;
       if (draft && sentFrom) saveFunding({ txHash: null, sender: sentFrom, draft, deadline, uncertain: true });
       void checkByRoot();
     }
@@ -414,25 +423,38 @@
   function unpin(msg: string) {
     sentTx = txState = null;
     pinned = hadUncertain = false;
+    lostAt = undefined;
     clearFunding();
     setMarker(null);
     errorTitle = `Not sent: your ${UNIT} is back in your wallet`;
     error = msg;
   }
 
-  /** "Change the list" after a rejected wallet: look by root once more (90 s), then let the draft go. */
+  const lost = () => ({ lostAt, height: () => getHeight(rpc!) });
+  /** A lost send can still land: keep the list pinned and say why (red team #13). */
+  function hold(at: number, title: string, msg: string) {
+    lostAt = at;
+    sentTx = txState = null;
+    if (draft && sentFrom) saveFunding({ txHash: null, sender: sentFrom, draft, deadline, uncertain: hadUncertain });
+    errorTitle = title;
+    error = msg;
+  }
+
+  /** "Change the list" after a rejected wallet: let the draft go only once no earlier send can still land. */
   async function changeAfterReject() {
     rejectedFree = false;
     txState = 'settling';
     error = errorTitle = '';
     try {
-      const r = await releaseAfterReject(byRoot(), { merkleRoot: draft!.merkleRoot, total: draft!.total });
+      const r = await releaseAfterReject(byRoot(), { merkleRoot: draft!.merkleRoot, total: draft!.total }, lost());
       if (r.kind === 'created') {
         await created({ campaignId: r.campaignId, txHash: sentTx ?? '' });
         return;
       }
+      if (r.kind === 'held') return hold(r.lostAt, 'This List Stays Locked for Now', HELD);
       sentTx = txState = null;
       pinned = hadUncertain = false;
+      lostAt = undefined;
       clearFunding();
       setMarker(null);
       draft = null;
@@ -446,8 +468,9 @@
   async function unpinAfterSecondLook(msg: string) {
     txState = 'settling'; // its own state: create()'s finally clears `busy` while this runs
     try {
-      const id = await settleAfterUncertain(byRoot(), { merkleRoot: draft!.merkleRoot, total: draft!.total });
-      if (id) await created({ campaignId: id, txHash: sentTx ?? '' });
+      const r = await releaseAfterReject(byRoot(), { merkleRoot: draft!.merkleRoot, total: draft!.total }, lost());
+      if (r.kind === 'created') await created({ campaignId: r.campaignId, txHash: sentTx ?? '' });
+      else if (r.kind === 'held') hold(r.lostAt, `Not sent: your ${UNIT} is back in your wallet`, `${msg} ${HELD}`);
       else unpin(msg);
     } catch (e) {
       txState = (e as Error).message === 'CAMPAIGN_MISMATCH' ? 'mismatch' : 'checking';
@@ -548,7 +571,8 @@
     setMarker(null);
     draft = result = null;
     sentTx = sentFrom = txState = null;
-    pinned = recoverySaved = recoveryAck = copied = false;
+    pinned = recoverySaved = recoveryAck = copied = hadUncertain = false;
+    lostAt = undefined;
     error = errorTitle = errorCode = '';
     gridRows = [{ email: '', amount: '' }];
     skipped = [];
@@ -980,7 +1004,7 @@
               onUndo={() => ((gridRows = cleared!), (cleared = null))}
               summaryItems={[{ label: 'Recipients', value: parsed.rows.length }, { label: 'Total', value: formatAmount(parsed.total), suffix: UNIT }]}
             />
-            {#if unsure.length}<p class="text-xs text-zen-fg-subtle">{unsure.length === 1 ? `Row ${unsure[0].line} must` : `Rows ${unsure.map((r) => r.line).join(', ')} must each`} be able to sign in to Google with that exact address, or the share waits until the deadline.</p>{/if}
+            {#if notGmail}<p class="text-xs text-zen-fg-subtle">{notGmail}</p>{/if}
             {#if capError}<Note tone="error">{capError}</Note>{/if}
             <!-- Ours: a campaign's backup file rebuilds its links (read-only, nothing is sent) -->
             <label class="self-start inline-flex items-center gap-1.5 text-xs text-zen-fg-muted hover:text-zen-fg cursor-pointer {!config || busy ? 'pointer-events-none opacity-50' : ''}">

@@ -406,16 +406,30 @@ export function sendHooks(page: {
 }
 
 /**
- * After the wallet was rejected and no campaign showed up for this root (T-012 finding 4): wait as
- * settleAfterUncertain does, then say whether the list is free to change ('free') or the send landed after all.
+ * NEAR's transaction_validity_period (genesis config, mainnet and testnet): a tx whose reference block is this many
+ * blocks older than the chain head is refused, so a send lost at height h can no longer land past h + this.
+ */
+export const TX_VALIDITY_BLOCKS = 86_400;
+
+/**
+ * "Change the list" (T-012 finding 4) and a refund after a lost send: may the draft go? Only on a terminal outcome
+ * (red team #13): the campaign exists, or nothing was lost (`lostAt` undefined), or every tx the lost send could have
+ * signed has expired. An absent campaign alone never frees it. `lostAt` null: lost at an unknown height, counted from
+ * now (a later height only holds the draft longer). 'held' returns the height to keep.
  */
 export async function releaseAfterReject(
   d: Pick<FundDeps, 'campaignByRoot' | 'campaign' | 'sender'>,
   expect: { merkleRoot: string; total: string },
+  lost: { lostAt?: number | null; height: () => Promise<number> },
   opts?: { waitMs?: number; sleep?: (ms: number) => Promise<void> },
-): Promise<{ kind: 'free' } | { kind: 'created'; campaignId: string }> {
-  const id = await settleAfterUncertain(d, expect, opts);
-  return id ? { kind: 'created', campaignId: id } : { kind: 'free' };
+): Promise<{ kind: 'free' } | { kind: 'created'; campaignId: string } | { kind: 'held'; lostAt: number }> {
+  const head = lost.lostAt === undefined ? 0 : await lost.height();
+  const lostAt = lost.lostAt ?? head;
+  const expired = lost.lostAt === undefined || head > lostAt + TX_VALIDITY_BLOCKS;
+  // Expired: one last look after the usual wait. Not expired: look now; the answer is 'held' unless it landed.
+  const id = expired ? await settleAfterUncertain(d, expect, opts) : await resolveByRoot(d, expect);
+  if (id) return { kind: 'created', campaignId: id };
+  return expired ? { kind: 'free' } : { kind: 'held', lostAt };
 }
 
 /** How long the wallet may stay open before /create suggests a reload (T-012 finding 5). */

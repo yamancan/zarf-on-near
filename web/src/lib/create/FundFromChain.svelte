@@ -43,11 +43,10 @@
   // A MetaMask sender's NEAR account is its Ethereum address (NEP-518): on an EVM chain that address is theirs, so it is
   // the refund address, with nothing to type or read back.
   const ownRefund = $derived(!saved && chain && chain.addressError === evmAddressError && /^0x[0-9a-f]{40}$/.test(account) ? account : '');
-  $effect(() => {
-    if (ownRefund) refundTo = ownRefund;
-  });
-  const addrError = $derived(refundTo && chain ? chain.addressError(refundTo.trim()) : null);
-  const confirmed = $derived(!addrError && (ownRefund ? refundTo === ownRefund : refundConfirmed(refundTo.trim(), last6)));
+  // Derived, never copied into refundTo: switching between EVM chains keeps it (T-024 review finding 3).
+  const refund = $derived(ownRefund || refundTo.trim());
+  const addrError = $derived(!ownRefund && refundTo && chain ? chain.addressError(refundTo.trim()) : null);
+  const confirmed = $derived(!!ownRefund || (!addrError && refundConfirmed(refundTo.trim(), last6)));
   const line = $derived(saved && status && chain ? describeFunding(status, chain.name, account, saved.refundTo, saved.depositAddress) : null);
   const canPay = $derived(!!saved && mayPay(status?.status, fresh, saved.deadline, now));
   const expired = $derived(!!saved && Date.parse(saved.deadline) <= now && (!status || status.status === 'PENDING_DEPOSIT'));
@@ -89,7 +88,7 @@
     if (!chain || !confirmed || busy) return;
     // Everything the quote is for, fixed now: the controls are disabled until it returns, and a reply to an
     // older request (or after unmount) is dropped, so a quote is never shown or saved under another chain or address.
-    const ctx = { chain, refundTo: refundTo.trim(), account, need, mine: ++request };
+    const ctx = { chain, refundTo: refund, account, need, mine: ++request };
     error = '';
     busy = true;
     quote = null;
@@ -115,7 +114,7 @@
 
   // A shown quote belongs to the address it was asked for: editing the address drops it (and any reply still out).
   $effect(() => {
-    void refundTo;
+    void refund;
     quote = null;
     request++;
   });
@@ -139,7 +138,6 @@
   }
   const pick = (k: Source) => {
     if (busy) return;
-    if (ownRefund && k !== source) refundTo = ''; // a typed address is never carried over from the own-account prefill
     source = k;
     quote = null;
     error = '';

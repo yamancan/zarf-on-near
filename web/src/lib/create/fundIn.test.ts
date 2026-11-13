@@ -3,7 +3,7 @@ import live from './fixtures/oneclick-dry-exact-output.json';
 import { NEAR_USDC_ASSET, QuoteError, type StatusView } from '../intents';
 import { ed25519B58, quoteSignedBytes, verifyQuoteSignature } from '../oneclickSig';
 import {
-  CANNOT_CHECK, MAX_QUOTE_AGE_MS, mayPay, mayStartOver, unresolved, archiveFunding, earlierFundings, describeFunding, FUNDING_CHAINS, followFunding, fundingCapError, fundingRequest, fundingWithinLossBound,
+  CANNOT_CHECK, CONFIRM_MARGIN_MS, MAX_QUOTE_AGE_MS, mayPay, mayStartOver, unresolved, archiveFunding, earlierFundings, describeFunding, FUNDING_CHAINS, followFunding, fundingCapError, fundingRequest, fundingWithinLossBound,
   getFundingQuote, loadFunding, refundConfirmed, saveFunding, TOO_COSTLY, type FundingArgs,
 } from './fundIn';
 
@@ -111,7 +111,7 @@ describe('quote signature, checked in the browser with the pinned key', () => {
       Object.assign(x.quote, { depositAddress: addr, deadline: '2026-11-14T16:18:02.000Z', timeEstimate: 35 });
     });
     const ok = await fq(false, liveArgs, answer(await real('0x76b4c56085ED136a8744D52bE956396624a730E8')), testSigner);
-    expect(ok).toMatchObject({ depositAddress: '0x76b4c56085ED136a8744D52bE956396624a730E8', deadline: '2026-11-14T16:18:02.000Z' });
+    expect(ok).toMatchObject({ depositAddress: '0x76b4c56085ED136a8744D52bE956396624a730E8', deadline: '2026-11-13T17:08:02.000Z' }); // the request's deadline, 10 min early
     await expect(fq(false, liveArgs, answer(await real('a'.repeat(64))), testSigner)).rejects.toThrow(CANNOT_CHECK);
   });
   it('a real quote\'s deposit address must fit the origin chain (T-025)', async () => {
@@ -134,6 +134,25 @@ describe('quote signature, checked in the browser with the pinned key', () => {
     await expect(fq(false, liveArgs, answer(await real('2020-01-01T00:00:00.000Z')), testSigner)).rejects.toThrow(CANNOT_CHECK);
     await expect(fq(false, liveArgs, answer(await real(new Date(AT + 3600e3).toISOString(), 'memo')), testSigner)).rejects.toThrow(CANNOT_CHECK);
     await expect(fq(false, liveArgs, answer(await real(new Date(AT + 3600e3).toISOString())), testSigner)).resolves.toBeTruthy();
+  });
+  it('pay-by is the earlier signed deadline less the confirmation margin, for display and expiry (red team #7)', async () => {
+    const real = (quoteDeadline: string, requestDeadline: string) => signed((x) => {
+      x.quoteRequest.dry = false;
+      x.quoteRequest.deadline = requestDeadline;
+      Object.assign(x.quote, { depositAddress: '0x76b4c56085ED136a8744D52bE956396624a730E8', deadline: quoteDeadline });
+    });
+    const at = (min: number) => new Date(AT + min * 60_000).toISOString();
+    // The request ends first (the live fixture's shape, 72 h apart on payouts): it wins.
+    expect((await fq(false, liveArgs, answer(await real(at(72 * 60), at(60))), testSigner)).deadline).toBe(at(60 - CONFIRM_MARGIN_MS / 60_000));
+    // The address ends first: it wins.
+    expect((await fq(false, liveArgs, answer(await real(at(40), at(60))), testSigner)).deadline).toBe(at(40 - CONFIRM_MARGIN_MS / 60_000));
+    // Under the margin plus the time to pay, on either deadline: refused, never shown as payable.
+    await expect(fq(false, liveArgs, answer(await real(at(72 * 60), at(19))), testSigner)).rejects.toThrow(CANNOT_CHECK);
+    await expect(fq(false, liveArgs, answer(await real(at(72 * 60), 'soon')), testSigner)).rejects.toThrow(CANNOT_CHECK);
+    // mayPay stops at the pay-by time, not at 1Click's own deadline.
+    const payBy = (await fq(false, liveArgs, answer(await real(at(72 * 60), at(60))), testSigner)).deadline;
+    expect(mayPay('PENDING_DEPOSIT', true, payBy, AT + 49 * 60_000)).toBe(true);
+    expect(mayPay('PENDING_DEPOSIT', true, payBy, AT + 51 * 60_000)).toBe(false);
   });
   it('1Click\'s own refusal is shown in plain words, never raw', async () => {
     await expect(fq(true, liveArgs, answer({ message: 'Amount is too low for bridge, try at least 1500000' }, 400))).rejects.toThrow(/too low to fund/);

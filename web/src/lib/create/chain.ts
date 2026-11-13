@@ -40,6 +40,14 @@ export async function getGasPrice(rpcUrl: string): Promise<bigint> {
   return BigInt(res.result.gas_price);
 }
 
+/** The final block's height: a lost send's expiry is counted in blocks (funding.ts TX_VALIDITY_BLOCKS). */
+export async function getHeight(rpcUrl: string): Promise<number> {
+  const res = await postJson<{ result?: { header?: { height?: number } } }>(rpcUrl, { jsonrpc: '2.0', id: 'zarf', method: 'block', params: { finality: 'final' } });
+  const h = res.result?.header?.height;
+  if (!Number.isSafeInteger(h)) throw new Error('block failed');
+  return h!;
+}
+
 /** The executed tx with all receipts (the wallet only returns the hash). */
 export async function txOutcome(rpcUrl: string, hash: string, sender: string): Promise<Outcome> {
   const res = await postJson<{ result?: Outcome; error?: unknown }>(rpcUrl, {

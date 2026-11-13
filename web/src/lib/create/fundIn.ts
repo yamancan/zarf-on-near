@@ -64,7 +64,7 @@ export interface FundingQuote {
   amountOutFormatted: string;
   fee: string; // amountIn - amountOut, USDC base units (both sides have 6 decimals)
   timeEstimate: number; // seconds after the deposit confirms
-  deadline: string; // ISO: send before this (real quotes: the address's own deadline)
+  deadline: string; // ISO: send before this: the earlier signed deadline less CONFIRM_MARGIN_MS
   depositAddress?: string; // real quotes only
 }
 
@@ -87,6 +87,8 @@ const ADDED_FIELDS: Record<string, (v: unknown) => boolean> = {
 export const ONECLICK_FEE_RECIPIENT = '5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd';
 /** A real quote must leave this long to pay before its address goes inactive. */
 export const MIN_TIME_TO_PAY_MS = 10 * 60_000;
+/** Kept back from 1Click's deadline for the deposit to confirm on its chain: the address is payable only until then. */
+export const CONFIRM_MARGIN_MS = 10 * 60_000;
 /** A quote signed longer ago than this (or this far in the future) is a replay or a broken clock: refused. */
 export const MAX_QUOTE_AGE_MS = 5 * 60_000;
 
@@ -126,12 +128,15 @@ export async function getFundingQuote(dry: boolean, a: FundingArgs, fetchFn: Fet
   const depositAddress = typeof q.depositAddress === 'string' ? q.depositAddress : undefined;
   if (!dry && (!depositAddress || a.chain.depositAddressError(depositAddress))) throw new QuoteError(CANNOT_CHECK);
   if (!dry && q.depositMemo) throw new QuoteError(CANNOT_CHECK); // we show no memo: a chain that needs one is not listed
-  if (!dry && !(Date.parse(String(q.deadline)) > now + MIN_TIME_TO_PAY_MS)) throw new QuoteError(CANNOT_CHECK);
+  // Pay by the earlier of the two signed deadlines (the request's starts refunds, red team #7), less the confirmation margin.
+  const payBy = Math.min(Date.parse(String(qr.deadline)), dry ? Infinity : Date.parse(String(q.deadline))) - CONFIRM_MARGIN_MS;
+  if (!Number.isFinite(payBy)) throw new QuoteError(CANNOT_CHECK); // NaN: a deadline that is missing or not a date
+  if (!dry && !(payBy > now + MIN_TIME_TO_PAY_MS)) throw new QuoteError(CANNOT_CHECK);
   return {
     amountIn, amountInFormatted: String(q.amountInFormatted ?? ''), amountOut, amountOutFormatted: String(q.amountOutFormatted ?? ''),
     fee: (BigInt(amountIn) > BigInt(amountOut) ? BigInt(amountIn) - BigInt(amountOut) : 0n).toString(),
     timeEstimate: Number(q.timeEstimate) || 0,
-    deadline: !dry && typeof q.deadline === 'string' ? q.deadline : a.deadline,
+    deadline: new Date(payBy).toISOString(),
     ...(dry ? {} : { depositAddress }),
   };
 }

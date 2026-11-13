@@ -124,3 +124,49 @@ export function reclaimOutcome(
   if (failure) return { kind: 'failed', code: /E1\d\d_[A-Z_]+/.exec(JSON.stringify(failure))?.[0] ?? 'FAILED' };
   return { kind: 'released' }; // no transfer: only the storage reservation went back to the free pre-pay
 }
+
+/** What this browser remembers about a send, for the /campaigns label (T-024): never sent anywhere. */
+export interface SentRecord {
+  campaignId: string;
+  firstEmail: string;
+  count: number;
+  createdAt: number; // ms
+}
+
+type Store = Pick<Storage, 'getItem' | 'setItem'>;
+const sentKey = (contractId: string) => `zarf-near:sent:${contractId}`; // campaign ids are per contract
+
+function readAll(store: Store, contractId: string): Record<string, SentRecord> {
+  try {
+    const v = JSON.parse(store.getItem(sentKey(contractId)) ?? '{}');
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Saved at send time; best effort (a blocked or full storage only loses the label). */
+export function saveSent(store: Store, contractId: string, r: SentRecord): void {
+  try {
+    store.setItem(sentKey(contractId), JSON.stringify({ ...readAll(store, contractId), [r.campaignId]: r }));
+  } catch {
+    // the amount line stays
+  }
+}
+
+/** The well-formed records by campaign id; anything else is skipped, so /campaigns falls back to the amount line. */
+export function readSent(store: Store, contractId: string): Map<string, SentRecord> {
+  const out = new Map<string, SentRecord>();
+  for (const [id, r] of Object.entries(readAll(store, contractId))) {
+    if (r && r.campaignId === id && typeof r.firstEmail === 'string' && r.firstEmail && Number.isSafeInteger(r.count) && r.count > 0 && Number.isFinite(r.createdAt)) out.set(id, r);
+  }
+  return out;
+}
+
+/** "ana@gmail.com + 4 others · 14 Nov 2026"; null without a record (the amount line shows instead). */
+export function sentLabel(r: SentRecord | undefined): string | null {
+  if (!r) return null;
+  const others = r.count - 1;
+  const date = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }).format(r.createdAt);
+  return `${r.firstEmail}${others ? ` + ${others} ${others === 1 ? 'other' : 'others'}` : ''} · ${date}`;
+}

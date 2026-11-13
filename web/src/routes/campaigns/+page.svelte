@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { env } from '$env/dynamic/public';
   import { getConfig, getPrepayBalance, txOutcome, type ContractConfig } from '$lib/create/chain';
-  import { claimedAmount, formatNear, listCampaigns, reclaimable, reclaimOutcome, reclaimTx, withdrawTx, type CampaignView } from '$lib/create/campaigns';
+  import { claimedAmount, formatNear, listCampaigns, readSent, sentLabel, type SentRecord, reclaimable, reclaimOutcome, reclaimTx, withdrawTx, type CampaignView } from '$lib/create/campaigns';
   import { formatAmount } from '$lib/create/recipients';
   import { nearConnectWallet, type SenderWallet } from '$lib/create/wallet';
   import { readSentOutcome } from '$lib/create/funding';
@@ -30,6 +30,8 @@
   let walletReady = $state(false);
   let account = $state<string | null>(null);
   let rows = $state<{ id: string; c: CampaignView }[] | null>(null);
+  // What this browser saved at send time (first email, count, date): the row's name when present (T-024).
+  let sent = $state(new Map<string, SentRecord>());
   let freePrepay = $state('0');
   let busy = $state('');
   let error = $state(''); // loading the list
@@ -62,6 +64,11 @@
     now = Date.now();
     try {
       const [list, free] = await Promise.all([listCampaigns(view, account!), getPrepayBalance(rpc!, contract!, account!)]);
+      try {
+        sent = readSent(localStorage, contract!);
+      } catch {
+        // no localStorage: amount lines
+      }
       freePrepay = free;
       rows = list;
     } catch {
@@ -205,10 +212,15 @@
         {@const total = BigInt(r.c.amount)}
         {@const ms = Number(BigInt(r.c.deadline_ns) / 1_000_000n)}
         {@const left = timeLeft(ms, now)}
+        {@const label = sentLabel(sent.get(r.id))}
         <section class="py-6 flex flex-col gap-4" aria-label="Campaign {r.id}">
-          <!-- The amount leads; the internal campaign number sits in Details (T-023 waste list item 11) -->
+          <!-- Who it went to leads when this browser sent it, else the amount; the campaign number sits in Details (T-023 item 11) -->
           <div class="flex items-center justify-between gap-3">
-            <span class="flex items-baseline gap-2"><span class="text-3xl font-light tracking-tighter tabular-nums">{formatAmount(total)}</span><span class="text-xs font-medium uppercase tracking-widest text-zen-primary whitespace-nowrap">{UNIT}</span></span>
+            {#if label}
+              <span class="min-w-0 text-base font-medium break-words">{label}</span>
+            {:else}
+              <span class="flex items-baseline gap-2"><span class="text-3xl font-light tracking-tighter tabular-nums">{formatAmount(total)}</span><span class="text-xs font-medium uppercase tracking-widest text-zen-primary whitespace-nowrap">{UNIT}</span></span>
+            {/if}
             <span title={deadlineText(ms, now)}>
               {#if left}<ZenBadge variant="default" size="sm">{titleCase(left)}</ZenBadge>{:else}<ZenBadge variant="warning" size="sm">Claims Closed</ZenBadge>{/if}
             </span>
@@ -218,7 +230,7 @@
             <div class="h-1 rounded-full bg-zen-fg/10 overflow-hidden" aria-hidden="true">
               <div class="h-full bg-zen-fg rounded-full" style="width: {total === 0n ? 0 : Number((claimed * 100n) / total)}%"></div>
             </div>
-            <p class="text-sm text-zen-fg-muted tabular-nums">{formatAmount(claimed)} of {formatAmount(total)} claimed</p>
+            <p class="text-sm text-zen-fg-muted tabular-nums">{formatAmount(claimed)} of {formatAmount(total)}{label ? ` ${UNIT}` : ''} claimed</p>
           </div>
           <details class="group text-xs text-zen-fg-subtle">
             <summary class="inline-flex items-center gap-1.5 py-1 cursor-pointer list-none hover:text-zen-fg">Details <ChevronDown class="w-3.5 h-3.5 transition-transform group-open:rotate-180" aria-hidden="true" /></summary>

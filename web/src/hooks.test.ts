@@ -17,14 +17,14 @@ describe('senderPolicy (NEAR Connect on /create, /campaigns and the claim form o
   const base = "default-src 'self'; connect-src 'self' https://rpc.example; img-src 'self' data:; script-src 'self' 'nonce-abc'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'";
   it('opens connect, img, style, font and frame to https; never script-src', () => {
     const p = senderPolicy(base);
-    expect(p).toContain("connect-src 'self' https://rpc.example https://dns.google https: wss:");
+    expect(p).toContain("connect-src 'self' https://rpc.example https: wss:");
     expect(p).toContain("img-src 'self' data: https:");
     expect(p).toContain("style-src 'self' 'unsafe-inline' https:");
     expect(p).toContain("font-src 'self' https: data:");
     expect(p).toContain("frame-src 'self' https:");
     expect(p).toContain("script-src 'self' 'nonce-abc';");
     expect(p).toContain("frame-ancestors 'none'");
-    expect(p.match(/dns\.google/g)).toHaveLength(1); // connect-src only
+    expect(p).not.toMatch(/dns\.google/); // the MX lookup is gone (T-024): every non-Gmail row is warned
   });
   it('applies to the sender pages only', () => {
     expect(['/create', '/create/', '/campaigns', '/claim/1/ab', '/claim/1/ab/'].every(isWalletPage)).toBe(true);

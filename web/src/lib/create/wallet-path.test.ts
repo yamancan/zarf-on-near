@@ -1,7 +1,7 @@
 // T-014: one test per finding of the T-012 sender-wallet review.
 import { describe, expect, it, vi } from 'vitest';
 import {
-  AccountChanged, CHECKING_TX, fundCampaign, readSentOutcome, releaseAfterReject, sendHooks, SendUncertain, WAITING_FOR_WALLET,
+  AccountChanged, CHECKING_TX, fundCampaign, readSentOutcome, releaseAfterReject, sendHooks, SendUncertain, TX_VALIDITY_BLOCKS, WAITING_FOR_WALLET,
   walletWaitNote, type FundDeps, type Outcome, type SendRecord, type Tx,
 } from './funding';
 import { assertSigner } from './wallet';
@@ -96,14 +96,40 @@ describe('finding 3: a short list of hashes is not the funding tx', () => {
 
 describe('finding 4: Change the list after a rejected wallet', () => {
   const expect_ = { merkleRoot: p.merkleRoot, total: p.total };
-  it('frees the list when no campaign shows up after the wait', async () => {
+  const nothingLost = { height: async () => { throw new Error('not asked'); } };
+  it('frees the list when nothing was lost and no campaign shows up after the wait', async () => {
     const sleep = vi.fn(async () => {});
-    expect(await releaseAfterReject(deps({}), expect_, { sleep })).toEqual({ kind: 'free' });
+    expect(await releaseAfterReject(deps({}), expect_, nothingLost, { sleep })).toEqual({ kind: 'free' });
     expect(sleep).toHaveBeenCalledWith(90_000);
   });
   it('adopts the campaign if the rejected-looking send landed after all', async () => {
     const d = deps({ campaignByRoot: async () => '7', campaign: async () => ({ merkle_root: p.merkleRoot, amount: p.total, sender: SENDER }) });
-    expect(await releaseAfterReject(d, expect_, { sleep: async () => {} })).toEqual({ kind: 'created', campaignId: '7' });
+    expect(await releaseAfterReject(d, expect_, nothingLost, { sleep: async () => {} })).toEqual({ kind: 'created', campaignId: '7' });
+  });
+});
+
+describe('red team #13: an absent campaign never frees a draft whose send was lost', () => {
+  const expect_ = { merkleRoot: p.merkleRoot, total: p.total };
+  const at = (head: number) => async () => head;
+  it('holds it while that send can still land, with no 90 s wait standing in for an outcome', async () => {
+    const sleep = vi.fn(async () => {});
+    expect(await releaseAfterReject(deps({}), expect_, { lostAt: 1000, height: at(1000 + TX_VALIDITY_BLOCKS) }, { sleep })).toEqual({ kind: 'held', lostAt: 1000 });
+    expect(sleep).not.toHaveBeenCalled();
+  });
+  it('a loss at an unknown height is counted from now', async () => {
+    expect(await releaseAfterReject(deps({}), expect_, { lostAt: null, height: at(5000) }, { sleep: async () => {} })).toEqual({ kind: 'held', lostAt: 5000 });
+  });
+  it('still adopts the campaign if the lost send landed', async () => {
+    const d = deps({ campaignByRoot: async () => '7', campaign: async () => ({ merkle_root: p.merkleRoot, amount: p.total, sender: SENDER }) });
+    expect(await releaseAfterReject(d, expect_, { lostAt: 1000, height: at(1001) })).toEqual({ kind: 'created', campaignId: '7' });
+  });
+  it('frees it once every tx it could have signed has expired, after one last look', async () => {
+    const sleep = vi.fn(async () => {});
+    expect(await releaseAfterReject(deps({}), expect_, { lostAt: 1000, height: at(1001 + TX_VALIDITY_BLOCKS) }, { sleep })).toEqual({ kind: 'free' });
+    expect(sleep).toHaveBeenCalledWith(90_000);
+  });
+  it('an unreadable chain height is an error, never a release', async () => {
+    await expect(releaseAfterReject(deps({}), expect_, { lostAt: 1000, height: async () => { throw new Error('block failed'); } })).rejects.toThrow('block failed');
   });
 });
 
