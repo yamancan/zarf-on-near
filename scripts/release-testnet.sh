@@ -4,7 +4,8 @@
 #   bash scripts/release-testnet.sh           # from a clean checkout of origin/main
 #   DRY=1 bash scripts/release-testnet.sh     # print every command, run none (no token read, no network)
 # Stops at the first failure and names the step. Before each Worker deploy it records the live version id, and
-# writes the rollback lines to $ROLLBACK (printed at the end and on failure). Never prints a secret; never
+# writes the rollback lines to $ROLLBACK (printed at the end and on failure). Step 3's watcher refresh commits
+# watcher/expected/testnet.json locally: it reaches main (step 6). Never prints a secret; never
 # runs `wrangler login`.
 set -Eeuo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
@@ -17,7 +18,7 @@ ROLLBACK=${ROLLBACK:-${XDG_STATE_HOME:-$HOME/.local/state}/zarf-near/release-tes
 DRY=${DRY:-}
 
 step=''
-trap '[[ -n $step ]] && { echo; echo "STOPPED at step: $step. Nothing after it ran."; [[ -s $ROLLBACK ]] && { echo "Rollback for what already went out:"; cat "$ROLLBACK"; }; }' ERR
+trap '[[ -n $step ]] && { echo; echo "STOPPED at step: $step. Nothing after it ran."; echo "To run again: git reset --hard origin/main (drops the local watcher-refresh commit; step 3 makes it again)."; [[ -s $ROLLBACK ]] && { echo "Rollback for what already went out:"; cat "$ROLLBACK"; }; }' ERR
 begin() { step=$1; echo; echo "=== $1 ==="; }
 # Prints the command; runs it unless DRY. Takes a single string so DRY shows it exactly as run.
 run() { echo "+ $1"; [[ -n $DRY ]] || bash -c "set -euo pipefail; cd '$root'; $1"; }
@@ -30,7 +31,11 @@ remember() { # <dir> <worker name> [--env testnet]
   local id
   id=$(cd "$dir" && CLOUDFLARE_API_TOKEN=$(cat "$TOKEN_FILE") npx wrangler deployments status "$@" --json \
     | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const v=JSON.parse(s).versions||[];if(v.length!==1)process.exit(1);console.log(v[0].version_id)})')
-  echo "(cd $dir && CLOUDFLARE_API_TOKEN=\$(cat $TOKEN_FILE) npx wrangler rollback $id $* -m 'release-testnet rollback' -y)  # $name" >> "$ROLLBACK"
+  if [[ $dir == /* ]]; then # a temporary checkout (the faucet): roll back by Worker name from web/, which stays
+    echo "(cd $root/web && CLOUDFLARE_ACCOUNT_ID=$ACCOUNT CLOUDFLARE_API_TOKEN=\$(cat $TOKEN_FILE) npx wrangler rollback $id --name $name -m 'release-testnet rollback' -y)  # $name" >> "$ROLLBACK"
+  else
+    echo "(cd $root/$dir && CLOUDFLARE_API_TOKEN=\$(cat $TOKEN_FILE) npx wrangler rollback $id $* -m 'release-testnet rollback' -y)  # $name" >> "$ROLLBACK"
+  fi
   echo "  live $name version before this release: $id"
 }
 
@@ -60,7 +65,9 @@ run "cd relayer && $(wr) deploy --env testnet"
 
 begin "3 web + watcher refresh (scripts/deploy-web.sh)"
 run "cd web && pnpm install --frozen-lockfile >/dev/null"
+run "cd watcher && pnpm install --frozen-lockfile >/dev/null"
 remember web zarf-near-claim --env testnet
+remember watcher zarf-near-watcher-testnet --env testnet # watcher-refresh.sh redeploys it with the new fingerprint
 run "scripts/deploy-web.sh testnet"
 
 begin "4 faucet ($FAUCET_REF)"
