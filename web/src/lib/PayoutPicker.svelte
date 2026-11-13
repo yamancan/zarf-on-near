@@ -120,7 +120,7 @@
         aria-checked={key === a.chain.key}
         tabindex={key === a.chain.key ? 0 : -1}
         data-chain={a.chain.key}
-        class="flex flex-col items-center gap-1 py-2 rounded-xl border text-[11px] font-medium transition-colors {key === a.chain.key ? 'border-zen-fg text-zen-fg' : 'border-transparent text-zen-fg-muted hover:text-zen-fg'}"
+        class="flex flex-col items-center gap-1 py-2 rounded-xl text-[11px] font-medium transition-colors {key === a.chain.key ? 'bg-zen-fg/10 text-zen-fg' : 'text-zen-fg-muted hover:text-zen-fg'}"
         onclick={() => (key = a.chain.key)}
       ><span class="w-6 h-6" aria-hidden="true">{@html chainLogo(a.chain)}</span><span class="w-full truncate text-center">{a.chain.name}</span></button>
     {/each}

@@ -187,4 +187,8 @@ describe('backup handoff /campaigns → /create (T-033)', () => {
     expect(takeBackup(store)).toBeNull();
     expect(m.size).toBe(0);
   });
+  it('a store that throws (site data blocked) reads as no backup', () => {
+    const store = { getItem: () => { throw new Error('SecurityError'); } } as unknown as Storage;
+    expect(takeBackup(store)).toBeNull();
+  });
 });

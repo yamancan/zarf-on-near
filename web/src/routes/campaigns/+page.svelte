@@ -35,6 +35,21 @@
   let sent = $state(new Map<string, SentRecord>());
   let freePrepay = $state('0');
   let busy = $state('');
+  let backupInput = $state<HTMLInputElement>();
+  let backupError = $state('');
+  async function pickBackup(e: Event & { currentTarget: HTMLInputElement }) {
+    const f = e.currentTarget.files?.[0];
+    e.currentTarget.value = '';
+    if (!f) return;
+    backupError = '';
+    try {
+      stashBackup(await f.text());
+    } catch {
+      backupError = 'This browser blocked the file. Allow site data for this page and try again.';
+      return;
+    }
+    await goto('/create');
+  }
   let error = $state(''); // loading the list
   // The outcome of the last action, shown under the button that started it ('prepay' or a campaign id).
   let result = $state<{ for: string; tone: 'success' | 'error' | 'info'; text: string; code?: string; hash?: string } | null>(null);
@@ -169,6 +184,16 @@
     </div>
   </div>
 
+  <!-- The one backup entry (T-033), in every state: the file rebuilds a sent campaign's links on /create, read-only -->
+  <div class="-mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-zen-fg-muted">
+    <span>Lost your links?</span>
+    <ZenButton variant="secondary" size="sm" onclick={() => backupInput?.click()}>
+      {#snippet iconLeft()}<FolderOpen class="w-4 h-4" />{/snippet}Open Backup File
+    </ZenButton>
+    <input bind:this={backupInput} type="file" accept=".json,application/json" class="hidden" onchange={pickBackup} />
+    {#if backupError}<Note tone="error">{backupError}</Note>{/if}
+  </div>
+
   {#if setupError}
     <ZenAlert variant="error">{setupError}</ZenAlert>
   {:else if !walletReady}
@@ -204,11 +229,6 @@
       </div>
     </ZenCard>
   {:else}
-    <!-- The one backup entry (T-033): the file rebuilds a sent campaign's links on /create, read-only -->
-    <label class="self-start -mt-4 inline-flex items-center gap-1.5 text-xs text-zen-fg-subtle hover:text-zen-fg cursor-pointer focus-within:text-zen-fg">
-      <FolderOpen class="w-3.5 h-3.5 shrink-0" aria-hidden="true" />Lost your links? Open the backup file
-      <input type="file" accept=".json,application/json" class="sr-only" onchange={async (e) => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ''; if (f) { stashBackup(await f.text()); await goto('/create'); } }} />
-    </label>
     <!-- Rows, not cards (design spec 3.7) -->
     <div class="divide-y divide-zen-border-subtle border-y border-zen-border-subtle">
       {#each rows as r (r.id)}

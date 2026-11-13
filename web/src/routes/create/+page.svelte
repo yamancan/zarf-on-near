@@ -228,6 +228,7 @@
   });
 
   onMount(async () => {
+    const backup = takeBackup(); // first, before any await: the file holds every link and must not linger in the tab
     if (!rpc || !contract || !token) {
       setupError = 'This site is not fully set up yet (PUBLIC_NEAR_RPC_URL, PUBLIC_CONTRACT_ID, PUBLIC_TOKEN_ID).';
       return;
@@ -268,8 +269,7 @@
         else if (f.txHash) await check(f.txHash);
         else await checkByRoot(); // reloaded while the wallet popup was open
       }
-      const backup = f ? null : takeBackup();
-      if (backup) await openBackup(backup);
+      if (backup && !f) await openBackup(backup);
     } catch {
       setupError = "Couldn't reach NEAR. Nothing was sent.";
       setupRetry = true;
@@ -747,7 +747,7 @@
 {#snippet usdcChip()}
   <!-- Zarf's token chip (create wizard step-1:230-250): one token, so no "Change" -->
   <span class="inline-flex items-center gap-2 bg-zen-fg/5 rounded-full pl-1.5 pr-3 py-1 border border-zen-border-subtle">
-    <Mark svg={MARKS.usdc} class="w-5 h-5" />
+    <Mark svg={MARKS.usdc} class="w-4 h-4" />
     <span class="text-xs font-semibold uppercase">{UNIT}</span>
   </span>
 {/snippet}
