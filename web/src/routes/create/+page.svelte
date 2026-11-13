@@ -19,8 +19,9 @@
   import { formatNear, sig3 } from '$lib/create/campaigns';
   import { getClaimState, nearView, type ClaimState } from '$lib/services';
   import { CIRCLE_LINE, TESTNET, UNIT } from '$lib/network';
-  import { ArrowRight, ArrowUpRight, Check, CheckCircle2, ChevronDown, Copy, Download, ExternalLink, FolderOpen, Lock, Mail, Plus, RefreshCw } from 'lucide-svelte';
-  import AmountPanel from '$lib/AmountPanel.svelte';
+  import { ArrowRight, ArrowUpRight, Check, CheckCircle2, ChevronDown, Copy, Download, ExternalLink, Eye, FolderOpen, Lock, Mail, Plus, RefreshCw } from 'lucide-svelte';
+  import ClaimCard from '$lib/ClaimCard.svelte';
+  import { crossChainOffered } from '$lib/intents';
   import Avatar from '$lib/Avatar.svelte';
   import CopyButton from '$lib/CopyButton.svelte';
   import EmailMark from '$lib/EmailMark.svelte';
@@ -78,6 +79,7 @@
   let wallet: SenderWallet | null = null;
   let walletReady = $state(false); // the wallet module loads after the config; Connect waits for it
   let account = $state<string | null>(null);
+  let walletId = $state<string | null>(null); // 'ethereum-wallets' is MetaMask (NEP-518)
   let draft = $state<Draft | null>(null);
   let recoverySaved = $state(false);
   let recoveryAck = $state(false);
@@ -240,6 +242,8 @@
       wallet = await nearConnectWallet(config.network, rpc, { ethereum: true }); // MetaMask senders (T-025)
       walletReady = true;
       account = wallet.accountId();
+      walletId = wallet.walletId();
+      wallet.onChange((a, id) => ((account = a), (walletId = id))); // sign-in/out from any path, including the wallet's own
       // A funding tx from before a reload: resume checking it instead of offering Create again.
       const f = loadFunding();
       if (!f) {
@@ -271,6 +275,7 @@
     error = errorTitle = '';
     try {
       account = await wallet!.signIn();
+      walletId = wallet!.walletId();
     } catch (e) {
       error = 'The wallet did not connect. Try again.';
     }
@@ -725,6 +730,7 @@
       <span class="min-w-0 flex items-center gap-2 text-sm"><span class="text-zen-fg-subtle">From</span><Avatar name={account} /><span class="font-mono truncate">{account}</span></span>
       {#if !pinned}<ZenButton variant="ghost" size="sm" onclick={disconnect} disabled={!!busy}>Disconnect</ZenButton>{/if}
     </div>
+    {#if walletId === 'ethereum-wallets'}<p class="text-xs text-zen-fg-muted">MetaMask opens a NEAR account. It pays with USDC on NEAR.</p>{/if}
   {/if}
 {/snippet}
 
@@ -1004,7 +1010,7 @@
               onUndo={() => ((gridRows = cleared!), (cleared = null))}
               summaryItems={[{ label: 'Recipients', value: parsed.rows.length }, { label: 'Total', value: formatAmount(parsed.total), suffix: UNIT }]}
             />
-            {#if notGmail}<p class="text-xs text-zen-fg-subtle">{notGmail}</p>{/if}
+            {#if notGmail}<ZenAlert variant="warning" icon={Mail}>{notGmail}</ZenAlert>{/if}
             {#if capError}<Note tone="error">{capError}</Note>{/if}
             <!-- Ours: a campaign's backup file rebuilds its links (read-only, nothing is sent) -->
             <label class="self-start inline-flex items-center gap-1.5 text-xs text-zen-fg-muted hover:text-zen-fg cursor-pointer {!config || busy ? 'pointer-events-none opacity-50' : ''}">
@@ -1073,8 +1079,9 @@
                 {/if}
               </details>
             </div>
-            {#if balance !== null && contract}
-              <!-- Pay With: USDC on NEAR, or another chain through 1Click into this account (T-019, T-025); the send itself is unchanged -->
+            {#if balance !== null && contract && config && crossChainOffered(config.network, env.PUBLIC_CROSS_CHAIN)}
+              <!-- Pay With: USDC on NEAR, or another chain through 1Click into this account (T-019, T-025); the send itself is unchanged.
+                   Mainnet: behind PUBLIC_CROSS_CHAIN, like the claim page (T-032) -->
               <FundFromChain {account} {contract} need={short} testnet={TESTNET} onArrived={() => balanceTick++} />
             {/if}
             {@render actions(true, 'Continue', ready && short === 0n && balance !== null, prepare, balance === null && balanceFailed ? 'Check your balance first.' : '')}
@@ -1205,27 +1212,21 @@
       </section>
 
       {#if step < 2}
-        <!-- Live Preview (Zarf create step-1:330-345): what the first recipient will see, the claim card in miniature -->
-        <aside class="w-full min-w-0 lg:flex-1 lg:max-w-2xl lg:sticky lg:top-24" aria-label="Preview of a claim">
-          <div class="mb-4 ml-1 text-sm text-zen-fg-muted">Live Preview</div>
-          <!-- What the first recipient will see: the claim card as T-023 draws it (no icon disc, amount as a plain row,
-               the three Send To choices), in miniature and inert -->
-          <ZenCard variant="elevated" radius="3xl" padding="lg">
-            <div class="space-y-8 {parsed.rows.length ? '' : 'opacity-50'}" aria-hidden="true">
-              <div class="min-w-0">
-                <div class="text-xl font-semibold">{TESTNET ? 'Claim Your Test USDC' : 'Claim Your USDC'}</div>
-                <div class="text-sm text-zen-fg-muted font-light mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-                  <span class="inline-flex items-center gap-1.5 min-w-0">{#if account}<Avatar name={account} /><span class="font-mono truncate">{account}</span>{:else}From you{/if}</span>
-                  {#if previewLeft}<span class="tabular-nums whitespace-nowrap">{previewLeft}</span>{/if}
-                </div>
-              </div>
-              <AmountPanel label="Claim Amount" value={previewAmount} unit={UNIT} />
-              <div class="flex flex-wrap items-center gap-2">
-                {#each TESTNET ? ['NEAR Account', 'Face ID', 'Other Chain'] : ['NEAR Account', 'Other Chain'] as label, i (label)}
-                  <span class="inline-flex items-center rounded-full px-3 py-1.5 text-xs font-medium {i === 0 ? 'bg-zen-fg text-zen-bg' : 'text-zen-fg-muted'}">{label}</span>
-                {/each}
-              </div>
-              <div class="flex items-center justify-center rounded-full bg-zen-fg text-zen-bg text-sm font-medium h-11"><GoogleG />Sign In With Google</div>
+        <!-- What They See (T-032, owner point 10): the claim page's own card component, inert; nothing in it takes a click -->
+        <aside class="w-full min-w-0 lg:flex-1 lg:max-w-2xl lg:sticky lg:top-24" aria-label="What the first recipient sees">
+          <div class="mb-4 ml-1 flex items-center gap-1.5 text-sm text-zen-fg-muted"><Eye class="w-4 h-4" aria-hidden="true" />What They See</div>
+          <ZenCard variant="elevated" class="overflow-hidden {parsed.rows.length ? '' : 'opacity-50'}">
+            <div class="p-4 sm:p-8">
+            <ClaimCard
+              preview
+              title={TESTNET ? 'Claim Your Test USDC' : 'Claim Your USDC'}
+              sender={account ?? ''}
+              left={previewLeft}
+              amount={previewAmount}
+              unit={UNIT}
+              modes={TESTNET ? [['existing', 'NEAR Account'], ['new', 'Face ID'], ['chain', 'Other Chain']] : [['existing', 'NEAR Account'], ['chain', 'Other Chain']]}
+              mode="existing"
+            />
             </div>
           </ZenCard>
         </aside>

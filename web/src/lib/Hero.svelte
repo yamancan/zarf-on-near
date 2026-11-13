@@ -5,7 +5,8 @@
   // style (hex) instead of Stellar strkeys, the eyebrow carries no chain logo, the CTAs are this app's, and (design
   // spec 3.5) the hero is its content plus py-24/32 with no 90vh minimum and no scroll cue.
   import { onMount } from 'svelte';
-  import { ArrowRight } from 'lucide-svelte';
+  import Mark from '$lib/Mark.svelte';
+  import { MARKS } from '$lib/chains';
   import { TESTNET, UNAUDITED_LINE } from '$lib/network';
   import { themeStore } from '$lib/zarf-kit/stores/themeStore.svelte';
   import ZenButton from '$lib/zarf-kit/components/ui/ZenButton.svelte';
@@ -177,7 +178,7 @@
       class="text-4xl sm:text-5xl md:text-6xl font-bold tracking-tighter text-zen-fg leading-[1.12] [text-wrap:balance] transition-opacity duration-1000 ease-out {mounted ? 'opacity-100' : 'opacity-0'}"
       style="transition-delay: 400ms;"
     >
-      Send tokens to an email.
+      Send USDC to any email, from any chain.
     </h1>
 
     <p
@@ -191,17 +192,19 @@
       class="flex flex-col sm:flex-row items-center gap-4 mt-6 w-full sm:w-auto transition-all duration-700 ease-out {mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-5'}"
       style="transition-delay: 1200ms;"
     >
-      <a href={tryUrl} class="block w-full sm:w-auto"><ZenButton tabindex={-1} variant="primary" size="lg" class="w-full sm:w-auto">
-        Try with Google
-        {#snippet iconRight()}<ArrowRight class="w-3.5 h-3.5" />{/snippet}
-      </ZenButton></a>
-      <a href="/create" class="block w-full sm:w-auto"><ZenButton tabindex={-1} variant="secondary" size="lg" class="w-full sm:w-auto">
+      <a href="/create" class="block w-full sm:w-auto"><ZenButton tabindex={-1} variant="primary" size="lg" class="w-full sm:w-auto">
+        {#snippet iconLeft()}<Mark svg={MARKS.usdc} class="w-5 h-5" />{/snippet}
         Send USDC
+      </ZenButton></a>
+      <a href={tryUrl} class="block w-full sm:w-auto"><ZenButton tabindex={-1} variant="secondary" size="lg" class="w-full sm:w-auto">
+        {#snippet iconLeft()}<Mark svg={MARKS.near} class="w-5 h-5" />{/snippet}
+        Try on NEAR Testnet
       </ZenButton></a>
     </div>
 
-    <!-- T-001: the unaudited note stays visible on mainnet; NEAR itself is named once, in the nav -->
-    {#if !TESTNET}<p class="text-xs text-zen-fg-subtle max-w-md">{UNAUDITED_LINE}</p>{/if}
+    <!-- T-032: on testnet one honest line on what pays here; on mainnet the unaudited note (T-001) -->
+    {#if TESTNET}<p class="text-xs text-zen-fg-subtle max-w-md">Testnet: Test USDC on NEAR. Other chains run on mainnet.</p>
+    {:else}<p class="text-xs text-zen-fg-subtle max-w-md">{UNAUDITED_LINE}</p>{/if}
   </div>
 
 </div>

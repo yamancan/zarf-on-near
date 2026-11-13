@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import wranglerJsonc from '../../wrangler.jsonc?raw';
+// @ts-expect-error: CommonJS helper without types; the scripts use the same reader (T-031)
+import { stripJsonc } from '../../../scripts/jsonc.cjs';
 import vectors from '../../../spec/vectors.json';
 import {
   classifyDestination, nearAccountReady, missingAccountLine, typedBefore, claimStartedHere, holdPage, CLAIMED_NO_RECORD, INCOMPLETE_LINE, EXPLORER_LABEL, stateMatches, deadlineText, timeLeft, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isImplicitAccount, isValidAccountId, loadAttempt, newAttemptId,
@@ -365,7 +367,7 @@ describe('shared contracts and 0x ids (T-002 items 3-4)', () => {
     expect(missingAccountLine(classifyDestination('alice.testnet'))).toBe('No such account. Check the spelling.');
   });
   it('0x destinations are on in the testnet build only', () => {
-    const cfg = JSON.parse(wranglerJsonc.replace(/^\s*\/\/.*$/gm, ''));
+    const cfg = JSON.parse((stripJsonc as (s: string) => string)(wranglerJsonc));
     expect(cfg.env.testnet.vars.PUBLIC_ETH_ACCOUNTS).toBe('on');
     expect(cfg.env.mainnet.vars.PUBLIC_ETH_ACCOUNTS).toBe('');
     expect(cfg.vars.PUBLIC_ETH_ACCOUNTS).toBe('');

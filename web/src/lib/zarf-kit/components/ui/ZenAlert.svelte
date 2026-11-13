@@ -7,6 +7,8 @@
         title?: Snippet;
         actions?: Snippet;
         variant?: 'info' | 'success' | 'warning' | 'error';
+        /** NEAR addition (T-032): a subject icon in place of the variant's, same size and color. */
+        icon?: typeof Info;
         dismissible?: boolean;
         ondismiss?: () => void;
         class?: string;
@@ -17,6 +19,7 @@
         title,
         actions,
         variant = 'info',
+        icon,
         dismissible = false,
         ondismiss,
         class: className = '',
@@ -43,7 +46,7 @@
         error: AlertCircle,
     } as const;
 
-    const Icon = $derived(icons[variant]);
+    const Icon = $derived(icon ?? icons[variant]);
 </script>
 
 <div

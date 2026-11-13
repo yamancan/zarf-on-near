@@ -14,6 +14,10 @@ import ethereumWallets from './ethereum-wallets.json';
 
 export interface SenderWallet {
   accountId(): string | null;
+  /** The connected wallet's manifest id ('ethereum-wallets' for MetaMask), or null. */
+  walletId(): string | null;
+  /** Called on every sign-in and sign-out the connector reports, from any path (picker, wallet, disconnect). */
+  onChange(cb: (account: string | null, walletId: string | null) => void): void;
   signIn(): Promise<string>;
   signOut(): Promise<void>;
   /** Signs and sends in order; returns the tx hashes. */
@@ -51,23 +55,42 @@ export async function nearConnectWallet(networkId: string, rpcUrl: string, { eth
     // The wallet code runs in srcdoc iframes, which inherit this page's CSP: its inline scripts need our nonce.
     cspNonce: (document.querySelector('script[nonce]') as HTMLScriptElement | null)?.nonce || undefined,
   });
+  // T-032 wallet finding: this restores the session NEAR Connect stored, read from the wallet's sandboxed code, not a
+  // live check. For Ethereum Wallets that is the 0x account from an earlier visit while MetaMask itself is asked only
+  // in the signing popup. So the page names the wallet and follows the connector's own sign-in/out events.
   let account: string | null = null;
+  let walletId: string | null = null;
+  let changed: (account: string | null, walletId: string | null) => void = () => {};
   try {
-    account = (await connector.getConnectedWallet()).accounts[0]?.accountId ?? null;
+    const c = await connector.getConnectedWallet();
+    account = c.accounts[0]?.accountId ?? null;
+    walletId = account ? c.wallet.manifest.id : null;
   } catch {
     // not connected yet
   }
+  connector.on('wallet:signIn', (e: { wallet: { manifest: { id: string } }; accounts: { accountId: string }[] }) => {
+    account = e.accounts[0]?.accountId ?? null;
+    walletId = account ? e.wallet.manifest.id : null;
+    changed(account, walletId);
+  });
+  connector.on('wallet:signOut', () => {
+    account = walletId = null;
+    changed(null, null);
+  });
   return {
     accountId: () => account,
+    walletId: () => walletId,
+    onChange: (cb) => void (changed = cb),
     async signIn() {
       const wallet = await connector.connect();
       const [a] = await wallet.getAccounts();
       if (!a) throw new Error('NO_ACCOUNT');
+      walletId = wallet.manifest.id;
       return (account = a.accountId);
     },
     async signOut() {
       await connector.disconnect();
-      account = null;
+      account = walletId = null;
     },
     async send(txs) {
       const wallet = await connector.wallet();

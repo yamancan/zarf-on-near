@@ -10,11 +10,8 @@
   import { accountExists, ClaimError, describeCheckError, describeError, getCampaign, getClaimState, getNetwork } from '$lib/services';
   import { crossChainOffered, getQuote, payoutCapError, QUOTE_LIFETIME_MS, withinLossBound, QuoteError, refusal, type PayoutAsset } from '$lib/intents';
   import PayoutPicker from '$lib/PayoutPicker.svelte';
-  import { AlertTriangle, ArrowUpRight, CheckCircle2, ChevronDown, Clock, Info, Link2Off, Loader2, Mail, SearchX, Wallet } from 'lucide-svelte';
-  import AmountPanel from '$lib/AmountPanel.svelte';
-  import Avatar from '$lib/Avatar.svelte';
-  import GoogleG from '$lib/GoogleG.svelte';
-  import Tooltip from '$lib/zarf-kit/components/ui/Tooltip.svelte';
+  import { AlertTriangle, ArrowUpRight, CheckCircle2, ChevronDown, Clock, Link2Off, Loader2, Mail, SearchX, Wallet } from 'lucide-svelte';
+  import ClaimCard from '$lib/ClaimCard.svelte';
   import { swapIn } from '$lib/motion';
   import ClaimRecord from '$lib/ClaimRecord.svelte';
   import { TESTNET, UNAUDITED_LINE, UNIT } from '$lib/network';
@@ -115,14 +112,6 @@
           : null,
   );
   // Radiogroup keys on the pills: arrows move the choice and the focus, as native radios do.
-  function modeKey(e: KeyboardEvent) {
-    const d = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
-    if (!d) return;
-    e.preventDefault();
-    const i = MODES.findIndex(([v]) => v === mode);
-    pick(MODES[(i + d + MODES.length) % MODES.length][0]);
-    tick().then(() => (document.querySelector(`[data-mode="${mode}"]`) as HTMLElement | null)?.focus());
-  }
   function backToField() {
     guideOpen = false;
     document.getElementById('dest')?.focus();
@@ -355,49 +344,22 @@
         </div>
       </div>
     {:else if loaded}
-      <div class="space-y-8" in:swapIn>
-        <!-- Header row (main claim app ClaimStep5Submit:150-175) -->
-        <div class="flex items-start gap-4">
-          <div class="min-w-0">
-            <h1 class="text-xl font-semibold">{network === 'mainnet' ? 'Claim Your USDC' : 'Claim Your Test USDC'}</h1>
-            <p class="text-sm text-zen-fg-muted font-light mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-              <span class="inline-flex items-center gap-1.5 min-w-0"><Avatar name={sender} /><span class="font-mono truncate">{sender}</span></span>
-              <span class="inline-flex items-center gap-1.5 whitespace-nowrap">
-              {#if left}<span class="tabular-nums" title="Claim by {deadline}">{left}</span>{/if}
-              <Tooltip text="Never on chain; our verifier sees it once." position="bottom">
-                <button type="button" class="inline-flex items-center justify-center w-6 h-6 rounded-full text-zen-fg-subtle hover:text-zen-fg" aria-label="Who sees the email: the email never goes on chain. Our verifier sees it once, to check this claim.">
-                  <Info class="w-3.5 h-3.5" aria-hidden="true" />
-                </button>
-              </Tooltip>
-              </span>
-            </p>
-          </div>
-        </div>
-
-        <!-- Amount Highlight (ClaimStep5Submit:178-206), without its blurred circles (spec G3) -->
-        <AmountPanel label="Claim Amount" value={formatAmount(BigInt(link!.amount))} unit={UNIT} />
-
-        <!-- Destination -->
-        <div class="space-y-3">
-          {#if MODES.length > 1}
-            <span id="dest-q" class="zen-section-label !text-zen-fg-subtle !mb-0 block">Send To</span>
-            <!-- Zarf pills (create VestingDurationPicker), radiogroup semantics kept: arrows move, one tab stop -->
-            <div class="flex flex-wrap items-center gap-2" role="radiogroup" aria-labelledby="dest-q" tabindex="-1" onkeydown={modeKey}>
-              {#each MODES as [value, text] (value)}
-                <ZenButton
-                  variant={mode === value ? 'primary' : 'ghost'}
-                  size="sm"
-                  class="px-3 rounded-full text-xs font-medium"
-                  role="radio"
-                  aria-checked={mode === value}
-                  tabindex={mode === value ? 0 : -1}
-                  data-mode={value}
-                  onclick={() => pick(value)}
-                >{text}</ZenButton>
-              {/each}
-            </div>
-          {/if}
-
+      <div in:swapIn>
+        <ClaimCard
+          title={network === 'mainnet' ? 'Claim Your USDC' : 'Claim Your Test USDC'}
+          {sender}
+          {left}
+          {deadline}
+          amount={formatAmount(BigInt(link!.amount))}
+          unit={UNIT}
+          modes={MODES}
+          {mode}
+          onpick={pick}
+          {ready}
+          mainnetOnly={mode === 'chain' && network !== 'mainnet'}
+          onsignin={signIn}
+        >
+          {#snippet body()}
           {#if mode === 'chain'}
             <PayoutPicker {network} amount={link!.amount} refundTo={sender} {requote} onUseNear={() => ((error = ''), pick('existing'))} bind:choice={payout} />
           {:else if mode === 'existing'}
@@ -481,19 +443,9 @@
             <ZenButton variant="secondary" class="self-start" onclick={download}>Download Key</ZenButton>
             <ZenCheckbox bind:checked={confirmed} disabled={!exported} label="I saved the key somewhere safe" />
           {/if}
-        </div>
-
-        <!-- CTA: the main claim app's (DistributionCard:160-190), Google's G on white -->
-        <div class="space-y-3">
+          {/snippet}
+          {#snippet footer()}
           {#if busy}<Note tone="pending">{busy}</Note>{/if}
-          {#if mode === 'chain' && network !== 'mainnet'}
-            <!-- Testnet shows the chains and a live mainnet price; the payout itself runs on mainnet only -->
-            <ZenButton variant="primary" class="w-full" disabled>Mainnet Only</ZenButton>
-          {:else}
-            <ZenButton variant="primary" class="google w-full" disabled={!ready} onclick={signIn}>
-              <GoogleG />Sign in with Google
-            </ZenButton>
-          {/if}
           <p class="text-xs text-zen-fg-subtle text-center">Use the email this link was sent to.</p>
           <!-- T-001: the unaudited note stays visible on mainnet -->
           {#if network === 'mainnet'}<p class="text-xs text-zen-fg-subtle text-center">{UNAUDITED_LINE}</p>{/if}
@@ -504,7 +456,8 @@
               <ZenButton variant="ghost" size="sm" onclick={() => ((error = ''), pick('existing'))}>Claim to a NEAR Account</ZenButton>
             </div>
           {/if}
-        </div>
+          {/snippet}
+        </ClaimCard>
       </div>
     {/if}
     </div>

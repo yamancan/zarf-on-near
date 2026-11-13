@@ -6,7 +6,7 @@
   import { onMount, tick } from 'svelte';
   import { encode } from 'uqr';
   import { ArrowLeftRight, CheckCircle2, Clock, AlertTriangle } from 'lucide-svelte';
-  import { chainLogo, evmAddressError } from '$lib/chains';
+  import { chainLogo, evmAddressError, markLogo, MARKS } from '$lib/chains';
   import { middle } from '$lib/claim';
   import { getStatus, QuoteError, type StatusView } from '$lib/intents';
   import {
@@ -145,8 +145,7 @@
   };
 
   // NEAR's mark: simple-icons 13.21.0 near.svg (CC0), the one the footer used to carry.
-  const NEAR_LOGO = '<svg viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M21.443 0c-.89 0-1.714.46-2.18 1.218l-5.017 7.448a.533.533 0 0 0 .792.7l4.938-4.282a.2.2 0 0 1 .334.151v13.41a.2.2 0 0 1-.354.128L5.03.905A2.555 2.555 0 0 0 3.078 0h-.521A2.557 2.557 0 0 0 0 2.557v18.886a2.557 2.557 0 0 0 4.736 1.338l5.017-7.448a.533.533 0 0 0-.792-.7l-4.938 4.283a.2.2 0 0 1-.333-.152V5.352a.2.2 0 0 1 .354-.128l14.924 17.87c.486.574 1.2.905 1.952.906h.521A2.558 2.558 0 0 0 24 21.445V2.557A2.558 2.558 0 0 0 21.443 0Z"/></svg>';
-  const SOURCES = $derived([['near', 'NEAR', NEAR_LOGO], ...FUNDING_CHAINS.map((c) => [c.key, c.name, chainLogo(c)])] as [Source, string, string][]);
+  const SOURCES = $derived([['near', 'NEAR', markLogo(MARKS.near)], ...FUNDING_CHAINS.map((c) => [c.key, c.name, chainLogo(c)])] as [Source, string, string][]);
   function sourceKey(e: KeyboardEvent) {
     const d = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
     if (!d) return;
@@ -245,7 +244,8 @@
             disabled={busy}
             class="flex flex-col items-center gap-1 py-2 rounded-xl border text-[11px] font-medium transition-colors {source === k ? 'border-zen-fg text-zen-fg' : 'border-transparent text-zen-fg-muted hover:text-zen-fg'}"
             onclick={() => pick(k)}
-          ><span class="w-6 h-6" aria-hidden="true">{@html logo}</span><span class="w-full truncate text-center">{label}</span></button>
+          ><span class="w-6 h-6 [&>svg]:w-full [&>svg]:h-full" aria-hidden="true">{@html logo}</span><span class="w-full truncate text-center">{label}</span
+            >{#if testnet && k !== 'near'}<span class="text-[10px] font-normal text-zen-fg-subtle">Mainnet</span>{/if}</button>
         {/each}
       </div>
     </div>
@@ -253,7 +253,7 @@
       <p class="text-sm text-zen-fg-muted">Nothing to bring from {chain.name}: your NEAR account already holds enough USDC.</p>
     {:else if chain}
       {#if testnet}
-        <Note tone="info">Mainnet only: 1Click has no testnet. This is a live mainnet price, with nothing to pay.</Note>
+        <Note tone="info">1Click has no testnet. Here you see the live mainnet price. On testnet, pay with Test USDC on NEAR.</Note>
       {/if}
       {#if ownRefund}
         <p class="text-sm text-zen-fg-muted">Refunds go to your own account, <span class="font-mono text-zen-fg" title={ownRefund}>{middle(ownRefund, 6)}</span>, on {chain.name}.</p>

@@ -4,6 +4,8 @@
   import { page } from '$app/state';
   import { beforeNavigate } from '$app/navigation';
   import { TESTNET } from '$lib/network';
+  import Mark from '$lib/Mark.svelte';
+  import { MARKS } from '$lib/chains';
   import { brandName } from '$lib/text';
   import ZLockup from '$lib/zarf-kit/components/brand/ZLockup.svelte';
   import ThemeToggle from '$lib/zarf-kit/components/layout/ThemeToggle.svelte';
@@ -58,7 +60,7 @@
       : 'backdrop-blur-none bg-transparent border-transparent'}">
       <a href="/" class="flex items-center gap-2.5" aria-label="{brand} home">{@render lockup()}</a>
       <div class="flex items-center gap-3">
-        <span class="whitespace-nowrap text-xs font-medium text-zen-fg-muted px-1.5">{network}</span>
+        <span class="inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium text-zen-fg-muted px-1.5"><Mark svg={MARKS.near} class="w-3.5 h-3.5" />{network}</span>
         <a href="https://x.com/zarfto" target="_blank" rel="noopener noreferrer" aria-label="Follow Zarf on X" class="inline-flex items-center gap-1.5 rounded-full bg-base-content/5 text-base-content/70 border border-base-content/8 hover:text-base-content hover:bg-base-content/10 px-4 py-1.5 text-xs font-medium transition-colors">
           <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
             <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"></path>
@@ -95,7 +97,7 @@
           </svg>
         </a>
         <div class="hidden sm:block w-px h-4 bg-zen-border" aria-hidden="true"></div>
-        <span class="whitespace-nowrap text-xs font-medium text-zen-fg-muted">{network}</span>
+        <span class="inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium text-zen-fg-muted"><Mark svg={MARKS.near} class="w-3.5 h-3.5" />{network}</span>
         <div class="w-px h-4 bg-zen-border" aria-hidden="true"></div>
         <ThemeToggle />
       </div>

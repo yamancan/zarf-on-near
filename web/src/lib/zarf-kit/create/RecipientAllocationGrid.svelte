@@ -171,7 +171,7 @@
                         aria-invalid={badIdentifier}
                         aria-describedby={describedBy(i, 'identifier')}
                         placeholder={identifierPlaceholder}
-                        class="-mx-1.5 min-w-0 flex-1 rounded bg-transparent px-1.5 py-1 font-mono text-base text-zen-fg focus:outline-none focus:ring-1 focus:ring-zen-fg/30 sm:text-xs {badIdentifier
+                        class="min-w-0 flex-1 rounded bg-transparent px-1.5 py-1 font-mono text-base text-zen-fg focus:outline-none focus:ring-1 focus:ring-zen-fg/30 sm:text-xs {badIdentifier
                             ? 'text-zen-error'
                             : ''}"
                     />

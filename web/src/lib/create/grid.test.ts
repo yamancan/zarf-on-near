@@ -126,8 +126,10 @@ describe('Gmail or Google Workspace only (red team #2)', () => {
   it('warns on every other non-Gmail row, by line; silent when all are Gmail', () => {
     expect(googleWarning([{ email: 'a@gmail.com', line: 1 }, { email: 'b@googlemail.com', line: 2 }])).toBeNull();
     expect(googleWarning([{ email: 'a@gmail.com', line: 1 }, { email: 'b@acme.com', line: 2 }])).toBe(
-      'Recipients must use Gmail or Google Workspace. Row 2 is not Gmail: it can claim only if acme.com uses Google Workspace.');
+      'b@acme.com is not Gmail. It can claim only if acme.com uses Google Workspace.');
     expect(googleWarning([{ email: 'b@acme.com', line: 2 }, { email: 'c@acme.org', line: 4 }])).toBe(
-      'Recipients must use Gmail or Google Workspace. Rows 2, 4 are not Gmail: each can claim only if its domain (acme.com, acme.org) uses Google Workspace.');
+      'b@acme.com and c@acme.org are not Gmail. Each can claim only if its domain uses Google Workspace.');
+    const many = ['a@x.com', 'b@y.com', 'c@z.com', 'd@w.com'].map((email, line) => ({ email, line }));
+    expect(googleWarning(many)).toBe('a@x.com, b@y.com and 2 more are not Gmail. Each can claim only if its domain uses Google Workspace.');
   });
 });
