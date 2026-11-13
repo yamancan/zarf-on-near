@@ -18,7 +18,17 @@ ROLLBACK=${ROLLBACK:-${XDG_STATE_HOME:-$HOME/.local/state}/zarf-near/release-tes
 DRY=${DRY:-}
 
 step=''
-trap '[[ -n $step ]] && { echo; echo "STOPPED at step: $step. Nothing after it ran."; echo "To run again: git reset --hard origin/main (drops the local watcher-refresh commit; step 3 makes it again)."; [[ -s $ROLLBACK ]] && { echo "Rollback for what already went out:"; cat "$ROLLBACK"; }; }' ERR
+rerun_hint='' # set once step 3 begins: only from then on can the checkout hold the watcher-refresh commit
+stopped() {
+  [[ -n $step ]] || return 0
+  echo; echo "STOPPED at step: $step. Nothing after it ran."
+  [[ -z $rerun_hint ]] || echo "To run again: git reset --hard origin/main (drops the local watcher-refresh commit; step 3 makes it again)."
+  if [[ -s $ROLLBACK ]]; then
+    echo "Rollback for what already went out (newest last; run them newest first):"; cat "$ROLLBACK"
+    echo "Keep $ROLLBACK: it holds the pre-release version ids. A rerun writes a new file whose ids are this run's deploys."
+  fi
+}
+trap stopped ERR
 begin() { step=$1; echo; echo "=== $1 ==="; }
 # Prints the command; runs it unless DRY. Takes a single string so DRY shows it exactly as run.
 run() { echo "+ $1"; [[ -n $DRY ]] || bash -c "set -euo pipefail; cd '$root'; $1"; }
@@ -28,16 +38,29 @@ wr() { echo "CLOUDFLARE_API_TOKEN=\$(cat $TOKEN_FILE) npx wrangler"; }
 remember() { # <dir> <worker name> [--env testnet]
   local dir=$1 name=$2; shift 2
   if [[ -n $DRY ]]; then echo "+ (cd $dir && $(wr) deployments status $* --json)  # → rollback line for $name"; return; fi
-  local id
-  id=$(cd "$dir" && CLOUDFLARE_API_TOKEN=$(cat "$TOKEN_FILE") npx wrangler deployments status "$@" --json \
-    | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const v=JSON.parse(s).versions||[];if(v.length!==1)process.exit(1);console.log(v[0].version_id)})')
-  if [[ $dir == /* ]]; then # a temporary checkout (the faucet): roll back by Worker name from web/, which stays
-    echo "(cd $root/web && CLOUDFLARE_ACCOUNT_ID=$ACCOUNT CLOUDFLARE_API_TOKEN=\$(cat $TOKEN_FILE) npx wrangler rollback $id --name $name -m 'release-testnet rollback' -y)  # $name" >> "$ROLLBACK"
-  else
-    echo "(cd $root/$dir && CLOUDFLARE_API_TOKEN=\$(cat $TOKEN_FILE) npx wrangler rollback $id $* -m 'release-testnet rollback' -y)  # $name" >> "$ROLLBACK"
+  # A temporary checkout (the faucet) is addressed by Worker name from web/, which stays; the rest from their own dir.
+  local at="cd $root/$dir && CLOUDFLARE_API_TOKEN=\$(cat $TOKEN_FILE) npx wrangler" by="$*"
+  [[ $dir != /* ]] || { at="cd $root/web && CLOUDFLARE_ACCOUNT_ID=$ACCOUNT CLOUDFLARE_API_TOKEN=\$(cat $TOKEN_FILE) npx wrangler"; by="--name $name"; }
+  local out err id
+  err=$(mktemp)
+  if ! out=$(cd "$dir" && CLOUDFLARE_API_TOKEN=$(cat "$TOKEN_FILE") npx wrangler deployments status "$@" --json 2>"$err"); then
+    # 10007: the Worker does not exist yet, so this release creates it. Removing it is the owner's call: a comment.
+    if grep -q 'code: 10007' "$err" - <<<"$out"; then
+      rm -f "$err"
+      echo "# $name was new before this release; to remove it: ($at delete $by --force)" >> "$ROLLBACK"
+      echo "  $name does not exist yet: this release creates it"
+      return 0
+    fi
+    cat "$err" >&2; rm -f "$err"; return 1
   fi
+  rm -f "$err"
+  id=$(node -e 'const v=JSON.parse(process.argv[1]).versions||[];if(v.length!==1)process.exit(1);console.log(v[0].version_id)' "$out")
+  echo "($at rollback $id $by -m 'release-testnet rollback' -y)  # $name" >> "$ROLLBACK"
   echo "  live $name version before this release: $id"
 }
+
+# Sourced (scripts/release-testnet.test.mjs): the functions above only, nothing runs.
+[[ ${BASH_SOURCE[0]} == "$0" ]] || return 0
 
 begin "0 preflight: clean checkout of origin/main, Cloudflare account $ACCOUNT"
 run "git fetch -q origin"
@@ -64,6 +87,7 @@ run "cd relayer && node -e 'process.stdout.write(JSON.parse(require(\"fs\").read
 run "cd relayer && $(wr) deploy --env testnet"
 
 begin "3 web + watcher refresh (scripts/deploy-web.sh)"
+rerun_hint=1
 run "cd web && pnpm install --frozen-lockfile >/dev/null"
 run "cd watcher && pnpm install --frozen-lockfile >/dev/null"
 remember web zarf-near-claim --env testnet
