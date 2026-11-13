@@ -14,7 +14,7 @@
   Your email never goes on chain.
 </p>
 <p>
-  The <a href="https://zarf-near-faucet-testnet.sparkling-queen-5e77.workers.dev/try" class="underline underline-offset-2 hover:text-zen-fg">test page</a>
+  The <a href="https://near.zarf.to/try" class="underline underline-offset-2 hover:text-zen-fg">test page</a>
   uses the email you type only to create your test claim link. For its daily limits it keeps counters keyed by a
   keyed hash of the email and of your IP address, never either one in the clear.
 </p>

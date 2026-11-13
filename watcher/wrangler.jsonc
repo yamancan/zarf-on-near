@@ -17,7 +17,7 @@
         "NETWORK": "testnet", "CONTRACT_ID": "zarf-near-1112.testnet", "NEAR_RPC_URL": "https://test.rpc.fastnear.com",
         "EXPECTED_OWNER": "zarf-near-owner-1111.testnet",
         "EXPECTED_SIGNERS": "2d10ebec1ec795cef82b8d357cc60d39d9119b99908741660b632fc5cf0d4e32",
-        "CLAIM_PAGE_URL": "https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev/claim/1/0",
+        "CLAIM_PAGE_URL": "https://near.zarf.to/claim/1/0", // what visitors load, through proxy/ (T-029)
         "MAX_SCRIPTS": "44"
       }
     },

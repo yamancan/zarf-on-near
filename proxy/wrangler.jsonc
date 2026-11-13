@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "zarf-near-proxy",
+  // The zarf.to zone lives in this account (operator; a zone-scoped CLOUDFLARE_API_TOKEN);
+  // the app workers live in f0b938…. `wrangler whoami` must show 97f6be… before a deploy.
+  "account_id": "97f6beae024e619ebd9faedf1c00b9e8",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-01",
+  "workers_dev": false,
+  "routes": [{ "pattern": "near.zarf.to", "custom_domain": true }],
+  "vars": {
+    // Testnet now (owner decision 14 Nov): the claim app and the faucet on workers.dev, which keep working directly.
+    "CLAIM_ORIGIN": "https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev",
+    "FAUCET_ORIGIN": "https://zarf-near-faucet-testnet.sparkling-queen-5e77.workers.dev"
+  }
+  // Secret PROXY_KEY (same value as the faucet's): lets the faucet trust the visitor IP this proxy forwards.
+}

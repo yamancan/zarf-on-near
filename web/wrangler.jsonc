@@ -46,7 +46,8 @@
         "PUBLIC_CONTRACT_ID": "zarf-near-1112.testnet",
         "PUBLIC_EXPLORER_TX_URL": "https://testnet.nearblocks.io/txns/",
         "PUBLIC_TOKEN_ID": "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af",
-        "PUBLIC_CLAIM_ORIGIN": ""
+        // Claim links name near.zarf.to (proxy/, T-029); the page itself also answers on workers.dev.
+        "PUBLIC_CLAIM_ORIGIN": "https://near.zarf.to"
       }
     },
     // Mainnet, prepared, not deployed (docs/deploy/mainnet-hosting.md). Empty PUBLIC_CONTRACT_ID makes
