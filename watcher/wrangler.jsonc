@@ -18,7 +18,8 @@
         "EXPECTED_OWNER": "zarf-near-owner-1111.testnet",
         "EXPECTED_SIGNERS": "2d10ebec1ec795cef82b8d357cc60d39d9119b99908741660b632fc5cf0d4e32",
         "EXPECTED_CODE_HASH": "5GdxDSB4sGW9Ewod4Q4Na613C2sLQjVfFjLbbZbKt6N8",
-        "CLAIM_PAGE_URL": "https://near.zarf.to/claim/1/0", // what visitors load, through proxy/ (T-029)
+        // CLAIM_PAGE_URL: what visitors load, through proxy/ (T-029)
+        "CLAIM_PAGE_URL": "https://near.zarf.to/claim/1/0",
         "SCRIPTS_PER_RUN": "40"
       }
     },

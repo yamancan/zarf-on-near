@@ -71,3 +71,20 @@ test('the rerun hint (git reset --hard) is printed only once step 3 has begun; t
   assert.match(late, /git reset --hard origin\/main/);
   assert.match(late, /Keep \S+: it holds the pre-release version ids/);
 });
+
+test('RESUME=1 needs the first run\'s rollback file, deploys no verifier, relayer or web, and never truncates it', () => {
+  const run = (env) => spawnSync('bash', [SCRIPT], { encoding: 'utf8', env: { ...process.env, DRY: '1', ...env } });
+  const refused = run({ RESUME: '1', ROLLBACK: '' });
+  assert.equal(refused.status, 64);
+  assert.match(refused.stderr, /RESUME=1 needs ROLLBACK=<the first run's rollback file>/);
+  const dir = mkdtempSync(join(tmpdir(), 'zarf-resume-'));
+  const first = join(dir, 'first.txt');
+  const lines = '(cd x/watcher && … rollback 06fc8957 --env testnet …)  # zarf-near-watcher-testnet\n';
+  writeFileSync(first, lines);
+  const r = run({ RESUME: '1', ROLLBACK: first });
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stdout, /=== 1 verifier|=== 2 relayer|deploy-web\.sh|: > /);
+  assert.match(r.stdout, /=== 3 \(resume\)[\s\S]*\+ scripts\/watcher-refresh\.sh testnet[\s\S]*=== 4 faucet[\s\S]*=== 5 smoke[\s\S]*=== 6 push/);
+  assert.doesNotMatch(r.stdout, /rollback line for zarf-near-watcher-testnet/); // already in the first file
+  assert.equal(readFileSync(first, 'utf8'), lines);
+});

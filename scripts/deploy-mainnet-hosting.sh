@@ -23,10 +23,10 @@ wr watcher secret list --env mainnet --format json 2>/dev/null |
   node -e 'process.exit(JSON.parse(require("fs").readFileSync(0, "utf8")).some((s) => s.name === "ALERT_WEBHOOK_URL") ? 0 : 1)' 2>/dev/null ||
   die "the mainnet watcher has no ALERT_WEBHOOK_URL secret, so its alerts would reach nobody. Set it first: (cd watcher && npx wrangler secret put ALERT_WEBHOOK_URL --env mainnet)"
 
-# env.mainnet must be filled in and agree across the three workers (jsonc: strip // comments first).
+# env.mainnet must be filled in and agree across the three workers (jsonc read by scripts/jsonc.cjs).
 vals=$(node -e '
   const fs = require("fs");
-  const env = (p) => JSON.parse(fs.readFileSync(p, "utf8").replace(/^\s*\/\/.*$/gm, "")).env.mainnet.vars;
+  const env = (p) => require("./scripts/jsonc.cjs").readJsonc(p).env.mainnet.vars;
   const v = env("verifier/wrangler.jsonc"), r = env("relayer/wrangler.jsonc"), w = env("web/wrangler.jsonc");
   if (!(v.CONTRACT_ID && v.CONTRACT_ID === r.CONTRACT_ID && r.CONTRACT_ID === w.PUBLIC_CONTRACT_ID)) throw new Error("CONTRACT_ID empty or different across the three env.mainnet blocks");
   console.log(v.CONTRACT_ID, r.RELAYER_ACCOUNT_ID || "-", r.VERIFIER_SIGNERS || "-", v.GOOGLE_CLIENT_ID || "-", w.PUBLIC_GOOGLE_CLIENT_ID || "-");') ||
@@ -36,7 +36,7 @@ read -r contract relayer_account signers vclient wclient <<<"$vals"
 [[ $vclient != - && $vclient == "$wclient" ]] || die "GOOGLE_CLIENT_ID (verifier) and PUBLIC_GOOGLE_CLIENT_ID (web) must be set and equal"
 # The upgrade watcher (watcher/README.md) must watch this escrow and these signers before anything goes live.
 CONTRACT=$contract SIGNERS=$signers node -e '
-  const v = JSON.parse(require("fs").readFileSync("watcher/wrangler.jsonc", "utf8").replace(/^\s*\/\/.*$/gm, "")).env.mainnet.vars;
+  const v = require("./scripts/jsonc.cjs").readJsonc("watcher/wrangler.jsonc").env.mainnet.vars;
   const want = (s) => s.split(",").map((x) => x.trim()).filter(Boolean).sort().join(",");
   if (v.CONTRACT_ID !== process.env.CONTRACT || !v.EXPECTED_OWNER || !v.CLAIM_PAGE_URL || !v.EXPECTED_CODE_HASH || want(v.EXPECTED_SIGNERS) !== want(process.env.SIGNERS))
     throw new Error("watcher env.mainnet: CONTRACT_ID, EXPECTED_SIGNERS must match, EXPECTED_OWNER, EXPECTED_CODE_HASH and CLAIM_PAGE_URL must be set");' ||

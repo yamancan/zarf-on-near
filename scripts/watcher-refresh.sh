@@ -12,9 +12,8 @@ ACCOUNT=f0b938c1641f5223c48199ec45751913 # Cloudflare account id
 token_file=${CLOUDFLARE_TOKEN_FILE:-$HOME/.config/cloudflare/api-token}
 die() { echo "watcher-refresh: $*" >&2; exit 1; }
 
-url=$(NET=$net node -e '
-  const v = JSON.parse(require("fs").readFileSync("watcher/wrangler.jsonc", "utf8").replace(/^\s*\/\/.*$/gm, "")).env[process.env.NET]?.vars;
-  console.log(v?.CLAIM_PAGE_URL || "")')
+# scripts/jsonc.cjs strips comments only outside strings (a trailing comment once broke a line-only strip, T-031).
+url=$(node scripts/jsonc.cjs watcher/wrangler.jsonc "env.$net.vars.CLAIM_PAGE_URL") || die "cannot read watcher/wrangler.jsonc (see the error above)"
 [[ -n $url ]] || die "CLAIM_PAGE_URL is empty in watcher/wrangler.jsonc env.$net"
 [[ -d web/.svelte-kit/output/client ]] || die "no web build: run this right after the web deploy, from the same tree"
 

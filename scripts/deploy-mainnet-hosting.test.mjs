@@ -14,6 +14,7 @@ function sandbox(secretList) {
   const dir = mkdtempSync(join(tmpdir(), 'zarf-hosting-'));
   for (const d of ['scripts', 'watcher', 'verifier', 'bin', 'secrets']) mkdirSync(join(dir, d));
   copyFileSync(new URL('./deploy-mainnet-hosting.sh', import.meta.url), join(dir, 'scripts/deploy-mainnet-hosting.sh'));
+  copyFileSync(new URL('./jsonc.cjs', import.meta.url), join(dir, 'scripts/jsonc.cjs'));
   writeFileSync(join(dir, 'token'), 'not-a-token');
   writeFileSync(join(dir, 'secrets/mainnet-verifier.seed'), 'dummy'); // presence only: the gate runs before they are read
   writeFileSync(join(dir, 'secrets/mainnet-relayer.key'), 'dummy');

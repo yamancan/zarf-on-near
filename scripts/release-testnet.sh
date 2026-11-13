@@ -3,6 +3,10 @@
 # refresh), faucet, a smoke curl of near.zarf.to, then main fast-forwarded to this commit. The owner runs it; agents never do.
 #   bash scripts/release-testnet.sh           # from a clean checkout of origin/main
 #   DRY=1 bash scripts/release-testnet.sh     # print every command, run none (no token read, no network)
+#   RESUME=1 ROLLBACK=<first run's file> bash scripts/release-testnet.sh
+#       finish a run that stopped after its web deploy: no verifier, relayer or web deploy; refresh the watcher from
+#       the web build already in this tree (it must be the deployed one), then faucet, smoke and push. Appends to
+#       that rollback file, never truncates it.
 # Stops at the first failure and names the step. Before each Worker deploy it records the live version id, and
 # writes the rollback lines to $ROLLBACK (printed at the end and on failure). Step 3's watcher refresh commits
 # watcher/expected/testnet.json locally: it reaches main (step 6). Never prints a secret; never
@@ -14,6 +18,8 @@ ACCOUNT=f0b938c1641f5223c48199ec45751913 # Cloudflare account id (operator@examp
 TOKEN_FILE=${CLOUDFLARE_TOKEN_FILE:-$HOME/.config/cloudflare/api-token}
 GAS_CREDS=${GAS_CREDS:-$HOME/.near-credentials/testnet/zarf-near-gas-1112.testnet.json} # the starter-NEAR gas account
 FAUCET_REF=${FAUCET_REF:-origin/main}
+RESUME=${RESUME:-}
+rollback_given=${ROLLBACK:-}
 ROLLBACK=${ROLLBACK:-${XDG_STATE_HOME:-$HOME/.local/state}/zarf-near/release-testnet-$(date -u +%Y%m%dT%H%M%SZ).txt} # outside the checkout
 DRY=${DRY:-}
 
@@ -62,6 +68,11 @@ remember() { # <dir> <worker name> [--env testnet]
 # Sourced (scripts/release-testnet.test.mjs): the functions above only, nothing runs.
 [[ ${BASH_SOURCE[0]} == "$0" ]] || return 0
 
+# A resume keeps the first run's file: it holds the pre-release ids, and the faucet's line is added to it.
+if [[ -n $RESUME ]] && ! [[ -n $rollback_given && -s $rollback_given ]]; then
+  echo "RESUME=1 needs ROLLBACK=<the first run's rollback file>, which must exist and not be empty" >&2; exit 64
+fi
+
 begin "0 preflight: clean checkout of origin/main, Cloudflare account $ACCOUNT"
 run "git fetch -q origin"
 run "test -z \"\$(git status --porcelain)\" || { echo 'the checkout has local changes' >&2; exit 1; }"
@@ -72,9 +83,15 @@ run "test -r $GAS_CREDS"
 # The watcher refresh (step 3) fingerprints https://near.zarf.to: its proxy comes from T-029's deploy-near-zarf-to.sh.
 run "curl -sf -o /dev/null --max-time 20 https://near.zarf.to/ || { echo 'near.zarf.to does not answer: run T-029 deploy-near-zarf-to.sh first' >&2; exit 1; }"
 run "(cd verifier && pnpm install --frozen-lockfile >/dev/null && $(wr) whoami 2>/dev/null | grep -q $ACCOUNT) || { echo 'the token does not see account $ACCOUNT' >&2; exit 1; }"
-[[ -n $DRY ]] || { mkdir -p "$(dirname "$ROLLBACK")" && : > "$ROLLBACK"; }
-[[ -z $DRY ]] || echo "+ : > $ROLLBACK"
+if [[ -n $RESUME ]]; then
+  run "test -d web/.svelte-kit/output/client || { echo 'no web build in this tree: a resume needs the build that was deployed' >&2; exit 1; }"
+  echo "  resuming: rollback lines are appended to $ROLLBACK"
+else
+  [[ -n $DRY ]] || { mkdir -p "$(dirname "$ROLLBACK")" && : > "$ROLLBACK"; }
+  [[ -z $DRY ]] || echo "+ : > $ROLLBACK"
+fi
 
+if [[ -z $RESUME ]]; then
 begin "1 verifier (testnet)"
 remember verifier zarf-near-verifier --env testnet
 run "cd verifier && $(wr) deploy --env testnet"
@@ -93,6 +110,15 @@ run "cd watcher && pnpm install --frozen-lockfile >/dev/null"
 remember web zarf-near-claim --env testnet
 remember watcher zarf-near-watcher-testnet --env testnet # watcher-refresh.sh redeploys it with the new fingerprint
 run "scripts/deploy-web.sh testnet"
+else
+begin "3 (resume) watcher refresh from the deployed web build; verifier, relayer and web are not deployed again"
+rerun_hint=1
+run "cd watcher && pnpm install --frozen-lockfile >/dev/null"
+# The first run recorded the watcher before its deploy-web.sh; record it only if that line is missing.
+if ! grep -q '# zarf-near-watcher-testnet$' "$ROLLBACK" 2>/dev/null; then remember watcher zarf-near-watcher-testnet --env testnet; fi
+# watcher-refresh.sh fails unless every live script is byte-identical to this tree's build: a wrong tree stops here.
+run "scripts/watcher-refresh.sh testnet"
+fi
 
 begin "4 faucet ($FAUCET_REF)"
 faucet_dir=${TMPDIR:-/tmp}/zarf-near-faucet-release
