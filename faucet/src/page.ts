@@ -186,7 +186,7 @@ const html = (siteKey: string, claimHost: string, usdc: string | null) => `<!doc
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Try Zarf on NEAR</title>
-<meta name="description" content="Send tokens to an email. Get a claim link for ${usdc ? usdc + ' ' : ''}test USDC and claim it with Google into a NEAR testnet account.">
+<meta name="description" content="Get a claim link for ${usdc ? usdc + ' ' : ''}test USDC to your Google email and claim it with Google into a NEAR testnet account.">
 <meta name="color-scheme" content="dark light">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Zarf">
@@ -222,7 +222,7 @@ const html = (siteKey: string, claimHost: string, usdc: string | null) => `<!doc
   <div class="card">
     <div id="ask">
       <h1>Try Zarf</h1>
-      <p class="lede">A test claim link for your Google email. Claiming is free: Zarf pays the NEAR gas.</p>
+      <p class="lede">Receive a test payment with your Google email. Test USDC has no value, and Zarf pays the NEAR gas.</p>
       ${usdc ? `<div class="amount"><span class="label">Claim amount</span><span class="figure"><span class="value">${usdc}</span><span class="unit">test USDC</span></span></div>` : ''}
       <form id="f" novalidate>
         <label for="email">Your Google email</label>
@@ -232,7 +232,7 @@ const html = (siteKey: string, claimHost: string, usdc: string | null) => `<!doc
       </form>
     </div>
     <div id="out" role="status" aria-live="polite"></div>
-    <p class="hint">No NEAR account needed: create one with Face ID when you claim.</p>
+    <p class="hint">No NEAR account needed: you can create one when you claim.</p>
     <p class="hint">Want to look first? <a href="${GALLERY}" target="_blank" rel="noopener noreferrer">See every screen</a>.</p>
     <details>
       <summary>How this works ${ICON(CHEVRON)}</summary>

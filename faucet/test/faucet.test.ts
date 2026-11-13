@@ -597,7 +597,7 @@ describe('judges page presentation', () => {
     const { default: worker } = await import('../src/index');
     const html = await (await worker.fetch(new Request('https://f.example/try'), { AMOUNT: '500000' } as never)).text();
     expect(html).toContain('<h1>Try Zarf</h1>');
-    expect(html).toContain('Claiming is free: Zarf pays the NEAR gas.');
+    expect(html).toContain('Test USDC has no value, and Zarf pays the NEAR gas.');
     expect(html).toMatch(/<a href="https:\/\/zarf-near-claim-preview\.[^"]+\/gallery\/" target="_blank" rel="noopener noreferrer">See every screen<\/a>/);
     expect(html).toContain('<div class="ts"><div class="cf-turnstile" data-sitekey="" data-size="flexible"');
   });
@@ -633,7 +633,7 @@ describe('judges page presentation', () => {
   it('tells a judge without a NEAR account to use Face ID, not a wallet sign-up (T-024)', async () => {
     const { default: worker } = await import('../src/index');
     const html = await (await worker.fetch(new Request('https://f.example/try'), {} as never)).text();
-    expect(html).toContain('No NEAR account needed: create one with Face ID when you claim.');
+    expect(html).toContain('No NEAR account needed: you can create one when you claim.');
     expect(html).not.toMatch(/Meteor|mynearwallet|id="wallet"/i);
     expect(html.slice(html.indexOf('<body>'))).not.toContain('zarf.to'); // visible page: "Zarf" (the head's preview URLs name near.zarf.to)
     // Every new-tab link drops the opener.
