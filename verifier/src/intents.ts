@@ -15,15 +15,26 @@ export const NEAR_USDC_ASSET = 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac
 /** The only `appFees` entry allowed: the 1 bp fee 1Click adds to keyless quotes (seen on every keyless quote, S3). */
 export const ONECLICK_KEYLESS_FEE = { recipient: '5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd', maxBps: 25 };
 /**
- * The only payout assets, with their decimals: Circle's native USDC on Base, Arbitrum and Ethereum
- * (contract addresses 0x8335…2913, 0xaf88…5831, 0xa0b8…eb48). The claim page pins the same ids;
- * a lookalike "USDC" that 1Click lists is never accepted.
+ * The only payout assets: Circle's native USDC, each 1Click id checked on 14 Nov 2026 against Circle's contract list
+ * (developers.circle.com/stablecoins/usdc-contract-addresses). The claim page pins the same ids
+ * (web/src/lib/intents.ts PAYOUT_CHAINS); a lookalike "USDC" that 1Click lists is never accepted.
+ * Each entry: decimals, and the address format a recipient on that chain must have.
  */
-export const PAYOUT_ASSETS: ReadonlyMap<string, number> = new Map([
-  ['nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near', 6],
-  ['nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near', 6],
-  ['nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near', 6],
-]);
+type AddressKind = 'evm' | 'solana' | 'hex64';
+const PAYOUT: ReadonlyArray<[string, number, AddressKind]> = [
+  ['nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near', 6, 'evm'],
+  ['nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near', 6, 'evm'],
+  ['nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near', 6, 'evm'],
+  ['nep245:v2_1.omni.hot.tg:10_A2ewyUyDp6qsue1jqZsGypkCxRJ', 6, 'evm'], // Optimism 0x0b2c…ff85
+  ['nep141:pol-0x3c499c542cef5e3811e1192ce70d8cc03d5c3359.omdep.near', 6, 'evm'], // Polygon PoS
+  ['nep141:avax-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e.omdep.near', 6, 'evm'], // Avalanche C-Chain
+  ['nep245:v2_1.omni.hot.tg:143_2dmLwYWkCQKyTjeUPAsGJuiVLbFx', 6, 'evm'], // Monad 0x7547…b603
+  ['nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near', 6, 'solana'], // EPjF…Dt1v
+  ['nep141:sui-c1b81ecaf27933252d31a963bc5e9458f13c18ce.omft.near', 6, 'hex64'], // 0xdba3…::usdc::USDC
+  ['nep141:aptos-34ee497f210c5a511e8d5b53bc56d75b63612bb5.omft.near', 6, 'hex64'], // 0xbae2…6f3b
+];
+export const PAYOUT_ASSETS: ReadonlyMap<string, number> = new Map(PAYOUT.map(([id, d]) => [id, d]));
+const PAYOUT_ADDRESS: ReadonlyMap<string, AddressKind> = new Map(PAYOUT.map(([id, , k]) => [id, k]));
 const ORIGIN_DECIMALS = 6; // NEAR USDC
 /** Worst case a quote may lose, as `minAmountOut` against the amount: the claim page refuses more too. */
 export const MAX_LOSS_BPS = 200n; // 2% (owner, 12 Nov): the claim page refuses the same
@@ -82,9 +93,44 @@ const KNOWN_REQUEST_KEYS = new Set([
   'virtualChainRecipient', 'virtualChainRefundRecipient', 'referral', 'confidentiality', 'customRecipientMsg',
 ]);
 
-// EVM hex addresses are case-insensitive (checksum casing is cosmetic); every other format is compared exactly.
+const HEX64 = /^0x[0-9a-fA-F]{64}$/;
+const BASE58_32 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+// Hex addresses (EVM, Sui, Aptos) are case-insensitive; every other format (Solana base58) is compared exactly.
 const sameAddress = (a: unknown, b: string): boolean =>
-  typeof a === 'string' && (EVM.test(a) && EVM.test(b) ? a.toLowerCase() === b.toLowerCase() : a === b);
+  typeof a === 'string' && ((EVM.test(a) && EVM.test(b)) || (HEX64.test(a) && HEX64.test(b)) ? a.toLowerCase() === b.toLowerCase() : a === b);
+
+const P25519 = 2n ** 255n - 19n;
+const D25519 = 37095705934669439343138083508754565189542113879843219016388785533085940283555n;
+const powP = (b: bigint, e: bigint): bigint => {
+  let r = 1n;
+  for (b %= P25519; e > 0n; e >>= 1n, b = (b * b) % P25519) if (e & 1n) r = (r * b) % P25519;
+  return r;
+};
+/** Solana's on-curve test (curve25519-dalek decompression). Off-curve addresses (token accounts, PDAs) have no key. */
+function ed25519OnCurve(key: Uint8Array): boolean {
+  let y = 0n;
+  for (let i = 31; i >= 0; i--) y = (y << 8n) | BigInt(i === 31 ? key[i] & 0x7f : key[i]);
+  const y2 = (y * y) % P25519;
+  const x2 = (((y2 - 1n + P25519) % P25519) * powP((D25519 * y2 + 1n) % P25519, P25519 - 2n)) % P25519;
+  return x2 === 0n || powP(x2, (P25519 - 1n) / 2n) === 1n;
+}
+const SOLANA_USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+
+/** Whether `address` can be a wallet on the chain of payout asset `assetId` (never all zeros; web/src/lib/intents.ts agrees). */
+export function recipientFits(assetId: string, address: string): boolean {
+  switch (PAYOUT_ADDRESS.get(assetId)) {
+    case 'evm':
+      return EVM.test(address) && !/^0x0{40}$/i.test(address);
+    case 'hex64':
+      return HEX64.test(address) && !/^0x0{64}$/i.test(address);
+    case 'solana':
+      if (!BASE58_32.test(address) || /^1+$/.test(address) || address === SOLANA_USDC_MINT) return false;
+      const key = b58decode(address);
+      return key.length === 32 && ed25519OnCurve(key);
+    default:
+      return false;
+  }
+}
 
 const isoToNs = (s: unknown): bigint => {
   const ms = typeof s === 'string' ? Date.parse(s) : NaN;
@@ -157,7 +203,7 @@ export function checkIntentsStatus(status: unknown, claim: IntentsClaim): void {
   if (BigInt(minOut as string) * 10n ** BigInt(ORIGIN_DECIMALS) * 10_000n < BigInt(claim.amount) * 10n ** BigInt(decimals!) * (10_000n - MAX_LOSS_BPS)) {
     fail('INTENTS_LOSS_TOO_HIGH');
   }
-  if (qr.recipientType !== 'DESTINATION_CHAIN' || !sameAddress(qr.recipient, claim.recipient) || /^0x0{40}$/i.test(claim.recipient)) {
+  if (qr.recipientType !== 'DESTINATION_CHAIN' || !sameAddress(qr.recipient, claim.recipient) || !recipientFits(claim.destinationAsset, claim.recipient)) {
     fail('INTENTS_WRONG_RECIPIENT');
   }
   // These reroute the output (virtual chains, ft_transfer_call on NEAR); a plain payout never sets them.

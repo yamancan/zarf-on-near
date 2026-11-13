@@ -2,8 +2,8 @@
 // origin is mainnet NEAR USDC. The browser calls 1Click directly (CORS *, no key); the verifier
 // re-reads the quote before it signs (verifier/src/intents.ts).
 
-import { keccak_256 } from '@noble/hashes/sha3';
-import { hex, saveReceipt, type BridgeOutcome, type Receipt } from './claim';
+import { saveReceipt, type BridgeOutcome, type Receipt } from './claim';
+import { PAYOUT_CHAINS, type Fetch, type PayoutChain } from './chains';
 
 export const ONECLICK_API = 'https://1click.chaindefuser.com';
 export const NEAR_USDC_ASSET = 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1';
@@ -17,58 +17,11 @@ export const MAX_CROSS_CHAIN_PAYOUT = 1_000_000_000n;
 export const payoutCapError = (amount: string): string | null =>
   BigInt(amount) > MAX_CROSS_CHAIN_PAYOUT ? 'Payouts to another chain are up to 1,000 USDC each. Claim this one to a NEAR account.' : null;
 
-type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
+// The chain list and its address checks live in ./chains (T-025); re-exported for existing importers.
+export { PAYOUT_CHAINS, evmAddressError, ed25519OnCurve, hex64AddressError, solanaAddressError, solanaFormatError, type PayoutChain } from './chains';
+
 const defaultFetch: Fetch = (u, i) => fetch(u, i);
 
-/** EIP-55: all-lower or all-upper is accepted as is; mixed case must match the checksum (a typo guard). */
-export function evmAddressError(address: string): string | null {
-  if (!/^0x[0-9a-fA-F]{40}$/.test(address)) return 'Enter the full address: 0x followed by 40 letters and digits.';
-  if (/^0x0{40}$/i.test(address)) return 'That is the zero address; nobody can use funds sent there.';
-  const body = address.slice(2);
-  if (body === body.toLowerCase() || body === body.toUpperCase()) return null;
-  const h = hex(keccak_256(body.toLowerCase()));
-  for (let i = 0; i < 40; i++) {
-    const c = body[i];
-    if (/[a-f]/i.test(c) && (c === c.toUpperCase()) !== parseInt(h[i], 16) >= 8) {
-      return 'This address has a typo: its capital letters do not match its checksum.';
-    }
-  }
-  return null;
-}
-
-/**
- * A chain the recipient can be paid on. Every listed chain must be memo-free: we never send a
- * memo or tag. A chain that needs more checks before a quote (Stellar: account, trustline,
- * memo_required) adds them through `preflight` and its own `note`; the page stays the same.
- */
-export interface PayoutChain {
-  key: string;
-  name: string;
-  assetId: string; // pinned: never looked up by symbol (a lookalike 'USDC' could be listed first)
-  decimals: number; // pinned, not taken from /v0/tokens
-  placeholder: string;
-  addressError(address: string): string | null;
-  preflight?(address: string, fetchFn?: Fetch): Promise<string | null>;
-  note: string;
-}
-
-const evmChain = (key: string, name: string, usdc: string): PayoutChain => ({
-  key,
-  name,
-  assetId: `nep141:${key}-${usdc}.omft.near`,
-  decimals: 6,
-  placeholder: '0x…',
-  addressError: evmAddressError,
-  note: `Paste your own ${name} wallet address. If it is an exchange address, make sure the exchange credits USDC on ${name} to it without a memo or tag.`,
-});
-
-/** Base first (the owner's pick); each is hidden at runtime if 1Click stops listing it. */
-// Circle's native USDC contracts; the verifier pins the same three asset ids (verifier/src/intents.ts).
-export const PAYOUT_CHAINS: PayoutChain[] = [
-  evmChain('base', 'Base', '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'),
-  evmChain('arb', 'Arbitrum', '0xaf88d065e77c8cc2239327c5edb3a432268e5831'),
-  evmChain('eth', 'Ethereum', '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'),
-];
 
 export interface PayoutAsset {
   chain: PayoutChain;

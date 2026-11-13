@@ -6,7 +6,7 @@ settings:
 
 patchedDependencies:
   '@hot-labs/near-connect@0.12.0':
-    hash: 008035cf1688a640e744277ff9b0d9047e95c5acad99f70e115fffd006b7d1f3
+    hash: e6a84f85a4bf7c755ecc321648835713168c0b48b9ae0aba3fa573771a9e8693
     path: patches/@hot-labs__near-connect@0.12.0.patch
 
 importers:
@@ -15,7 +15,7 @@ importers:
     dependencies:
       '@hot-labs/near-connect':
         specifier: 0.12.0
-        version: 0.12.0(patch_hash=008035cf1688a640e744277ff9b0d9047e95c5acad99f70e115fffd006b7d1f3)
+        version: 0.12.0(patch_hash=e6a84f85a4bf7c755ecc321648835713168c0b48b9ae0aba3fa573771a9e8693)
       '@noble/hashes':
         specifier: 1.8.0
         version: 1.8.0
@@ -1490,7 +1490,7 @@ snapshots:
   '@esbuild/win32-x64@0.28.2':
     optional: true
 
-  '@hot-labs/near-connect@0.12.0(patch_hash=008035cf1688a640e744277ff9b0d9047e95c5acad99f70e115fffd006b7d1f3)': {}
+  '@hot-labs/near-connect@0.12.0(patch_hash=e6a84f85a4bf7c755ecc321648835713168c0b48b9ae0aba3fa573771a9e8693)': {}
 
   '@img/colour@1.1.0': {}
 

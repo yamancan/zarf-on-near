@@ -6,6 +6,7 @@
  "website": "https://evm-on-near.dev/",
  "version": "0.1.4",
  "executor": "https://evm-on-near.dev/executor.js",
+ "integrity": "0480ca7b4d2204b1702a554e92f6d00d69a780ff1dee9dcf67feb6ae7991556b",
  "type": "sandbox",
  "platform": {
   "web": "https://evm-on-near.dev/"

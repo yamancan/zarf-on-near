@@ -36,8 +36,8 @@ describe('funding quote request (T-019)', () => {
       refundTo: REFUND, refundType: 'ORIGIN_CHAIN', deadline: liveArgs.deadline,
     });
   });
-  it('offers the payout leg\'s three pinned chains', () => {
-    expect(FUNDING_CHAINS.map((c) => c.name)).toEqual(['Base', 'Arbitrum', 'Ethereum']);
+  it('offers every pinned payout chain (T-025)', () => {
+    expect(FUNDING_CHAINS.map((c) => c.name)).toEqual(['Base', 'Arbitrum', 'Ethereum', 'Optimism', 'Polygon', 'Avalanche', 'Monad', 'Solana', 'Sui', 'Aptos']);
   });
 });
 
@@ -113,6 +113,17 @@ describe('quote signature, checked in the browser with the pinned key', () => {
     const ok = await fq(false, liveArgs, answer(await real('0x76b4c56085ED136a8744D52bE956396624a730E8')), testSigner);
     expect(ok).toMatchObject({ depositAddress: '0x76b4c56085ED136a8744D52bE956396624a730E8', deadline: '2026-11-14T16:18:02.000Z' });
     await expect(fq(false, liveArgs, answer(await real('a'.repeat(64))), testSigner)).rejects.toThrow(CANNOT_CHECK);
+  });
+  it('a real quote\'s deposit address must fit the origin chain (T-025)', async () => {
+    const sol = FUNDING_CHAINS.find((c) => c.key === 'sol')!;
+    const solArgs = { ...liveArgs, chain: sol, refundTo: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM' };
+    const real = (addr: string) => signed((x) => {
+      Object.assign(x.quoteRequest, { dry: false, originAsset: sol.assetId, refundTo: solArgs.refundTo });
+      Object.assign(x.quote, { depositAddress: addr, deadline: '2026-11-14T16:18:02.000Z', timeEstimate: 35 });
+    });
+    const ok = await fq(false, solArgs, answer(await real('13QkxhNMrTPxoCkRdYdJ65tFuwXPhL5gLS2Z5Nr6gjRK')), testSigner);
+    expect(ok.depositAddress).toBe('13QkxhNMrTPxoCkRdYdJ65tFuwXPhL5gLS2Z5Nr6gjRK');
+    await expect(fq(false, solArgs, answer(await real('0x76b4c56085ED136a8744D52bE956396624a730E8')), testSigner)).rejects.toThrow(CANNOT_CHECK);
   });
   it('a real quote with too little time left to pay, or with a memo, is refused', async () => {
     const real = (deadline: string, memo?: string) => signed((x) => {
@@ -190,6 +201,19 @@ describe('each status on the funding screen', () => {
     expect(earlierFundings('c', 'b.near', store)).toEqual([]);
     m.set('zarf-near:funding-earlier:c/a.near', JSON.stringify([f, f])); // two tabs wrote it twice
     expect(earlierFundings('c', 'a.near', store)).toEqual([f]);
+    // T-025: addresses are checked for their own chain; a Solana record with EVM addresses is dropped
+    const sol = { ...f, chainKey: 'sol', depositAddress: '13QkxhNMrTPxoCkRdYdJ65tFuwXPhL5gLS2Z5Nr6gjRK', refundTo: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM' };
+    m.set('zarf-near:funding-earlier:c/a.near', JSON.stringify([sol, { ...sol, depositAddress: dep }, { ...f, chainKey: 'gone' }]));
+    expect(earlierFundings('c', 'a.near', store)).toEqual([sol]);
+    // an off-curve deposit address is still a deposit address; an off-curve refund address is nobody's wallet
+    const offCurve = '8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR';
+    m.set('zarf-near:funding-earlier:c/a.near', JSON.stringify([{ ...sol, depositAddress: offCurve }, { ...sol, refundTo: offCurve }]));
+    expect(earlierFundings('c', 'a.near', store)).toEqual([{ ...sol, depositAddress: offCurve }]);
+    // base58 is case-sensitive: two Solana deposit addresses that differ only in case are two records
+    m.delete('zarf-near:funding-earlier:c/a.near');
+    const other = { ...sol, depositAddress: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAwWM' };
+    expect(archiveFunding('c', 'a.near', sol, store) && archiveFunding('c', 'a.near', other, store)).toBe(true);
+    expect(earlierFundings('c', 'a.near', store)).toHaveLength(2);
   });
   it('a failed archive write says so: the active record is never dropped without it', () => {
     const full = { getItem: () => null, setItem: () => { throw new Error('QuotaExceededError'); }, removeItem: () => {} } as unknown as Storage;
@@ -206,11 +230,14 @@ describe('each status on the funding screen', () => {
 });
 
 describe('refund address confirmation and the saved funding', () => {
-  it('needs the last 6 characters, any case', () => {
+  it('needs the last 6 characters: any case for 0x addresses, exact for Solana', () => {
     expect(refundConfirmed(REFUND, '1beaed')).toBe(true);
     expect(refundConfirmed(REFUND, ' 1BeAed ')).toBe(true);
     expect(refundConfirmed(REFUND, '1beae')).toBe(false);
     expect(refundConfirmed('', '')).toBe(false);
+    // Solana (base58): case is part of the address, so it must match exactly
+    const solRefund = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
+    expect([refundConfirmed(solRefund, 'YtAWWM'), refundConfirmed(solRefund, ' YtAWWM '), refundConfirmed(solRefund, 'YtAWwM'), refundConfirmed(solRefund, 'ytawwm')]).toEqual([true, true, false, false]);
   });
   it('survives a reload and is cleared on request', () => {
     const m = new Map<string, string>();

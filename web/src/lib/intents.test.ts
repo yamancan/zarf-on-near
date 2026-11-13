@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 // Subset of GET /v0/tokens recorded 2026-11-11; the status body is the verifier's recorded fixture.
 import tokens from './fixtures/1click-tokens.json';
+// Every USDC-named entry of GET /v0/tokens, recorded 2026-11-14 (T-025): the pinned set is checked against it.
+import usdcTokens from './fixtures/1click-tokens-usdc.json';
 import pending from './fixtures/1click-status-pending.json';
-import { MAX_CROSS_CHAIN_PAYOUT, MAX_LOSS_BPS, payoutCapError, withinLossBound, crossChainOffered, submitDeposit, describeStatus, refusal, evmAddressError, getQuote, getStatus, loadPayout, lossBps, needsRecheck, nextStep, notReturnedYet, recheckReceipt, savePayout, NEAR_USDC_ASSET, PAYOUT_CHAINS, QuoteError, resolveAssets } from './intents';
+import { MAX_CROSS_CHAIN_PAYOUT, MAX_LOSS_BPS, payoutCapError, withinLossBound, crossChainOffered, submitDeposit, describeStatus, refusal, evmAddressError, hex64AddressError, solanaAddressError, solanaFormatError, ed25519OnCurve, getQuote, getStatus, loadPayout, lossBps, needsRecheck, nextStep, notReturnedYet, recheckReceipt, savePayout, NEAR_USDC_ASSET, PAYOUT_CHAINS, QuoteError, resolveAssets } from './intents';
+import { b58decode } from './oneclickSig';
 import { loadReceipt, saveReceipt, shownAmount, type Receipt } from './claim';
 
 const json = (body: unknown, status = 200) => vi.fn(async (_u: string, _i?: RequestInit) => new Response(JSON.stringify(body), { status }));
@@ -40,8 +43,71 @@ describe('resolveAssets', () => {
   it('hides a chain 1Click stops listing', async () => {
     expect((await resolveAssets(json(tokens.filter((t) => t.blockchain !== 'arb')))).map((a) => a.chain.key)).toEqual(['base', 'eth']);
   });
-  it('every listed chain is memo-free EVM (a memo chain needs its own review)', () => {
-    for (const c of PAYOUT_CHAINS) expect(c.addressError('0x' + 'ab'.repeat(20))).toBeNull();
+  it('every listed chain accepts an address in its own format (and none needs a memo: a memo chain is not listed)', () => {
+    const sample: Record<string, string> = {
+      base: EVM, arb: EVM, eth: EVM, op: EVM, pol: EVM, avax: EVM, monad: EVM, sol: SOL, sui: HEX64, aptos: HEX64,
+    };
+    expect(PAYOUT_CHAINS.map((c) => c.key)).toEqual(Object.keys(sample));
+    for (const c of PAYOUT_CHAINS) expect(c.addressError(sample[c.key])).toBeNull();
+  });
+});
+
+const EVM = '0x' + 'ab'.repeat(20);
+const SOL = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
+const HEX64 = '0x1d8727df513fa2a8785d0834e40b34223daff1affc079574082baadb74b66ee4';
+
+describe('pinned chains (T-025): Circle native USDC only, checked against the recorded /v0/tokens', () => {
+  // Circle's contract per chain, developers.circle.com/stablecoins/usdc-contract-addresses, read 2026-11-14.
+  const circle: Record<string, string> = {
+    base: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', arb: '0xaf88d065e77c8cc2239327c5edb3a432268e5831',
+    eth: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', op: '0x0b2c639c533813f4aa9d7837caf62653d097ff85',
+    pol: '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359', avax: '0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e',
+    monad: '0x754704bc059f8c67012fed69bc8a327a5aafb603', sol: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+    sui: '0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC', aptos: '0xbae207659db88bea0cbead6da0ed00aac12edcdda169e591cd41c94180b46f3b',
+  };
+  it('each pinned id is listed as USDC, 6 decimals, at Circle\'s own contract', () => {
+    for (const c of PAYOUT_CHAINS) {
+      const t = usdcTokens.find((x) => x.assetId === c.assetId);
+      expect(t, c.key).toMatchObject({ symbol: 'USDC', decimals: 6 });
+      expect(t!.contractAddress.toLowerCase(), c.key).toBe(circle[c.key].toLowerCase());
+    }
+  });
+  it('the recorded list routes all ten, Base first; BNB, Gnosis, X Layer (USDC.e), Stellar and deprecated ids never appear', async () => {
+    const got = (await resolveAssets(json(usdcTokens))).map((a) => a.chain.key);
+    expect(got).toEqual(['base', 'arb', 'eth', 'op', 'pol', 'avax', 'monad', 'sol', 'sui', 'aptos']);
+    const pinned = new Set(PAYOUT_CHAINS.map((c) => c.assetId));
+    const left = usdcTokens.filter((t) => !pinned.has(t.assetId) && t.blockchain !== 'near').map((t) => `${t.blockchain}:${t.symbol}`);
+    expect(left).toEqual(expect.arrayContaining(['bsc:USDC', 'gnosis:USDC', 'xlayer:USDC', 'stellar:USDC', 'pol:USDC(DEPRECATED)', 'avax:USDC(DEPRECATED)']));
+  });
+});
+
+describe('address validators (T-025)', () => {
+  it('Solana: base58 of 32 bytes; not the system program, not the USDC mint, no typos', () => {
+    expect(solanaAddressError(SOL)).toBeNull();
+    expect(solanaAddressError('13QkxhNMrTPxoCkRdYdJ65tFuwXPhL5gLS2Z5Nr6gjRK')).toBeNull();
+    expect(solanaAddressError('11111111111111111111111111111111')).toMatch(/system program/);
+    expect(solanaAddressError('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v')).toMatch(/USDC token itself/);
+    expect(solanaAddressError(SOL.slice(0, 30))).toMatch(/full Solana address/);
+    expect(solanaAddressError(SOL.replace('W', '0'))).toMatch(/full Solana address/); // 0 is not base58
+    expect(solanaAddressError('z'.repeat(44))).toMatch(/not a Solana address/); // decodes to more than 32 bytes
+    expect(solanaAddressError(EVM)).toMatch(/full Solana address/);
+    expect(solanaAddressError('8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR')).toMatch(/not a wallet address/); // off-curve, like a token account
+    expect(solanaFormatError('8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR')).toBeNull(); // still a valid deposit-address format
+    expect(solanaFormatError('11111111111111111111111111111111')).toMatch(/system program/);
+    expect([ed25519OnCurve(b58decode(SOL)), ed25519OnCurve(b58decode('8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR'))]).toEqual([true, false]);
+  });
+  it('Sui and Aptos: 0x and all 64 hex digits, never zero, no short form', () => {
+    expect(hex64AddressError(HEX64)).toBeNull();
+    expect(hex64AddressError(HEX64.toUpperCase().replace('0X', '0x'))).toBeNull();
+    expect(hex64AddressError('0x1')).toMatch(/64 letters/);
+    expect(hex64AddressError(HEX64.slice(0, -1))).toMatch(/64 letters/);
+    expect(hex64AddressError('0x' + '0'.repeat(64))).toMatch(/zero address/);
+    expect(hex64AddressError(EVM)).toMatch(/64 letters/);
+    expect(hex64AddressError(SOL)).toMatch(/64 letters/);
+  });
+  it('EVM chains refuse Solana and 64-digit addresses', () => {
+    expect(evmAddressError(SOL)).toMatch(/40 letters/);
+    expect(evmAddressError(HEX64)).toMatch(/40 letters/);
   });
 });
 

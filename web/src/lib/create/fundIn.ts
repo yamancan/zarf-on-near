@@ -1,19 +1,20 @@
-// Funding a send from another chain (T-019): NEAR Intents 1Click turns USDC on Base, Arbitrum or Ethereum into NEAR USDC
+// Funding a send from another chain (T-019, T-025): NEAR Intents 1Click turns Circle USDC on any chain in PAYOUT_CHAINS into NEAR USDC
 // in the sender's own connected account; the send itself (ft_transfer_call to the escrow) is unchanged. EXACT_OUTPUT:
 // the sender asks for exactly what is missing and pays what 1Click quotes. Same limits as the payout leg (intents.ts).
 // 1Click has no testnet: on testnet only dry quotes (live mainnet prices, no deposit address) are shown.
 
 import {
-  describeStatus, evmAddressError, MAX_CROSS_CHAIN_PAYOUT, MAX_LOSS_BPS, NEAR_USDC_ASSET, ONECLICK_API, PAYOUT_CHAINS, QuoteError,
-  SLIPPAGE_BPS, type PayoutChain, type PayoutStatus, type StatusView,
+  describeStatus, MAX_CROSS_CHAIN_PAYOUT, MAX_LOSS_BPS, NEAR_USDC_ASSET, ONECLICK_API, QuoteError,
+  SLIPPAGE_BPS, type PayoutStatus, type StatusView,
 } from '../intents';
+import { PAYOUT_CHAINS, type PayoutChain } from '../chains';
 import { middle } from '../claim';
 import { SignatureError, verifyQuoteSignature } from '../oneclickSig';
 
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 const defaultFetch: Fetch = (u, i) => fetch(u, i);
 
-/** The chains a send can be funded from: the payout leg's pinned Circle USDC on Base, Arbitrum and Ethereum. */
+/** The chains a send can be funded from: the payout leg's pinned Circle USDC chains (PAYOUT_CHAINS in lib/chains.ts). */
 export const FUNDING_CHAINS: PayoutChain[] = PAYOUT_CHAINS;
 const NEAR_USDC_DECIMALS = 6;
 export const FUNDING_LIFETIME_MS = 60 * 60_000; // the request deadline: after it 1Click refunds a late deposit
@@ -32,9 +33,12 @@ export function fundingWithinLossBound(amountIn: string, amountOut: string, inDe
   return BigInt(amountOut) * 10n ** BigInt(inDecimals) * 10_000n >= BigInt(amountIn) * 10n ** BigInt(NEAR_USDC_DECIMALS) * BigInt(10_000 - MAX_LOSS_BPS);
 }
 
-/** "Type its last 6 characters": the refund address is the sender's own, read twice. Case does not matter. */
+/** Hex addresses (0x…) ignore case; base58 (Solana) does not: a different case is a different address. */
+const addressKey = (a: string): string => (a.startsWith('0x') ? a.toLowerCase() : a);
+
+/** "Type its last 6 characters": the refund address is the sender's own, read twice. Case matters only for Solana. */
 export const refundConfirmed = (address: string, typed: string): boolean =>
-  address.length >= 6 && typed.trim().toLowerCase() === address.slice(-6).toLowerCase();
+  address.length >= 6 && (address.startsWith('0x') ? typed.trim().toLowerCase() === address.slice(-6).toLowerCase() : typed.trim() === address.slice(-6));
 
 export interface FundingArgs {
   chain: PayoutChain;
@@ -120,8 +124,8 @@ export async function getFundingQuote(dry: boolean, a: FundingArgs, fetchFn: Fet
   if (amountOut !== a.amount || BigInt(minOut) < BigInt(a.amount)) throw new QuoteError(CANNOT_CHECK);
   if (!fundingWithinLossBound(amountIn, amountOut, a.chain.decimals)) throw new QuoteError(TOO_COSTLY);
   const depositAddress = typeof q.depositAddress === 'string' ? q.depositAddress : undefined;
-  if (!dry && (!depositAddress || evmAddressError(depositAddress))) throw new QuoteError(CANNOT_CHECK);
-  if (!dry && q.depositMemo) throw new QuoteError(CANNOT_CHECK); // an EVM deposit never needs a memo
+  if (!dry && (!depositAddress || a.chain.depositAddressError(depositAddress))) throw new QuoteError(CANNOT_CHECK);
+  if (!dry && q.depositMemo) throw new QuoteError(CANNOT_CHECK); // we show no memo: a chain that needs one is not listed
   if (!dry && !(Date.parse(String(q.deadline)) > now + MIN_TIME_TO_PAY_MS)) throw new QuoteError(CANNOT_CHECK);
   return {
     amountIn, amountInFormatted: String(q.amountInFormatted ?? ''), amountOut, amountOutFormatted: String(q.amountOutFormatted ?? ''),
@@ -233,7 +237,7 @@ const earlierKey = (contract: string, account: string) => `zarf-near:funding-ear
 export function archiveFunding(contract: string, account: string, f: SavedFunding, store?: Storage): boolean {
   try {
     const s = store ?? localStorage;
-    const rest = earlierFundings(contract, account, s).filter((e) => e.depositAddress.toLowerCase() !== f.depositAddress.toLowerCase());
+    const rest = earlierFundings(contract, account, s).filter((e) => addressKey(e.depositAddress) !== addressKey(f.depositAddress));
     s.setItem(earlierKey(contract, account), JSON.stringify([f, ...rest].slice(0, 5)));
     return earlierFundings(contract, account, s).some((e) => e.depositAddress === f.depositAddress);
   } catch {
@@ -241,14 +245,20 @@ export function archiveFunding(contract: string, account: string, f: SavedFundin
   }
 }
 
+/** A saved funding is only trusted if its chain is still listed and both addresses fit that chain. */
+const savedValid = (f: SavedFunding | null): f is SavedFunding => {
+  const c = f && FUNDING_CHAINS.find((x) => x.key === f.chainKey);
+  return !!c && typeof f.depositAddress === 'string' && typeof f.refundTo === 'string' && !c.depositAddressError(f.depositAddress) && !c.addressError(f.refundTo);
+};
+
 export function earlierFundings(contract: string, account: string, store?: Storage): SavedFunding[] {
   try {
     const list = JSON.parse((store ?? localStorage).getItem(earlierKey(contract, account)) ?? '[]');
     if (!Array.isArray(list)) return [];
     const seen = new Set<string>(); // one per address, whatever another tab wrote
     return list.filter((f: SavedFunding) => {
-      if (!f || evmAddressError(f.depositAddress) || evmAddressError(f.refundTo) || seen.has(f.depositAddress.toLowerCase())) return false;
-      seen.add(f.depositAddress.toLowerCase());
+      if (!savedValid(f) || seen.has(addressKey(f.depositAddress))) return false;
+      seen.add(addressKey(f.depositAddress));
       return true;
     });
   } catch {
@@ -259,7 +269,7 @@ export function earlierFundings(contract: string, account: string, store?: Stora
 export function loadFunding(contract: string, account: string, store?: Storage): SavedFunding | null {
   try {
     const f = JSON.parse((store ?? localStorage).getItem(fundingKey(contract, account)) ?? 'null') as SavedFunding | null;
-    return f && !evmAddressError(f.depositAddress) && FUNDING_CHAINS.some((c) => c.key === f.chainKey) && /^[1-9]\d*$/.test(f.amountIn) ? f : null;
+    return savedValid(f) && /^[1-9]\d*$/.test(f.amountIn) ? f : null;
   } catch {
     return null;
   }

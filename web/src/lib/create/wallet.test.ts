@@ -21,7 +21,7 @@ describe('walletRequest (what NEAR Connect is handed)', () => {
 describe('pinned wallet list (wallets.json)', async () => {
   const { default: manifest } = await import('./wallets.json');
   it('offers only the reviewed wallets, never MyNearWallet', () => {
-    expect(manifest.wallets.map((w) => w.id).sort()).toEqual(['hot-wallet', 'intear-wallet', 'meteor-wallet', 'nightly-wallet']) // senders never get ethereum-wallets;
+    expect(manifest.wallets.map((w) => w.id).sort()).toEqual(['hot-wallet', 'intear-wallet', 'meteor-wallet', 'nightly-wallet']); // ethereum-wallets is added by nearConnectWallet({ ethereum })
   });
   it('every wallet\'s code is pinned: a GitHub commit URL, or a sha256 the patched loader checks (Intear, T-004)', () => {
     for (const w of manifest.wallets as { executor: string; integrity?: string }[]) {
@@ -33,14 +33,23 @@ describe('pinned wallet list (wallets.json)', async () => {
 
 describe('patched NEAR Connect loader: integrity pin (patches/@hot-labs__near-connect@0.12.0.patch)', async () => {
   const { default: mod } = await import('@hot-labs/near-connect/build/SandboxedWallet/executor.js');
-  const SandboxExecutor = ((mod as { default?: unknown }).default ?? mod) as { prototype: { checkNewVersion(e: unknown, c: string | null): Promise<string> } };
+  type Proto = { checkNewVersion(e: unknown, c: string | null): Promise<string>; loadCode(): Promise<string>; matchesIntegrity(c: string): Promise<boolean> };
+  const SandboxExecutor = ((mod as { default?: unknown }).default ?? mod) as { prototype: Proto };
   const code = 'window.selector.ready({})';
   const sha = async (t: string) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t))), (b) => b.toString(16).padStart(2, '0')).join('');
-  const load = async (integrity?: string) => {
+  // the executor as NEAR Connect builds it (it passes itself to checkNewVersion), with an in-memory cache
+  const executor = (integrity?: string, cached: string | null = null) => {
     const saved: string[] = [];
-    const self = { actualCode: null, connector: { db: { setItem: async (_k: string, v: string) => void saved.push(v) } }, manifest: { id: 'intear-wallet', version: '1' } };
-    const executor = { manifest: { id: 'intear-wallet', executor: 'https://wallet.intear.tech/near-selector.js', integrity } };
-    const got = await SandboxExecutor.prototype.checkNewVersion.call(self, executor, null);
+    const self = Object.assign(Object.create(SandboxExecutor.prototype) as Proto, {
+      actualCode: null,
+      connector: { db: { getItem: async () => cached, setItem: async (_k: string, v: string) => void saved.push(v) } },
+      manifest: { id: 'intear-wallet', version: '1', executor: 'https://wallet.intear.tech/near-selector.js', integrity },
+    });
+    return { self, saved };
+  };
+  const load = async (integrity?: string) => {
+    const { self, saved } = executor(integrity);
+    const got = await self.checkNewVersion(self, null);
     return { got, saved };
   };
   it('runs and caches the file whose hash matches', async () => {
@@ -55,14 +64,44 @@ describe('patched NEAR Connect loader: integrity pin (patches/@hot-labs__near-co
     vi.stubGlobal('fetch', async () => new Response(code));
     expect((await load()).got).toBe(code);
   });
+  it('ignores cached code that does not match the pin and waits for the verified download', async () => {
+    vi.stubGlobal('fetch', async () => new Response(code));
+    const pin = await sha(code);
+    expect(await executor(pin, code + ';steal()').self.loadCode()).toBe(code);
+    expect(await executor(pin, code).self.loadCode()).toBe(code); // a matching cache is used as before
+    vi.stubGlobal('fetch', async () => new Response(code + ';steal()'));
+    await expect(executor(pin, code + ';steal()').self.loadCode()).rejects.toThrow(/pinned hash/); // nothing good to run
+  });
+  it('a failed background refresh behind a valid cache is handled, not an unhandled rejection', async () => {
+    const pin = await sha(code);
+    const unhandled: unknown[] = [];
+    const onUnhandled = (e: unknown) => void unhandled.push(e);
+    type Proc = { on(e: string, f: (x: unknown) => void): void; off(e: string, f: (x: unknown) => void): void };
+    const proc = (globalThis as unknown as { process: Proc }).process; // web has no @types/node
+    proc.on('unhandledRejection', onUnhandled);
+    try {
+      vi.stubGlobal('fetch', async () => new Response('down', { status: 503 }));
+      expect(await executor(pin, code).self.loadCode()).toBe(code);
+      vi.stubGlobal('fetch', async () => new Response(code + ';steal()'));
+      expect(await executor(pin, code).self.loadCode()).toBe(code);
+      await new Promise((r) => setTimeout(r, 20));
+      expect(unhandled).toEqual([]);
+    } finally {
+      proc.off('unhandledRejection', onUnhandled);
+    }
+  });
 });
 
-describe('ethereum-wallets (claim form only, T-002)', async () => {
+describe('ethereum-wallets (T-002 claim form; senders since T-025)', async () => {
   const { default: eth } = await import('./ethereum-wallets.json');
   it('is the upstream entry, sandboxed, and sign-in needs no key', () => {
     expect(eth.id).toBe('ethereum-wallets');
     expect(eth.type).toBe('sandbox');
     expect(eth.executor).toBe('https://evm-on-near.dev/executor.js');
     expect(eth.features.signInWithoutAddKey).toBe(true);
+  });
+  it('its executor is pinned by sha256 like Intear\'s (the patched loader refuses another file), on both networks', () => {
+    expect(eth.integrity).toBe('0480ca7b4d2204b1702a554e92f6d00d69a780ff1dee9dcf67feb6ae7991556b');
+    expect([eth.features.mainnet, eth.features.testnet]).toEqual([true, true]);
   });
 });

@@ -6,8 +6,9 @@ import { AccountChanged, type Tx } from './funding';
 // Pinned copy of NEAR Connect's manifest (hot-dao/near-selector repository/manifest.json, v1.1.0, 12 Nov 2026),
 // cut to the wallets we offer: no runtime manifest fetch, and no wallet appears that we have not looked at.
 import manifest from './wallets.json';
-// MetaMask on NEAR (NEP-518), the upstream entry copied verbatim; its executor is served unpinned by evm-on-near.dev.
-// Offered only on the claim form with 0x ids on (it reads an account name there), never to senders who sign funding.
+// MetaMask on NEAR (NEP-518, "Ethereum Wallets"), the upstream entry plus an `integrity` pin of its executor
+// (sha256 of evm-on-near.dev/executor.js, 14 Nov 2026; a changed file fails to load). Signing happens in a popup on
+// evm-on-near.dev, which is not pinned. Senders get it on /create and /campaigns (T-025); the claim form only with 0x ids on.
 import ethereumWallets from './ethereum-wallets.json';
 
 

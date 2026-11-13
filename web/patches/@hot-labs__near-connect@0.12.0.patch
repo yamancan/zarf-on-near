@@ -1,19 +1,43 @@
 diff --git a/build/SandboxedWallet/executor.js b/build/SandboxedWallet/executor.js
-index 6e8bdc24a679cecb4ca23f0421ae9d50105b24d6..7e6415c8e7eb77082f7d74fbc10eba08ed81730e 100644
+index 6e8bdc24a679cecb4ca23f0421ae9d50105b24d6..7c81f1739ed4e91d2393e38bf72dabb8ea9f90bc 100644
 --- a/build/SandboxedWallet/executor.js
 +++ b/build/SandboxedWallet/executor.js
-@@ -288,6 +288,14 @@ class SandboxExecutor {
+@@ -288,6 +288,10 @@ class SandboxExecutor {
                  throw new Error(`Failed to load executor: ${res.status}`);
              return res.text();
          });
 +        // Zarf patch: `integrity` (sha256 hex of the file) pins an executor that is not served from a commit URL.
 +        // A changed file never runs and is never cached: the wallet fails to open instead.
-+        if (executor.manifest.integrity) {
-+            const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(newVersion));
-+            const hex = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
-+            if (hex !== executor.manifest.integrity)
-+                throw new Error(`Executor code for ${executor.manifest.id} does not match its pinned hash`);
-+        }
++        if (!(await executor.matchesIntegrity(newVersion)))
++            throw new Error(`Executor code for ${executor.manifest.id} does not match its pinned hash`);
          this.connector.logger?.log(`New version of code fetched`);
          this.actualCode = newVersion;
          if (newVersion === currentVersion) {
+@@ -302,12 +306,25 @@ class SandboxExecutor {
+             .catch((e) => this.connector.logger?.log(`Failed to cache new version of code`, e));
+         return newVersion;
+     }
++    // Zarf patch: true when the manifest pins no hash, or `code` hashes to it.
++    async matchesIntegrity(code) {
++        if (!this.manifest.integrity)
++            return true;
++        const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(code));
++        return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("") === this.manifest.integrity;
++    }
+     async loadCode() {
+-        const cachedCode = await this.connector.db.getItem(`${this.manifest.id}:${this.manifest.version}`).catch(() => null);
++        let cachedCode = await this.connector.db.getItem(`${this.manifest.id}:${this.manifest.version}`).catch(() => null);
++        // Zarf patch: code cached before the pin (or altered in storage) is ignored; the verified download is awaited instead
++        if (cachedCode && !(await this.matchesIntegrity(cachedCode)))
++            cachedCode = null;
+         this.connector.logger?.log(`Code loaded from cache`, cachedCode !== null);
+         const task = this.checkNewVersion(this, cachedCode);
+-        if (cachedCode)
++        if (cachedCode) {
++            // Zarf patch: the background refresh may fail (offline, 5xx, changed file); the verified cache still runs
++            task.catch((e) => this.connector.logger?.log(`Background code check failed`, e));
+             return cachedCode;
++        }
+         return await task;
+     }
+     async call(method, params) {
