@@ -41,6 +41,8 @@ run "test \"\$(git rev-parse HEAD)\" = \"\$(git rev-parse origin/main)\" || { ec
 run "git merge-base --is-ancestor origin/main HEAD || { echo 'origin/main moved: this checkout is no longer a fast-forward' >&2; exit 1; }"
 run "git rev-parse -q --verify $FAUCET_REF >/dev/null"
 run "test -r $GAS_CREDS"
+# The watcher refresh (step 3) fingerprints https://near.zarf.to: its proxy comes from T-029's deploy-near-zarf-to.sh.
+run "curl -sf -o /dev/null --max-time 20 https://near.zarf.to/ || { echo 'near.zarf.to does not answer: run T-029 deploy-near-zarf-to.sh first' >&2; exit 1; }"
 run "(cd verifier && pnpm install --frozen-lockfile >/dev/null && $(wr) whoami 2>/dev/null | grep -q $ACCOUNT) || { echo 'the token does not see account $ACCOUNT' >&2; exit 1; }"
 [[ -n $DRY ]] || { mkdir -p "$(dirname "$ROLLBACK")" && : > "$ROLLBACK"; }
 [[ -z $DRY ]] || echo "+ : > $ROLLBACK"
