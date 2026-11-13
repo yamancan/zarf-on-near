@@ -68,13 +68,13 @@ async function run(final) {
   await p.goto(base + v.links.main[0]);
   await p.getByText('Other Chain', { exact: true }).click();
   await p.waitForSelector('#chain');
-  assert((await p.locator('#chain button').first().innerText()).trim() === 'USDC on Base', 'Base is first');
+  assert((await p.locator('#chain [role=radio][aria-checked=true]').innerText()).trim() === 'Base', 'Base is preselected');
   await p.fill('#addr', RECIPIENT.slice(0, -1) + 'D'); // checksum typo
-  assert(/typo/.test(await p.locator('#addr-note').innerText()), 'EIP-55 typo caught');
+  assert(/typo/.test(await p.locator(`#${await p.locator('#addr').getAttribute('aria-describedby')}`).innerText()), 'EIP-55 typo caught'); // ZenInput's own error line
   await p.fill('#addr', RECIPIENT);
   await p.waitForSelector('.quote');
   const box = await p.locator('.quote').innerText();
-  assert(/≈ 9\.99 USDC on Base/.test(box), `quote line: ${box}`);
+  assert(/≈ 9\.99 USDC/.test(box) && !/live mainnet price/.test(box), `quote line: ${box}`);
   await p.getByText('Details', { exact: true }).click(); // minimum, cost and refund sit one layer down
   const detail = await p.locator('#addr-note details').innerText();
   assert(/About 9\.99558 USDC, at least 9\.895624/.test(detail), `quote detail: ${detail}`);
@@ -117,7 +117,7 @@ async function run(final) {
     await q.waitForFunction(() => /Paid out/i.test(document.querySelector('main')?.innerText ?? ''), null, { timeout: 20000 });
     const again = await q.locator('main').innerText();
     assert(seen.statusReads > before, 'the reopened link asked the bridge again');
-    assert(/Already claimed/.test(again) && /9\.99\s*USDC/.test(again) && !/On its way/i.test(again), `reopened record: ${again}`);
+    assert(/Already claimed/i.test(again) && /9\.99\s*USDC/.test(again) && !/On its way/i.test(again), `reopened record: ${again}`);
     const after = JSON.parse(await q.evaluate(() => Object.entries(localStorage).find(([k]) => k.startsWith('zarf-near:receipt:'))?.[1]));
     assert(after.bridge === 'paid' && after.amountOut === '9.99558' && typeof after.checkedAt === 'number', `record updated: ${JSON.stringify(after)}`);
     assert(!errs.length, `console errors: ${errs.join(' | ')}`);
