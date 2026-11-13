@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import { env } from '$env/dynamic/public';
+  import { takeBackup } from '$lib/create/campaigns';
   import { buildDraft, claimLink, LONG_LINKS_ABOVE, mailtoHref, messageText, readRecoveryFile, recoveryFile, type Draft } from '$lib/create/campaign';
   import { saveSent } from '$lib/create/campaigns';
   import { getAccount, getCampaignByRoot, getCampaignView, getConfig, getGasPrice, getHeight, getPrepayBalance, getStorageCosts, txOutcome, type ContractConfig } from '$lib/create/chain';
@@ -19,8 +20,10 @@
   import { formatNear, sig3 } from '$lib/create/campaigns';
   import { getClaimState, nearView, type ClaimState } from '$lib/services';
   import { CIRCLE_LINE, TESTNET, UNIT } from '$lib/network';
-  import { ArrowRight, ArrowUpRight, Check, CheckCircle2, ChevronDown, Copy, Download, ExternalLink, Eye, FolderOpen, Lock, Mail, Plus, RefreshCw } from 'lucide-svelte';
+  import { ArrowRight, ArrowUpRight, Check, CheckCircle2, ChevronDown, Copy, Download, ExternalLink, Eye, Lock, Mail, Plus, RefreshCw } from 'lucide-svelte';
   import ClaimCard, { type ClaimMode } from '$lib/ClaimCard.svelte';
+  import Mark from '$lib/Mark.svelte';
+  import { MARKS } from '$lib/chains';
   import { passkeyOffered } from '$lib/passkey';
   import { crossChainOffered } from '$lib/intents';
   import Avatar from '$lib/Avatar.svelte';
@@ -265,6 +268,8 @@
         else if (f.txHash) await check(f.txHash);
         else await checkByRoot(); // reloaded while the wallet popup was open
       }
+      const backup = f ? null : takeBackup();
+      if (backup) await openBackup(backup);
     } catch {
       setupError = "Couldn't reach NEAR. Nothing was sent.";
       setupRetry = true;
@@ -293,14 +298,13 @@
   }
 
   /**
-   * "Open a backup file": the recovery file rebuilds the links of a campaign this account already funded.
+   * A backup file chosen on /campaigns (takeBackup): it rebuilds the links of a campaign this account already funded.
    * Read-only: it finds the campaign by (sender, merkle_root) and shows the done page; nothing is sent.
    */
-  async function openBackup(file: File | undefined) {
+  async function openBackup(text: string) {
     error = errorTitle = errorCode = '';
-    if (!file) return;
     try {
-      const { draft: d } = await readRecoveryFile(await file.text(), { contractId: contract!, network: config!.network });
+      const { draft: d } = await readRecoveryFile(text, { contractId: contract!, network: config!.network });
       if (!account) await connect();
       if (!account) {
         error = 'Connect the wallet that sent this campaign to open its backup.';
@@ -743,7 +747,7 @@
 {#snippet usdcChip()}
   <!-- Zarf's token chip (create wizard step-1:230-250): one token, so no "Change" -->
   <span class="inline-flex items-center gap-2 bg-zen-fg/5 rounded-full pl-1.5 pr-3 py-1 border border-zen-border-subtle">
-    <img src="/tokens/usdc.svg" alt="" class="w-4 h-4 rounded-full" />
+    <Mark svg={MARKS.usdc} class="w-5 h-5" />
     <span class="text-xs font-semibold uppercase">{UNIT}</span>
   </span>
 {/snippet}
@@ -1018,11 +1022,6 @@
             />
             {#if notGmail}<ZenAlert variant="warning" icon={Mail}>{notGmail}</ZenAlert>{/if}
             {#if capError}<Note tone="error">{capError}</Note>{/if}
-            <!-- Ours: a campaign's backup file rebuilds its links (read-only, nothing is sent) -->
-            <label class="self-start inline-flex items-center gap-1.5 text-xs text-zen-fg-muted hover:text-zen-fg cursor-pointer {!config || busy ? 'pointer-events-none opacity-50' : ''}">
-              <FolderOpen class="w-3.5 h-3.5" aria-hidden="true" />Open a Backup
-              <input type="file" accept=".json,application/json" class="sr-only" disabled={!config || !!busy} onchange={(e) => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ''; void openBackup(f); }} />
-            </label>
           </div>
           {@render deadlineRow()}
           {@render actions(false, 'Continue', recipientsOk && deadlineOk, () => (uiStep = 1), recipientsOk ? (deadlineOk ? '' : 'Pick when claims close.') : capError ? 'Up to 100 USDC per send.' : parsed.rejected.length ? `Fix row ${parsed.rejected[0].line} first.` : 'Add a recipient first.' /* T-010 review minor 2 */)}

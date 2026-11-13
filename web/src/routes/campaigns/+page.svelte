@@ -2,14 +2,15 @@
   import { onMount } from 'svelte';
   import { env } from '$env/dynamic/public';
   import { getConfig, getPrepayBalance, txOutcome, type ContractConfig } from '$lib/create/chain';
-  import { claimedAmount, formatNear, listCampaigns, outLabel, readSent, reclaimable, sentLabel, showPrepay, type SentRecord, reclaimOutcome, reclaimTx, withdrawTx, type CampaignView } from '$lib/create/campaigns';
+  import { claimedAmount, formatNear, listCampaigns, outLabel, readSent, reclaimable, sentLabel, showPrepay, stashBackup, type SentRecord, reclaimOutcome, reclaimTx, withdrawTx, type CampaignView } from '$lib/create/campaigns';
   import { formatAmount } from '$lib/create/recipients';
   import { nearConnectWallet, type SenderWallet } from '$lib/create/wallet';
   import { readSentOutcome } from '$lib/create/funding';
   import { nearView } from '$lib/services';
   import { deadlineText, timeLeft } from '$lib/claim';
   import { UNIT } from '$lib/network';
-  import { ArrowDownToLine, ArrowUpRight, ChevronDown, Info, Plus, Send, Wallet } from 'lucide-svelte';
+  import { ArrowDownToLine, ArrowUpRight, ChevronDown, FolderOpen, Info, Plus, Send, Wallet } from 'lucide-svelte';
+  import { goto } from '$app/navigation';
   import Avatar from '$lib/Avatar.svelte';
   import { titleCase } from '$lib/text';
   import Tooltip from '$lib/zarf-kit/components/ui/Tooltip.svelte';
@@ -203,8 +204,11 @@
       </div>
     </ZenCard>
   {:else}
-    <!-- One backup link for every campaign (T-023 waste list item 12) -->
-    <a href="/create#backup" class="self-start -mt-4 text-xs text-zen-fg-subtle underline underline-offset-2 hover:text-zen-fg">Lost the links? Open your backup</a>
+    <!-- The one backup entry (T-033): the file rebuilds a sent campaign's links on /create, read-only -->
+    <label class="self-start -mt-4 inline-flex items-center gap-1.5 text-xs text-zen-fg-subtle hover:text-zen-fg cursor-pointer focus-within:text-zen-fg">
+      <FolderOpen class="w-3.5 h-3.5 shrink-0" aria-hidden="true" />Lost your links? Open the backup file
+      <input type="file" accept=".json,application/json" class="sr-only" onchange={async (e) => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ''; if (f) { stashBackup(await f.text()); await goto('/create'); } }} />
+    </label>
     <!-- Rows, not cards (design spec 3.7) -->
     <div class="divide-y divide-zen-border-subtle border-y border-zen-border-subtle">
       {#each rows as r (r.id)}

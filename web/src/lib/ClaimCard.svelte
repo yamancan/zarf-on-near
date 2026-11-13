@@ -89,8 +89,11 @@
   <div class="flex items-center gap-3">
     <span class="sr-only">Claim amount</span>
     <Mark svg={MARKS.usdc} class="w-10 h-10" />
-    <span class="text-5xl font-semibold tracking-tight text-zen-fg tabular-nums">{amount}</span>
-    <span class="text-base text-zen-fg-muted">{unit}</span>
+    <!-- The figure's box trimmed to its cap height, so the mark centres on the digits; the unit sits on their baseline -->
+    <span class="flex items-baseline gap-2">
+      <span class="text-5xl font-semibold tracking-tight text-zen-fg tabular-nums [text-box:trim-both_cap_alphabetic]">{amount}</span>
+      <span class="text-base text-zen-fg-muted">{unit}</span>
+    </span>
   </div>
 
   <div class="space-y-3">
@@ -107,7 +110,7 @@
             data-mode={value}
             onclick={() => onpick(value)}
             class="flex flex-col items-center justify-center gap-1 min-w-0 h-14 px-2 rounded-2xl text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zen-fg/40 {mode === value
-              ? 'bg-zen-bg text-zen-fg shadow-sm'
+              ? 'bg-zen-fg/10 text-zen-fg ring-1 ring-inset ring-zen-border'
               : 'text-zen-fg-muted hover:text-zen-fg'}"
           >
             {#if value === 'existing'}<Mark svg={MARKS.near} class="w-4 h-4" />
