@@ -280,7 +280,8 @@
         // Decided from the state after the checks: a send still saved and without a campaign is unsettled.
         if (loadFunding() && !result) backupNote = 'A send is still being checked here, so the backup did not open. When it settles, open the backup again from Campaigns.';
         else {
-          startOver(); // a settled or refunded send leaves the screen, so the backup (or its error) shows on its own
+          // Only this tab's own settled or refunded send is reset (startOver also clears the other-tab marker it owns)
+          if (f) startOver();
           await openBackup(backup);
         }
       }
