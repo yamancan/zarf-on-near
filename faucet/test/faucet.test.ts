@@ -587,7 +587,7 @@ describe('judges page presentation', () => {
   it('shows the configured amount, never an unvalidated one', async () => {
     const { default: worker } = await import('../src/index');
     const page = async (AMOUNT: string) => (await worker.fetch(new Request('https://f.example/try'), { AMOUNT } as never)).text();
-    expect(await page('500000')).toContain('<span class="label">Claim Amount</span><span class="figure"><span class="value">0.5</span><span class="unit">test USDC</span>');
+    expect(await page('500000')).toContain('<span class="label">Claim amount</span><span class="figure"><span class="value">0.5</span><span class="unit">test USDC</span>');
     const hostile = await page('5"><script>');
     expect(hostile).not.toContain('class="amount"');
     expect(hostile).not.toContain('"><script>');
@@ -633,23 +633,36 @@ describe('judges page presentation', () => {
   it('tells a judge without a NEAR account to use Face ID, not a wallet sign-up (T-024)', async () => {
     const { default: worker } = await import('../src/index');
     const html = await (await worker.fetch(new Request('https://f.example/try'), {} as never)).text();
-    expect(html).toContain('No NEAR account needed — create one with Face ID when you claim.');
+    expect(html).toContain('No NEAR account needed: create one with Face ID when you claim.');
     expect(html).not.toMatch(/Meteor|mynearwallet|id="wallet"/i);
-    expect(html).not.toContain('zarf.to');
+    expect(html.slice(html.indexOf('<body>'))).not.toContain('zarf.to'); // visible page: "Zarf" (the head's preview URLs name near.zarf.to)
     // Every new-tab link drops the opener.
     for (const t of html.match(/<a [^>]*target="_blank"[^>]*>/g)!) expect(t).toMatch(/rel="noopener noreferrer"/);
   });
 
-  it('links the footer (Send, Campaigns, Privacy) only to a safe https claim host', async () => {
+  it('links the footer (Privacy, as on the app) only to a safe https claim host', async () => {
     const { default: worker } = await import('../src/index');
     const page = async (CLAIM_HOST?: string) => (await worker.fetch(new Request('https://f.example/try'), { CLAIM_HOST } as never)).text();
     const nav = (html: string) => html.match(/<nav aria-label="Footer">(.*?)<\/nav>/)?.[1] ?? null;
     expect(nav(await page('https://claim.example/'))).toBe(
-      '<a href="https://claim.example/create">Send</a><a href="https://claim.example/campaigns">Campaigns</a><a href="https://claim.example/privacy">Privacy</a>');
+      '<a href="https://claim.example/privacy">Privacy</a>');
     for (const bad of [undefined, '', 'http://claim.example', 'javascript:alert(1)', '//claim.example', 'https://claim.example/path', 'https://x.example/"><script>']) {
       const html = await page(bad);
       expect(nav(html)).toBeNull(); // no footer links rather than links to this page's own 404s
       expect(html).not.toContain('claim.example');
     }
+  });
+});
+
+describe('link previews (T-034)', () => {
+  it('/try carries an absolute og:image and a large twitter card', async () => {
+    const { default: worker } = await import('../src/index');
+    const html = await (await worker.fetch(new Request('https://f.example/try'), {} as never)).text();
+    const head = html.slice(0, html.indexOf('</head>'));
+    expect(head).toContain('<meta property="og:image" content="https://near.zarf.to/og.png">');
+    expect(head).toContain('<meta name="twitter:card" content="summary_large_image">');
+    expect(head).toContain('<meta name="twitter:image" content="https://near.zarf.to/og.png">');
+    expect(head).toContain('<meta property="og:title" content="Try Zarf on NEAR Testnet">');
+    expect(head).not.toMatch(/content="\/og\.png"/);
   });
 });

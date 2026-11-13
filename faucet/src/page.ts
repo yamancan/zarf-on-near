@@ -12,7 +12,6 @@ const MARK = (px: number) => `<svg class="mark" width="${px}" height="${px}" vie
 
 // Lucide icons (ISC), stroke style as in the Zen components.
 const ICON = (inner: string) => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
-const MAIL = '<rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>';
 const SUN = '<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>';
 const MOON = '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>';
 const CHEVRON = '<path d="m6 9 6 6 6-6"/>';
@@ -82,7 +81,7 @@ const CSS = `
   .lockup { display: inline-flex; align-items: center; gap: 3.5px; min-height: 44px; text-decoration: none; opacity: .8; transition: opacity .2s; }
   .lockup:hover { opacity: 1; }
   .lockup span { font-size: 16px; font-weight: 600; letter-spacing: -0.025em; }
-  .net { font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: .15em; color: var(--fg-muted); white-space: nowrap; }
+  .net { font-size: 12px; font-weight: 500; color: var(--fg-muted); white-space: nowrap; } /* the app header's network name, no caps */
   .x { display: none; align-items: center; justify-content: center; min-height: 44px; color: var(--fg-subtle); transition: color .2s; }
   .x:hover { color: var(--fg); }
   .divider { display: none; width: 1px; height: 16px; background: var(--border); }
@@ -157,7 +156,7 @@ const CSS = `
   /* Link issued. */
   .amount { margin-top: 24px; text-align: center; }
   /* The web app's Amount: small uppercase label, large light figure, the unit BESIDE it. */
-  .amount .label { display: block; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .3em; color: var(--fg-muted); }
+  .amount .label { display: block; font-size: 12px; font-weight: 500; color: var(--fg-muted); } /* a label, not an eyebrow (T-034) */
   .amount .figure { display: flex; align-items: baseline; justify-content: center; gap: 8px; margin-top: 4px; }
   .amount .value { font-size: 48px; line-height: 1; font-weight: 300; letter-spacing: -0.05em; font-variant-numeric: tabular-nums; }
   .amount .unit { font-size: 14px; font-weight: 500; text-transform: uppercase; letter-spacing: .1em; color: var(--primary); white-space: nowrap; }
@@ -168,7 +167,7 @@ const CSS = `
   .actions .btn { flex: 1 1 180px; }
   .next { margin: 16px 0 0; font-size: 14px; color: var(--fg-muted); text-align: center; text-wrap: balance; }
 
-  /* Footer: the web app's (lockup / Send · Campaigns · Privacy / built-on line), centred column, a row from 768 px. */
+  /* Footer: the web app's (Privacy left, © trionlabs.dev right), centred column, a row from 768 px (T-034). */
   footer { border-top: 1px solid oklch(from var(--fg) l c h / 0.05); font-size: 12px; color: var(--fg-muted); }
   .foot { max-width: 1024px; margin: 0 auto; padding: 40px 24px; display: flex; flex-direction: column; align-items: center; justify-content: space-between; gap: 20px; }
   @media (min-width: 768px) { .foot { flex-direction: row; } }
@@ -189,6 +188,20 @@ const html = (siteKey: string, claimHost: string, usdc: string | null) => `<!doc
 <title>Try Zarf on NEAR</title>
 <meta name="description" content="Send tokens to an email. Get a claim link for ${usdc ? usdc + ' ' : ''}test USDC and claim it with Google into a NEAR testnet account.">
 <meta name="color-scheme" content="dark light">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Zarf">
+<meta property="og:url" content="https://near.zarf.to/try">
+<meta property="og:title" content="Try Zarf on NEAR Testnet">
+<meta property="og:description" content="Get a test USDC claim link for your Google email, then claim it with Google. No NEAR account needed.">
+<meta property="og:image" content="https://near.zarf.to/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Zarf: Send USDC to any email. They claim with Google.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@zarfto">
+<meta name="twitter:title" content="Try Zarf on NEAR Testnet">
+<meta name="twitter:description" content="Get a test USDC claim link for your Google email, then claim it with Google. No NEAR account needed.">
+<meta name="twitter:image" content="https://near.zarf.to/og.png">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <style>${CSS}</style>
 </head>
@@ -208,10 +221,9 @@ const html = (siteKey: string, claimHost: string, usdc: string | null) => `<!doc
 <main>
   <div class="card">
     <div id="ask">
-      <div class="medallion">${ICON(MAIL)}</div>
       <h1>Try Zarf</h1>
       <p class="lede">A test claim link for your Google email. Claiming is free: Zarf pays the NEAR gas.</p>
-      ${usdc ? `<div class="amount"><span class="label">Claim Amount</span><span class="figure"><span class="value">${usdc}</span><span class="unit">test USDC</span></span></div>` : ''}
+      ${usdc ? `<div class="amount"><span class="label">Claim amount</span><span class="figure"><span class="value">${usdc}</span><span class="unit">test USDC</span></span></div>` : ''}
       <form id="f" novalidate>
         <label for="email">Your Google email</label>
         <input id="email" name="email" type="email" autocomplete="email" inputmode="email" required spellcheck="false" autocapitalize="off" placeholder="you@gmail.com">
@@ -220,7 +232,7 @@ const html = (siteKey: string, claimHost: string, usdc: string | null) => `<!doc
       </form>
     </div>
     <div id="out" role="status" aria-live="polite"></div>
-    <p class="hint">No NEAR account needed — create one with Face ID when you claim.</p>
+    <p class="hint">No NEAR account needed: create one with Face ID when you claim.</p>
     <p class="hint">Want to look first? <a href="${GALLERY}" target="_blank" rel="noopener noreferrer">See every screen</a>.</p>
     <details>
       <summary>How this works ${ICON(CHEVRON)}</summary>
@@ -235,9 +247,8 @@ const html = (siteKey: string, claimHost: string, usdc: string | null) => `<!doc
 </main>
 <footer>
   <div class="foot">
-    <a class="lockup" href="${claimHost}/" aria-label="Zarf home">${MARK(9)}<span>Zarf</span></a>
-    ${claimHost ? `<nav aria-label="Footer"><a href="${claimHost}/create">Send</a><a href="${claimHost}/campaigns">Campaigns</a><a href="${claimHost}/privacy">Privacy</a></nav>` : ''}
-    <div class="by"><span>© 2026</span><span class="dot" aria-hidden="true">·</span><span>Built on NEAR by</span><a href="https://trionlabs.dev" target="_blank" rel="noopener noreferrer">trionlabs.dev</a></div>
+    ${claimHost ? `<nav aria-label="Footer"><a href="${claimHost}/privacy">Privacy</a></nav>` : '<span></span>'}
+    <div class="by"><span>© 2026</span><a href="https://trionlabs.dev" target="_blank" rel="noopener noreferrer">trionlabs.dev</a></div>
   </div>
 </footer>
 <script src="/try.js"></script>
