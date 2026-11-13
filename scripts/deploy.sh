@@ -7,13 +7,28 @@
 #      add_owner_key would wait the upgrade delay)
 #   4. print the views the apps read
 #
+# Mainnet (and OWNER_ON_MAC=1 on testnet) signs nothing on this host: no owner, escrow or relayer
+# full-access key is ever read here. It builds the wasm and writes an owner kit (the wasm plus
+# owner-steps.sh) that the owner runs on their own machine, off the deploy host, with near-cli-rs
+# (keys in the local key store or on a hardware wallet); then VERIFY_ONLY=1 checks the result from here with read-only RPC views.
+#
 # Required env:
-#   CONTRACT_ID      account to deploy to (its full-access key in ~/.near-credentials)
-#   OWNER_ID         contract owner (key in ~/.near-credentials)
+#   CONTRACT_ID      account to deploy to (testnet: its full-access key in ~/.near-credentials)
+#   OWNER_ID         contract owner (testnet: key in ~/.near-credentials; mainnet: on the owner's machine only)
 # Optional env:
 #   NETWORK          testnet (default) or mainnet. Mainnet requires LOCK_CONTRACT=1, Circle's
-#                    mainnet USDC exactly, .near accounts, and no faucet; it warns without a guardian.
+#                    mainnet USDC exactly, .near accounts, no faucet, GUARDIAN_ID, SIGNER_PUBKEY,
+#                    BACKUP_SIGNER_PUBKEY and RELAYER_ID, and always runs as OWNER_ON_MAC=1.
+#   OWNER_ON_MAC=1   write the owner kit instead of signing here (forced on mainnet)
+#   KIT_DIR          default <repo>/owner-kit-$NETWORK
+#   OWNER_SIGN       how the kit signs as OWNER_ID: sign-with-keychain (default) or 'sign-with-ledger usb'
+#   ESCROW_NEAR, RELAYER_NEAR   what the kit funds the two new accounts with (default 3.5 and 1 NEAR)
+#   VERIFY_ONLY=1    read-only: check the deployed escrow and relayer against this env, sign nothing
+#   EXPECT_CODE_HASH base58 code hash the build (and VERIFY_ONLY) must match
 #   GUARDIAN_ID      account that can only delay (cancel, freeze, drop a not-yet-active key)
+#   BACKUP_SIGNER_PUBKEY  a second verifier key (64 lowercase hex) whose seed is kept offline: an
+#                    initial signer too, so if SIGNER_PUBKEY leaks the owner removes it and live
+#                    campaigns go on with the backup key (they snapshot both at creation)
 #   SIGNER_PUBKEY    verifier ed25519 public key (64 lowercase hex). Default: derived from
 #                    VERIFIER_SEED_FILE, which is created (32 random bytes, mode 600) if missing
 #   VERIFIER_SEED_FILE   default ~/.config/zarf-near/$NETWORK-verifier.seed
@@ -69,7 +84,12 @@ if [[ $NETWORK == mainnet ]]; then
   [[ ${LOCK_CONTRACT:-} == 1 ]] || { echo "LOCK_CONTRACT=1 is mandatory on mainnet" >&2; exit 64; }
   [[ $USDC_ID == "$MAINNET_USDC" ]] || { echo "mainnet USDC_ID must be Circle's $MAINNET_USDC" >&2; exit 64; }
   [[ ${CREATE_ACCOUNTS:-} != 1 ]] || { echo "CREATE_ACCOUNTS uses the testnet faucet only" >&2; exit 64; }
-  [[ -n ${GUARDIAN_ID:-} ]] || echo "WARNING: no GUARDIAN_ID on mainnet: a stolen owner key can't be slowed down" >&2
+  [[ -n ${GUARDIAN_ID:-} ]] || { echo "GUARDIAN_ID is mandatory on mainnet: without it a stolen owner key cannot be stopped" >&2; exit 64; }
+  [[ -n ${SIGNER_PUBKEY:-} ]] || { echo "SIGNER_PUBKEY is mandatory on mainnet (scripts/mainnet-keys.mjs prints it)" >&2; exit 64; }
+  [[ -n ${BACKUP_SIGNER_PUBKEY:-} ]] || { echo "BACKUP_SIGNER_PUBKEY is mandatory on mainnet (the offline verifier key)" >&2; exit 64; }
+  [[ -n ${RELAYER_ID:-} ]] || { echo "RELAYER_ID is mandatory on mainnet" >&2; exit 64; }
+  [[ ${OWNER_ON_MAC:-1} == 1 ]] || { echo "mainnet signs off the deploy host only (OWNER_ON_MAC=1)" >&2; exit 64; }
+  OWNER_ON_MAC=1
   [[ ${GUARDIAN_ID:-} != "$OWNER_ID" ]] || { echo "GUARDIAN_ID must not be OWNER_ID: one stolen key would hold both" >&2; exit 64; }
 fi
 umask 077
@@ -85,12 +105,16 @@ if [[ -z ${SIGNER_PUBKEY:-} ]]; then
     process.stdout.write(c.createPublicKey(k).export({ format: "der", type: "spki" }).subarray(-32).toString("hex"));' "$VERIFIER_SEED_FILE")
 fi
 [[ $SIGNER_PUBKEY =~ ^[0-9a-f]{64}$ ]] || { echo "SIGNER_PUBKEY must be 64 lowercase hex" >&2; exit 64; }
+if [[ -n ${BACKUP_SIGNER_PUBKEY:-} ]]; then
+  [[ $BACKUP_SIGNER_PUBKEY =~ ^[0-9a-f]{64}$ ]] || { echo "BACKUP_SIGNER_PUBKEY must be 64 lowercase hex" >&2; exit 64; }
+  [[ $BACKUP_SIGNER_PUBKEY != "$SIGNER_PUBKEY" ]] || { echo "BACKUP_SIGNER_PUBKEY must differ from SIGNER_PUBKEY" >&2; exit 64; }
+fi
 # The vector keys' seeds are public (spec/vectors.json): anyone could sign claims with them.
 # Hard-coded like the contract's PUBLIC_TEST_KEYS (a contract test pins both to the vectors).
 for test_key in 8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c \
                 fd1724385aa0c75b64fb78cd602fa1d991fdebf76b13c58ed702eac835e9f618; do
-  [[ $SIGNER_PUBKEY != "$test_key" ]] ||
-    { echo "SIGNER_PUBKEY is a public test key from spec/vectors.json; use the verifier's real key" >&2; exit 64; }
+  [[ $SIGNER_PUBKEY != "$test_key" && ${BACKUP_SIGNER_PUBKEY:-} != "$test_key" ]] ||
+    { echo "SIGNER_PUBKEY or BACKUP_SIGNER_PUBKEY is a public test key from spec/vectors.json; use real keys" >&2; exit 64; }
 done
 for account in "$CONTRACT_ID" "$OWNER_ID" ${RELAYER_ID:+"$RELAYER_ID"} ${GUARDIAN_ID:+"$GUARDIAN_ID"}; do
   [[ $account == *"$SUFFIX" ]] || { echo "$account is not a $NETWORK account (*$SUFFIX)" >&2; exit 64; }
@@ -115,6 +139,43 @@ call() { # call <method> <json-args> [gas] -- as OWNER_ID
     network-config "$NETWORK" sign-with-legacy-keychain send
 }
 
+# The new() args. Both verifier keys are initial signers: active at once, snapshotted by every campaign.
+make_init_args() {
+  local valid_until=$(( ($(date +%s) + SIGNER_VALID_DAYS * 86400) * 1000000000 ))
+  jq -nc --arg o "$OWNER_ID" --arg u "$USDC_ID" --arg m "$MIN_LIFETIME_NS" --arg t "$AGENT_TTL_NS" \
+    --arg r "$RESOLVE_DELAY_NS" --arg g "$UPGRADE_DELAY_NS" --arg s "$SIGNER_PUBKEY" --arg b "${BACKUP_SIGNER_PUBKEY:-}" \
+    --arg v "$valid_until" --arg n "$NETWORK" --arg gd "${GUARDIAN_ID:-}" \
+    '{owner_id:$o, guardian_id:(if $gd == "" then null else $gd end), network:$n, token_ids:[$u], min_lifetime_ns:$m, agent_ttl_ns:$t, resolve_delay_ns:$r, upgrade_delay_ns:$g, initial_signers:([{signer:$s, valid_until_ns:$v}] + (if $b == "" then [] else [{signer:$b, valid_until_ns:$v}] end))}'
+}
+
+# The relayer's claim-only public key R, from RELAYER_KEY_FILE (created here if missing, except on mainnet).
+relayer_pubkey() {
+  if [[ $NETWORK == mainnet && ! -s $RELAYER_KEY_FILE ]]; then
+    echo "no $RELAYER_KEY_FILE: run scripts/mainnet-keys.mjs first" >&2; return 64
+  fi
+  mkdir -p "$(dirname "$RELAYER_KEY_FILE")"
+  if [[ ! -s $RELAYER_KEY_FILE ]]; then
+    # near secret format: ed25519:<base58(seed || pub)>; written to the file only.
+    node -e '
+      const c = require("crypto"), { privateKey, publicKey } = c.generateKeyPairSync("ed25519");
+      const seed = privateKey.export({ format: "der", type: "pkcs8" }).subarray(-32);
+      const pub = publicKey.export({ format: "der", type: "spki" }).subarray(-32);
+      const A = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+      const b58 = (b) => { let n = BigInt("0x" + b.toString("hex")), o = ""; for (; n > 0n; n /= 58n) o = A[Number(n % 58n)] + o; for (const x of b) { if (x) break; o = "1" + o; } return o; };
+      process.stdout.write("ed25519:" + b58(Buffer.concat([seed, pub])));' >"$RELAYER_KEY_FILE"
+  fi
+  chmod 600 "$RELAYER_KEY_FILE"
+  node -e '
+    const A = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    const s = require("fs").readFileSync(process.argv[1], "utf8").trim().replace(/^ed25519:/, "");
+    let n = 0n; for (const ch of s) n = n * 58n + BigInt(A.indexOf(ch));
+    const b = Buffer.from(n.toString(16).padStart(128, "0"), "hex");
+    const pub = b.subarray(32), out = []; let m = BigInt("0x" + pub.toString("hex"));
+    for (; m > 0n; m /= 58n) out.unshift(A[Number(m % 58n)]);
+    for (const x of pub) { if (x) break; out.unshift("1"); } // base58 keeps leading zero bytes as "1"
+    process.stdout.write("ed25519:" + out.join(""));' "$RELAYER_KEY_FILE"
+}
+
 if [[ ${DRY_RUN:-} != 1 ]]; then
   for tool in near cargo curl jq; do
     command -v "$tool" >/dev/null || { echo "missing: $tool" >&2; exit 69; }
@@ -125,6 +186,122 @@ echo "== USDC on chain: $USDC_ID"
 meta=$(view "$USDC_ID" ft_metadata)
 jq -e '.symbol == "USDC" and .decimals == 6' <<<"$meta" >/dev/null ||
   { echo "unexpected token metadata: $meta" >&2; exit 65; }
+
+b58() { node -e '
+  const A = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz", b = Buffer.from(process.argv[1], "hex");
+  let n = BigInt("0x" + b.toString("hex")), o = ""; for (; n > 0n; n /= 58n) o = A[Number(n % 58n)] + o;
+  for (const x of b) { if (x) break; o = "1" + o; } process.stdout.write(o);' "$1"; }
+
+# Read-only check of a deployment made from the owner kit (or by hand). Signs nothing, reads no key.
+if [[ ${VERIFY_ONLY:-} == 1 ]]; then
+  fails=0
+  check() { if eval "$2"; then echo "ok    $1"; else echo "FAIL  $1" >&2; fails=$((fails + 1)); fi; }
+  rpcq() { curl -sSf "$RPC" -H 'content-type: application/json' -d "$(jq -nc --argjson p "$1" '{jsonrpc:"2.0",id:1,method:"query",params:$p}')"; }
+  account=$(rpcq "$(jq -nc --arg a "$CONTRACT_ID" '{request_type:"view_account",finality:"final",account_id:$a}')")
+  escrow_keys=$(rpcq "$(jq -nc --arg a "$CONTRACT_ID" '{request_type:"view_access_key_list",finality:"final",account_id:$a}')" | jq -c '.result.keys')
+  config=$(view "$CONTRACT_ID" get_config) watch=$(view "$CONTRACT_ID" watch) owner=$(view "$CONTRACT_ID" get_owner)
+  storage=$(view "$USDC_ID" storage_balance_of "$(jq -nc --arg a "$CONTRACT_ID" '{account_id:$a}')")
+  signers=$(jq -c '[.owner_keys[].signer] | sort' <<<"$watch")
+  want=$(jq -nc --arg s "$SIGNER_PUBKEY" --arg b "${BACKUP_SIGNER_PUBKEY:-}" '[$s, $b] | map(select(. != "")) | sort')
+  [[ -n ${EXPECT_CODE_HASH:-} ]] && check "code hash = $EXPECT_CODE_HASH" '[[ $(jq -r .result.code_hash <<<"$account") == "$EXPECT_CODE_HASH" ]]'
+  check "escrow has no access key at all" '[[ $escrow_keys == "[]" ]]'
+  check "owner = $OWNER_ID" '[[ $owner == "\"$OWNER_ID\"" ]]'
+  check "network = $NETWORK" '[[ $(jq -r .network <<<"$config") == "$NETWORK" ]]'
+  check "guardian = ${GUARDIAN_ID:-null}" '[[ $(jq -r .guardian_id <<<"$config") == "${GUARDIAN_ID:-null}" ]]'
+  check "upgrade delay = $UPGRADE_DELAY_NS ns" '[[ $(jq -r .upgrade_delay_ns <<<"$config") == "$UPGRADE_DELAY_NS" ]]'
+  check "token_ids = [$USDC_ID]" '[[ $(jq -c .token_ids <<<"$config") == "[\"$USDC_ID\"]" ]]'
+  check "verifier keys = $want" '[[ $signers == "$want" ]]'
+  check "no pending upgrade or owner change" '[[ $(jq -c "[.pending_upgrade, .pending_owner]" <<<"$watch") == "[null,null]" ]]'
+  check "escrow registered on USDC" '[[ $storage != null ]]'
+  if [[ -n ${RELAYER_ID:-} ]]; then
+    R=$(relayer_pubkey)
+    relayer_keys=$(rpcq "$(jq -nc --arg a "$RELAYER_ID" '{request_type:"view_access_key_list",finality:"final",account_id:$a}')" | jq -c '.result.keys')
+    check "relayer $RELAYER_ID keys = one full-access (owner's machine) + R claim-only on $CONTRACT_ID" \
+      'jq -e --arg r "$R" --arg c "$CONTRACT_ID" "length == 2 and ([.[] | select(.access_key.permission == \"FullAccess\")] | length) == 1
+        and any(.[]; .public_key == \$r and .access_key.permission.FunctionCall.receiver_id == \$c and .access_key.permission.FunctionCall.method_names == [\"claim\"])" <<<"$relayer_keys" >/dev/null'
+  fi
+  echo "verify: $fails failed"
+  exit $(( fails > 0 ))
+fi
+
+# The owner kit: everything that needs a full-access key, as commands for the owner's machine.
+if [[ ${OWNER_ON_MAC:-} == 1 ]]; then
+  kit=${KIT_DIR:-$repo_root/owner-kit-$NETWORK}
+  owner_sign=${OWNER_SIGN:-sign-with-keychain}
+  [[ $owner_sign == sign-with-keychain || $owner_sign == "sign-with-ledger usb" ]] || { echo "OWNER_SIGN: sign-with-keychain or 'sign-with-ledger usb'" >&2; exit 64; }
+  [[ -n ${RELAYER_ID:-} ]] || { echo "OWNER_ON_MAC needs RELAYER_ID" >&2; exit 64; }
+  echo "== build"
+  run make -C "$repo_root/contract" wasm
+  if [[ -s $wasm ]]; then
+    wasm_sha=$(sha256sum "$wasm" | cut -d' ' -f1) code_hash=$(b58 "$(sha256sum "$wasm" | cut -d' ' -f1)")
+    echo "wasm sha256 $wasm_sha, code hash $code_hash"
+    [[ -z ${EXPECT_CODE_HASH:-} || $code_hash == "$EXPECT_CODE_HASH" ]] || { echo "STOP: code hash $code_hash, expected $EXPECT_CODE_HASH" >&2; exit 65; }
+  else
+    [[ ${DRY_RUN:-} == 1 ]] || { echo "missing $wasm" >&2; exit 66; }
+    wasm_sha="<sha256 of the release wasm>"
+  fi
+  R=$(relayer_pubkey)
+  mkdir -p "$kit"
+  [[ -s $wasm ]] && cp "$wasm" "$kit/zarf_near.wasm"
+  {
+    echo '#!/usr/bin/env bash'
+    echo "# Owner kit for $CONTRACT_ID ($NETWORK), written by scripts/deploy.sh on $(date -u +%FT%TZ)."
+    echo '# Run on YOUR own machine, not on the deploy host: every step signs with a key that only your machine holds'
+    echo '# (local key store or a hardware wallet). Resume after a failure with FROM=<step> bash owner-steps.sh.'
+    for v in NETWORK CONTRACT_ID OWNER_ID RELAYER_ID USDC_ID; do printf '%s=%q\n' "$v" "${!v}"; done
+    printf '%s=%q\n' R "$R" WASM_SHA256 "$wasm_sha" OWNER_SIGN "$owner_sign" INIT_ARGS "$(make_init_args)" \
+      ESCROW_NEAR "${ESCROW_NEAR:-3.5 NEAR}" RELAYER_NEAR "${RELAYER_NEAR:-1 NEAR}"
+    cat <<'KIT'
+set -euo pipefail
+cd "$(dirname "$0")"
+FROM=${FROM:-1}
+step() { if (( $1 < FROM )); then echo "-- skip $1: $2"; return 1; fi; echo; echo "== $1: $2"; }
+command -v near >/dev/null || { echo "install near-cli-rs first (https://github.com/near/near-cli-rs)"; exit 69; }
+# Written against near-cli-rs 0.30.1's command grammar; on another version check `near --version` first.
+near --version
+got=$(shasum -a 256 zarf_near.wasm | cut -d' ' -f1)
+[[ $got == "$WASM_SHA256" ]] || { echo "STOP: zarf_near.wasm sha256 is $got, expected $WASM_SHA256"; exit 1; }
+echo "new() args: $INIT_ARGS"
+
+if step 1 "create $CONTRACT_ID ($ESCROW_NEAR from $OWNER_ID); its key goes to your local key store and is deleted in step 4"; then
+  near account create-account fund-myself "$CONTRACT_ID" "$ESCROW_NEAR" autogenerate-new-keypair save-to-keychain \
+    sign-as "$OWNER_ID" network-config "$NETWORK" $OWNER_SIGN send
+fi
+if step 2 "create $RELAYER_ID ($RELAYER_NEAR from $OWNER_ID); its full-access key stays in your local key store"; then
+  near account create-account fund-myself "$RELAYER_ID" "$RELAYER_NEAR" autogenerate-new-keypair save-to-keychain \
+    sign-as "$OWNER_ID" network-config "$NETWORK" $OWNER_SIGN send
+fi
+if step 3 "deploy + new on $CONTRACT_ID (one transaction)"; then
+  near contract deploy "$CONTRACT_ID" use-file zarf_near.wasm with-init-call new json-args "$INIT_ARGS" \
+    prepaid-gas '100 Tgas' attached-deposit '0 NEAR' network-config "$NETWORK" sign-with-keychain send
+fi
+if step 4 "lock: delete the escrow's only key (after this nobody can sign as $CONTRACT_ID)"; then
+  keys=$(near account list-keys "$CONTRACT_ID" network-config "$NETWORK" now 2>&1 | grep -oE 'ed25519:[1-9A-HJ-NP-Za-km-z]{32,44}' | sort -u || true)
+  [[ $(wc -w <<<"$keys") == 1 ]] || { echo "STOP: expected exactly one key on $CONTRACT_ID, found: $keys"; exit 1; }
+  near account delete-keys "$CONTRACT_ID" public-keys "$keys" network-config "$NETWORK" sign-with-keychain send
+fi
+if step 5 "register $CONTRACT_ID on USDC (0.00125 NEAR from $OWNER_ID)"; then
+  near contract call-function as-transaction "$USDC_ID" storage_deposit json-args "{\"account_id\":\"$CONTRACT_ID\",\"registration_only\":true}" \
+    prepaid-gas '30 Tgas' attached-deposit '0.00125 NEAR' sign-as "$OWNER_ID" network-config "$NETWORK" $OWNER_SIGN send
+fi
+if step 6 "refresh_token_storage (owner)"; then
+  near contract call-function as-transaction "$CONTRACT_ID" refresh_token_storage json-args "{\"token_id\":\"$USDC_ID\"}" \
+    prepaid-gas '50 Tgas' attached-deposit '0 NEAR' sign-as "$OWNER_ID" network-config "$NETWORK" $OWNER_SIGN send
+fi
+if step 7 "give $RELAYER_ID the claim-only key R = $R"; then
+  near account add-key "$RELAYER_ID" grant-function-call-access --allowance unlimited --contract-account-id "$CONTRACT_ID" \
+    --function-names claim use-manually-provided-public-key "$R" network-config "$NETWORK" sign-with-keychain send
+fi
+echo
+echo "done. Tell the contract operator; it checks from the deploy host with VERIFY_ONLY=1 (read-only)."
+KIT
+  } >"$kit/owner-steps.sh"
+  chmod 700 "$kit/owner-steps.sh"
+  echo "owner kit: $kit (zarf_near.wasm + owner-steps.sh; no secret in it)"
+  echo "the owner copies the kit from the deploy host to their machine, then runs:  bash owner-steps.sh"
+  echo "then, here:  VERIFY_ONLY=1 with the same env${EXPECT_CODE_HASH:+ (EXPECT_CODE_HASH=$EXPECT_CODE_HASH)}"
+  exit 0
+fi
 
 if [[ ${CREATE_ACCOUNTS:-} == 1 ]]; then
   for account in "$CONTRACT_ID" "$OWNER_ID" ${RELAYER_ID:+"$RELAYER_ID"}; do
@@ -142,11 +319,7 @@ run make -C "$repo_root/contract" wasm
 [[ ${DRY_RUN:-} == 1 || -s $wasm ]] || { echo "missing $wasm" >&2; exit 66; }
 
 echo "== deploy + new (one transaction)"
-signer_valid_until=$(( ($(date +%s) + SIGNER_VALID_DAYS * 86400) * 1000000000 ))
-init_args=$(jq -nc --arg o "$OWNER_ID" --arg u "$USDC_ID" --arg m "$MIN_LIFETIME_NS" --arg t "$AGENT_TTL_NS" \
-  --arg r "$RESOLVE_DELAY_NS" --arg g "$UPGRADE_DELAY_NS" --arg s "$SIGNER_PUBKEY" --arg v "$signer_valid_until" \
-  --arg n "$NETWORK" --arg gd "${GUARDIAN_ID:-}" \
-  '{owner_id:$o, guardian_id:(if $gd == "" then null else $gd end), network:$n, token_ids:[$u], min_lifetime_ns:$m, agent_ttl_ns:$t, resolve_delay_ns:$r, upgrade_delay_ns:$g, initial_signers:[{signer:$s, valid_until_ns:$v}]}')
+init_args=$(make_init_args)
 run near contract deploy "$CONTRACT_ID" use-file "$wasm" \
   with-init-call new json-args "$init_args" prepaid-gas '100 Tgas' attached-deposit '0 NEAR' \
   network-config "$NETWORK" sign-with-legacy-keychain send
@@ -203,27 +376,7 @@ call refresh_token_storage "$(jq -nc --arg u "$USDC_ID" '{token_id:$u}')" '50 Tg
 
 if [[ -n ${RELAYER_ID:-} ]]; then
   echo "== relayer claim-only key ($RELAYER_ID)"
-  mkdir -p "$(dirname "$RELAYER_KEY_FILE")"
-  if [[ ! -s $RELAYER_KEY_FILE ]]; then
-    # near secret format: ed25519:<base58(seed || pub)>; written to the file only.
-    node -e '
-      const c = require("crypto"), { privateKey, publicKey } = c.generateKeyPairSync("ed25519");
-      const seed = privateKey.export({ format: "der", type: "pkcs8" }).subarray(-32);
-      const pub = publicKey.export({ format: "der", type: "spki" }).subarray(-32);
-      const A = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-      const b58 = (b) => { let n = BigInt("0x" + b.toString("hex")), o = ""; for (; n > 0n; n /= 58n) o = A[Number(n % 58n)] + o; for (const x of b) { if (x) break; o = "1" + o; } return o; };
-      process.stdout.write("ed25519:" + b58(Buffer.concat([seed, pub])));' >"$RELAYER_KEY_FILE"
-  fi
-  chmod 600 "$RELAYER_KEY_FILE"
-  relayer_pub=$(node -e '
-    const A = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-    const s = require("fs").readFileSync(process.argv[1], "utf8").trim().replace(/^ed25519:/, "");
-    let n = 0n; for (const ch of s) n = n * 58n + BigInt(A.indexOf(ch));
-    const b = Buffer.from(n.toString(16).padStart(128, "0"), "hex");
-    const pub = b.subarray(32), out = []; let m = BigInt("0x" + pub.toString("hex"));
-    for (; m > 0n; m /= 58n) out.unshift(A[Number(m % 58n)]);
-    for (const x of pub) { if (x) break; out.unshift("1"); } // base58 keeps leading zero bytes as "1"
-    process.stdout.write("ed25519:" + out.join(""));' "$RELAYER_KEY_FILE")
+  relayer_pub=$(relayer_pubkey)
   # Resumed run: skip only an exact claim-only key. An empty method_names means every method.
   existing=""
   if [[ ${DRY_RUN:-} != 1 ]]; then
