@@ -144,7 +144,8 @@
      gutters, a header row with PageHeader on the left and the primary action on the right -->
 <div class="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 h-full flex flex-col gap-8">
   <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
-  <PageHeader title="My Campaigns" description="Claims, deadlines and take-backs." />
+  <!-- No subtitle (T-023 waste list item 13); the kit PageHeader takes the empty string -->
+  <PageHeader title="My Campaigns" description="" />
     <div class="flex flex-wrap items-center justify-between sm:justify-end gap-4">
       <!-- The connected account sits beside the primary action, where Zarf's navbar keeps its wallet button -->
       {#if account}
@@ -194,6 +195,8 @@
       </div>
     </ZenCard>
   {:else}
+    <!-- One backup link for every campaign (T-023 waste list item 12) -->
+    <a href="/create#backup" class="self-start -mt-4 text-xs text-zen-fg-subtle underline underline-offset-2 hover:text-zen-fg">Lost the links? Open your backup</a>
     <!-- Rows, not cards (design spec 3.7) -->
     <div class="divide-y divide-zen-border-subtle border-y border-zen-border-subtle">
       {#each rows as r (r.id)}
@@ -203,13 +206,13 @@
         {@const ms = Number(BigInt(r.c.deadline_ns) / 1_000_000n)}
         {@const left = timeLeft(ms, now)}
         <section class="py-6 flex flex-col gap-4" aria-label="Campaign {r.id}">
+          <!-- The amount leads; the internal campaign number sits in Details (T-023 waste list item 11) -->
           <div class="flex items-center justify-between gap-3">
-            <span class="zen-section-label !text-zen-fg-subtle !mb-0">Campaign {r.id}</span>
+            <span class="flex items-baseline gap-2"><span class="text-3xl font-light tracking-tighter tabular-nums">{formatAmount(total)}</span><span class="text-xs font-medium uppercase tracking-widest text-zen-primary whitespace-nowrap">{UNIT}</span></span>
             <span title={deadlineText(ms, now)}>
               {#if left}<ZenBadge variant="default" size="sm">{titleCase(left)}</ZenBadge>{:else}<ZenBadge variant="warning" size="sm">Claims Closed</ZenBadge>{/if}
             </span>
           </div>
-          <span class="flex items-baseline gap-2"><span class="text-3xl font-light tracking-tighter tabular-nums">{formatAmount(total)}</span><span class="text-xs font-medium uppercase tracking-widest text-zen-primary whitespace-nowrap">{UNIT}</span></span>
           <!-- Claimed share of the campaign: the value, shown -->
           <div class="flex flex-col gap-2">
             <div class="h-1 rounded-full bg-zen-fg/10 overflow-hidden" aria-hidden="true">
@@ -224,6 +227,7 @@
               <div class="flex justify-between gap-4"><span class="text-[10px] uppercase">Being Paid Now</span><span class="tabular-nums text-sm text-zen-fg">{formatAmount(BigInt(r.c.in_flight))} {UNIT}</span></div>
               <div class="flex justify-between gap-4"><span class="text-[10px] uppercase">Storage for Open Links</span><span class="tabular-nums text-sm text-zen-fg">{formatNear(r.c.storage_reserved)} NEAR</span></div>
               <div class="flex justify-between gap-4"><span class="text-[10px] uppercase">Claims Close</span><span class="text-sm text-zen-fg text-right">{deadlineText(ms, now)}</span></div>
+              <div class="flex justify-between gap-4"><span class="text-[10px] uppercase">Campaign Number</span><span class="tabular-nums text-sm text-zen-fg">{r.id}</span></div>
             </div>
           </details>
           <div class="flex flex-col items-start gap-2">
@@ -236,7 +240,6 @@
             {/if}
             {@render outcome(r.id)}
           </div>
-          <a href="/create#backup" class="self-start text-xs text-zen-fg-subtle underline underline-offset-2 hover:text-zen-fg">Lost the links? Open your backup</a>
         </section>
       {/each}
     </div>

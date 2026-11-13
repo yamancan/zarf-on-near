@@ -108,14 +108,15 @@
   <Note tone="pending">Loading chains…</Note>
 {:else}
   <p class="text-xs text-zen-fg-subtle">Very small payouts may be refused when the bridge's cost is above 2%. Claiming to a NEAR account has no such limit.</p>
-  <span id="chain-l" class="block pl-1 text-xs font-bold uppercase tracking-widest text-zen-fg-subtle">Chain</span>
+  <!-- One eyebrow per screen ("Send To" above): the chain and address fields carry their names for screen readers -->
+  <span id="chain-l" class="sr-only">Chain</span>
   <div id="chain" role="group" aria-labelledby="chain-l">
     <ZenSelect bind:value={key} options={assets.map((a) => ({ value: a.chain.key, label: `USDC on ${a.chain.name}` }))} aria-label="Chain" class="w-full" />
   </div>
   {#if asset}
     <ZenInput
       id="addr"
-      label="{asset.chain.name} Address"
+      aria-label="{asset.chain.name} address"
       class="font-mono"
       bind:value={address}
       placeholder={asset.chain.placeholder}

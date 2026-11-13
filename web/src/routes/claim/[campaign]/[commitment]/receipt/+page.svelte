@@ -17,7 +17,6 @@
   import Note from '$lib/Note.svelte';
   import ZenButton from '$lib/zarf-kit/components/ui/ZenButton.svelte';
   import ZenCard from '$lib/zarf-kit/components/ui/ZenCard.svelte';
-  import PageHeader from '$lib/zarf-kit/components/ui/PageHeader.svelte';
   import { describeStatus, getStatus, loadPayout, nextStep, notReturnedYet, savePayout, submitDeposit, type StatusView } from '$lib/intents';
   import BridgeDetails from '$lib/BridgeDetails.svelte';
   import { passkeyOffered } from '$lib/passkey';
@@ -231,10 +230,8 @@
 {#snippet nearDone(amount: string, to: string, hash: string, starter: string, passkey = false)}
   <!-- Main claim app ClaimStep5Submit: header row, Amount Highlight, two-button grid (h-14 rounded-2xl) -->
   <div class="w-full text-left space-y-8" in:swapIn>
+    <!-- No check disc: the title says it arrived (T-023 waste list item 10) -->
     <div class="flex items-start gap-4">
-      <div class="w-12 h-12 rounded-full bg-zen-success/10 text-zen-success flex items-center justify-center shrink-0" in:markIn aria-hidden="true">
-        <CheckCircle2 class="w-6 h-6" />
-      </div>
       <div class="min-w-0">
         <h1 class="text-xl font-semibold">Arrived</h1>
         <p class="text-sm text-zen-fg-muted font-light mt-1 flex items-center gap-1.5">
@@ -250,17 +247,18 @@
     {/if}
     {#if passkeyOn && passkey && isImplicitAccount(to)}<PasskeyAccount expected={to} />{/if}
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <!-- Title Case buttons, not Zarf's tracked caps (T-023 waste list item 2) -->
       {#if hash && env.PUBLIC_EXPLORER_TX_URL}
-        <a href="{env.PUBLIC_EXPLORER_TX_URL}{hash}" target="_blank" rel="external noopener noreferrer" class="flex items-center justify-center border border-zen-border-subtle bg-zen-bg hover:bg-zen-fg/5 h-14 rounded-2xl text-[10px] uppercase tracking-widest font-bold transition-colors">
-          <ExternalLink class="w-3.5 h-3.5 mr-2 opacity-40" aria-hidden="true" />View Transaction
-        </a>
+        <a href="{env.PUBLIC_EXPLORER_TX_URL}{hash}" target="_blank" rel="external noopener noreferrer" class="grid"><ZenButton tabindex={-1} variant="secondary">
+          {#snippet iconLeft()}<ExternalLink class="w-3.5 h-3.5" />{/snippet}View Transaction
+        </ZenButton></a>
       {:else if accountExplorerUrl(env.PUBLIC_EXPLORER_TX_URL, to)}
-        <a href={accountExplorerUrl(env.PUBLIC_EXPLORER_TX_URL, to)} target="_blank" rel="external noopener noreferrer" class="flex items-center justify-center border border-zen-border-subtle bg-zen-bg hover:bg-zen-fg/5 h-14 rounded-2xl text-[10px] uppercase tracking-widest font-bold transition-colors">
-          <ExternalLink class="w-3.5 h-3.5 mr-2 opacity-40" aria-hidden="true" />{EXPLORER_LABEL}
-        </a>
+        <a href={accountExplorerUrl(env.PUBLIC_EXPLORER_TX_URL, to)} target="_blank" rel="external noopener noreferrer" class="grid"><ZenButton tabindex={-1} variant="secondary">
+          {#snippet iconLeft()}<ExternalLink class="w-3.5 h-3.5" />{/snippet}{EXPLORER_LABEL}
+        </ZenButton></a>
       {/if}
       {#if TESTNET}
-        <a href="/create" class="grid"><ZenButton tabindex={-1} variant="primary" class="h-14 rounded-2xl text-[10px] uppercase tracking-widest font-bold shadow-[var(--zen-shadow-sm)] shadow-zen-primary/10 hover:shadow-zen-primary/20 transition-all">Send Your Own</ZenButton></a>
+        <a href="/create" class="grid"><ZenButton tabindex={-1} variant="primary">Send Your Own</ZenButton></a>
       {/if}
     </div>
     {#if hash && !env.PUBLIC_EXPLORER_TX_URL}<p class="text-xs text-zen-fg-subtle">Transaction <span class="font-mono">{middle(hash, 8)}</span></p>{/if}
@@ -271,11 +269,10 @@
 {/snippet}
 
 <!-- Zarf claim app frame: AppShell container (apps/claim/src/routes/+layout.svelte: w-full max-w-7xl mx-auto p-8 lg:p-12),
-     the page column (apps/claim/src/routes/+page.svelte: max-w-5xl w-full px-4 md:px-0), PageHeader, then the card as
-     LoginPrompt.svelte lays it out (section pt-8, max-w-lg mx-auto, ZenCard elevated, p-8; p-6 on phones for the form) -->
+     the page column (apps/claim/src/routes/+page.svelte: max-w-5xl w-full px-4 md:px-0), then the card as LoginPrompt.svelte
+     lays it out. No page header: the card's own title is the one header (T-023 waste list item 5). -->
 <div class="w-full max-w-7xl mx-auto p-8 lg:p-12">
   <div class="h-full flex flex-col relative max-w-5xl w-full px-4 md:px-0">
-    <PageHeader title="Claim Portal" description="Your claim, as NEAR records it." />
     <section class="w-full pt-8">
       <div class="max-w-lg mx-auto">
   <ZenCard variant="elevated" class="overflow-hidden">
@@ -319,7 +316,7 @@
         {@const shown = shownAmount({ chainName: payout.chainName, bridge: outcome, amountOut: bridge?.amountOutFormatted }, formatAmount(BigInt(ok ? attempt!.amount : (resumed?.amount ?? '0'))), UNIT)}
         {#if step === 'done' || working}
           {#if arrived}
-            <Medallion icon={Check} tone="success" />
+            <!-- no disc: "Arrived on …" says it -->
           {:else if refunded}
             <Medallion icon={Undo2} tone="error" />
           {:else if lost}

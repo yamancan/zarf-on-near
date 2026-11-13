@@ -45,11 +45,10 @@
   });
 </script>
 
-{#if kind === 'paid'}<Medallion icon={Check} tone="success" />
-{:else if kind === 'in-transit' || kind === 'refunding'}<Medallion icon={Clock} tone="muted" />
+<!-- Discs only where they carry a state the title does not (T-023 waste list item 10): no check for paid/unknown -->
+{#if kind === 'in-transit' || kind === 'refunding'}<Medallion icon={Clock} tone="muted" />
 {:else if kind === 'refunded'}<Medallion icon={Undo2} tone="error" />
-{:else if kind === 'failed'}<Medallion icon={AlertTriangle} tone="error" />
-{:else}<Medallion icon={Check} tone="muted" />{/if}
+{:else if kind === 'failed'}<Medallion icon={AlertTriangle} tone="error" />{/if}
 <h1 class="text-xl font-semibold tracking-tight">{heading}</h1>
 <Amount
   label={kind === 'unknown' ? 'This Link Held' : kind === 'paid' ? 'Paid Out' : kind === 'in-transit' ? 'On Its Way' : kind === 'refunded' ? 'Returned to the Sender' : kind === 'refunding' ? 'Going Back to the Sender' : 'Not Delivered'}

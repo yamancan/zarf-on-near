@@ -23,7 +23,6 @@
   import ZenButton from '$lib/zarf-kit/components/ui/ZenButton.svelte';
   import ZenCheckbox from '$lib/zarf-kit/components/ui/ZenCheckbox.svelte';
   import ZenCard from '$lib/zarf-kit/components/ui/ZenCard.svelte';
-  import PageHeader from '$lib/zarf-kit/components/ui/PageHeader.svelte';
   import ZenInput from '$lib/zarf-kit/components/ui/ZenInput.svelte';
   import { themeStore } from '$lib/zarf-kit/stores/themeStore.svelte';
   import { formatAmount } from '$lib/create/recipients';
@@ -292,11 +291,11 @@
 {/snippet}
 
 <!-- Zarf claim app frame: AppShell container (apps/claim/src/routes/+layout.svelte: w-full max-w-7xl mx-auto p-8 lg:p-12),
-     the page column (apps/claim/src/routes/+page.svelte: max-w-5xl w-full px-4 md:px-0), PageHeader, then the card as
-     LoginPrompt.svelte lays it out (section pt-8, max-w-lg mx-auto, ZenCard elevated, p-8; p-6 on phones for the form) -->
+     the page column (apps/claim/src/routes/+page.svelte: max-w-5xl w-full px-4 md:px-0), then the card as LoginPrompt.svelte
+     lays it out (section pt-8, max-w-lg mx-auto, ZenCard elevated, p-8; p-6 on phones for the form). No page header: the
+     card's own title is the one header (T-023 waste list item 5). -->
 <div class="w-full max-w-7xl mx-auto p-8 lg:p-12">
   <div class="h-full flex flex-col relative max-w-5xl w-full px-4 md:px-0">
-    <PageHeader title="Claim Portal" description="Choose where your USDC goes, then confirm with Google." />
     <section class="w-full pt-8">
       <div class="max-w-lg mx-auto">
   <ZenCard variant="elevated" class="overflow-hidden">
@@ -337,9 +336,6 @@
       <div class="space-y-8" in:swapIn>
         <!-- Header row (main claim app ClaimStep5Submit:150-175) -->
         <div class="flex items-start gap-4">
-          <div class="w-12 h-12 rounded-full bg-zen-primary/10 text-zen-primary flex items-center justify-center shrink-0" aria-hidden="true">
-            <Mail class="w-6 h-6" />
-          </div>
           <div class="min-w-0">
             <h1 class="text-xl font-semibold">{network === 'mainnet' ? 'Claim Your USDC' : 'Claim Your Test USDC'}</h1>
             <p class="text-sm text-zen-fg-muted font-light mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -383,9 +379,10 @@
           {#if mode === 'chain'}
             <PayoutPicker {network} amount={link!.amount} refundTo={sender} {requote} onUseNear={() => ((error = ''), (mode = 'existing'))} bind:choice={payout} />
           {:else if mode === 'existing'}
+            <!-- No visible label: the selected "NEAR Account" pill above names the field -->
             <ZenInput
               id="dest"
-              label="NEAR Account"
+              aria-label="NEAR account"
               bind:value={typed}
               placeholder={network === 'mainnet' ? 'alice.near' : 'alice.testnet'}
               autocomplete="off"
@@ -398,20 +395,19 @@
                 <Note tone="pending">Checking <span class="font-mono">{acct.id}</span>…</Note>
               {:else if acct?.state === 'found' && !askConfirm}
                 <p class="flex items-center gap-2 text-sm text-zen-fg" role="status">
-                  <CheckCircle2 class="w-4 h-4 text-zen-success shrink-0" aria-hidden="true" /><Avatar name={acct.id} /><span class="truncate">{acct.id}</span>
-                  <span class="sr-only">found</span>
+                  <!-- The name is in the field above; this row only says it was found (T-023 waste list item 6) -->
+                  <CheckCircle2 class="w-4 h-4 text-zen-success shrink-0" aria-hidden="true" /><span>Account found</span>
                   {#if accountOk}<ZenButton variant="ghost" size="xs" class="ml-auto" onclick={() => ((confirmedFor = ''), backToField())}>Change</ZenButton>{/if}
                 </p>
               {:else if acct?.state === 'missing' && dest.kind === 'implicit' && !isEthAccount(dest.id)}
                 <ZenCheckbox bind:checked={unfundedAck} label="Only the holder of its private key can use these funds. I hold it." />
               {/if}
               {#if askConfirm}
-                <!-- Wrong-address guard: the account restated large, before Google (a paid claim cannot be undone) -->
-                <div id="confirm" class="space-y-3 py-5 px-5 rounded-2xl bg-zen-fg/5 border border-zen-border-subtle" role="group" aria-labelledby="confirm-q">
-                  <p id="confirm-q" class="text-[10px] uppercase tracking-[0.3em] text-zen-fg-subtle font-bold">Is This Your Account?</p>
-                  <p class="text-2xl font-mono font-semibold tracking-tight break-all text-zen-fg">{destination}</p>
-                  <p class="text-xs text-zen-fg-subtle">The USDC goes here and cannot be taken back.</p>
-                  <div class="flex flex-wrap gap-2 pt-1">
+                <!-- Wrong-address guard before Google (a paid claim cannot be undone): a plain row under a hairline; the
+                     account itself is the field right above, so it is not restated -->
+                <div id="confirm" class="space-y-3 pt-4 border-t border-zen-border-subtle" role="group" aria-labelledby="confirm-q">
+                  <p id="confirm-q" class="text-sm text-zen-fg">Is this your account? The USDC cannot be taken back.</p>
+                  <div class="flex flex-wrap gap-2">
                     <ZenButton variant="primary" size="sm" onclick={() => (confirmedFor = destination)}>Yes, It's Mine</ZenButton>
                     <ZenButton variant="ghost" size="sm" onclick={backToField}>Change It</ZenButton>
                   </div>

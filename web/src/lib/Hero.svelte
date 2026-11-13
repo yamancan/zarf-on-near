@@ -6,7 +6,7 @@
   // spec 3.5) the hero is its content plus py-24/32 with no 90vh minimum and no scroll cue.
   import { onMount } from 'svelte';
   import { ArrowRight } from 'lucide-svelte';
-  import { TESTNET } from '$lib/network';
+  import { TESTNET, UNAUDITED_LINE } from '$lib/network';
   import { themeStore } from '$lib/zarf-kit/stores/themeStore.svelte';
   import ZenButton from '$lib/zarf-kit/components/ui/ZenButton.svelte';
 
@@ -173,17 +173,6 @@
   ></div>
 
   <div class="relative z-30 text-center max-w-4xl px-6 flex flex-col items-center gap-5 md:gap-6">
-    <div class="transition-all duration-700 ease-out {mounted ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'}" style="transition-delay: 150ms;">
-      <a
-        href="https://near.org"
-        target="_blank"
-        rel="noopener noreferrer"
-        class="group inline-flex items-center gap-2 rounded-full border border-zen-fg/10 bg-zen-fg/[0.04] backdrop-blur-md pl-3.5 pr-4 py-1.5 transition-colors duration-300 hover:border-zen-fg/20 hover:bg-zen-fg/[0.07]"
-      >
-        <span class="text-[10px] font-semibold tracking-[0.28em] uppercase text-zen-fg/55 transition-colors duration-300 group-hover:text-zen-fg/80">Built on NEAR</span>
-      </a>
-    </div>
-
     <h1
       class="text-4xl sm:text-5xl md:text-6xl font-bold tracking-tighter text-zen-fg leading-[1.12] [text-wrap:balance] transition-opacity duration-1000 ease-out {mounted ? 'opacity-100' : 'opacity-0'}"
       style="transition-delay: 400ms;"
@@ -211,13 +200,8 @@
       </ZenButton></a>
     </div>
 
-    <!-- Zarf's status line (landing Hero), in fg-subtle: Zarf's fg/35 fails 4.5:1 as text -->
-    <p
-      class="inline-flex items-center gap-1.5 text-[11px] font-medium tracking-[0.15em] uppercase text-zen-fg-subtle transition-opacity duration-700 ease-out {mounted ? 'opacity-100' : 'opacity-0'}"
-      style="transition-delay: 1500ms;"
-    >
-      Live on NEAR {TESTNET ? 'Testnet' : ''}
-    </p>
+    <!-- T-001: the unaudited note stays visible on mainnet; NEAR itself is named once, in the nav -->
+    {#if !TESTNET}<p class="text-xs text-zen-fg-subtle max-w-md">{UNAUDITED_LINE}</p>{/if}
   </div>
 
 </div>
