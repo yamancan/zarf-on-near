@@ -57,6 +57,7 @@ run "cd relayer && node -e 'process.stdout.write(JSON.parse(require(\"fs\").read
 run "cd relayer && $(wr) deploy --env testnet"
 
 begin "3 web + watcher refresh (scripts/deploy-web.sh)"
+run "cd web && pnpm install --frozen-lockfile >/dev/null"
 remember web zarf-near-claim --env testnet
 run "scripts/deploy-web.sh testnet"
 
