@@ -4,6 +4,7 @@
 
 import { keccak_256 } from '@noble/hashes/sha3';
 import { hex, saveReceipt, type BridgeOutcome, type Receipt } from './claim';
+import { b58decode } from './oneclickSig';
 
 export const ONECLICK_API = 'https://1click.chaindefuser.com';
 export const NEAR_USDC_ASSET = 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1';
@@ -36,6 +37,30 @@ export function evmAddressError(address: string): string | null {
   return null;
 }
 
+const SOLANA_USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+
+/** A Solana wallet address: base58 of a 32-byte public key. Not the system program or the USDC mint itself. */
+export function solanaAddressError(address: string): string | null {
+  if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) return 'Enter the full Solana address: 32 to 44 letters and digits.';
+  let bytes: Uint8Array;
+  try {
+    bytes = b58decode(address);
+  } catch {
+    return 'Enter the full Solana address: 32 to 44 letters and digits.';
+  }
+  if (bytes.length !== 32) return 'This is not a Solana address: check that you copied all of it.';
+  if (bytes.every((b) => b === 0)) return 'That is the system program; nobody can use funds sent there.';
+  if (address === SOLANA_USDC_MINT) return 'That is the USDC token itself, not a wallet. Paste your own wallet address.';
+  return null;
+}
+
+/** Sui and Aptos: 0x and the full 64 hex digits (no short form), never all zeros. */
+export function hex64AddressError(address: string): string | null {
+  if (!/^0x[0-9a-fA-F]{64}$/.test(address)) return 'Enter the full address: 0x followed by 64 letters and digits.';
+  if (/^0x0{64}$/i.test(address)) return 'That is the zero address; nobody can use funds sent there.';
+  return null;
+}
+
 /**
  * A chain the recipient can be paid on. Every listed chain must be memo-free: we never send a
  * memo or tag. A chain that needs more checks before a quote (Stellar: account, trustline,
@@ -52,22 +77,34 @@ export interface PayoutChain {
   note: string;
 }
 
-const evmChain = (key: string, name: string, usdc: string): PayoutChain => ({
+const chain = (key: string, name: string, assetId: string, placeholder: string, addressError: (a: string) => string | null): PayoutChain => ({
   key,
   name,
-  assetId: `nep141:${key}-${usdc}.omft.near`,
+  assetId,
   decimals: 6,
-  placeholder: '0x…',
-  addressError: evmAddressError,
+  placeholder,
+  addressError,
   note: `Paste your own ${name} wallet address. If it is an exchange address, make sure the exchange credits USDC on ${name} to it without a memo or tag.`,
 });
+const evmChain = (key: string, name: string, assetId: string) => chain(key, name, assetId, '0x…', evmAddressError);
 
-/** Base first (the owner's pick); each is hidden at runtime if 1Click stops listing it. */
-// Circle's native USDC contracts; the verifier pins the same three asset ids (verifier/src/intents.ts).
+/**
+ * Base first (the owner's pick); each is hidden at runtime if 1Click stops listing it. Only Circle's native USDC,
+ * checked on 14 Nov 2026 against developers.circle.com/stablecoins/usdc-contract-addresses (the token address 1Click
+ * lists for each id below is Circle's). Left out: BNB and Gnosis (not Circle's), X Layer (1Click routes USDC.e),
+ * Stellar (funding needs a memo, payout a trustline). The verifier pins the same ids (verifier/src/intents.ts).
+ */
 export const PAYOUT_CHAINS: PayoutChain[] = [
-  evmChain('base', 'Base', '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'),
-  evmChain('arb', 'Arbitrum', '0xaf88d065e77c8cc2239327c5edb3a432268e5831'),
-  evmChain('eth', 'Ethereum', '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'),
+  evmChain('base', 'Base', 'nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near'),
+  evmChain('arb', 'Arbitrum', 'nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near'),
+  evmChain('eth', 'Ethereum', 'nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near'),
+  evmChain('op', 'Optimism', 'nep245:v2_1.omni.hot.tg:10_A2ewyUyDp6qsue1jqZsGypkCxRJ'), // 0x0b2c…ff85
+  evmChain('pol', 'Polygon', 'nep141:pol-0x3c499c542cef5e3811e1192ce70d8cc03d5c3359.omdep.near'),
+  evmChain('avax', 'Avalanche', 'nep141:avax-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e.omdep.near'),
+  evmChain('monad', 'Monad', 'nep245:v2_1.omni.hot.tg:143_2dmLwYWkCQKyTjeUPAsGJuiVLbFx'), // 0x7547…b603
+  chain('sol', 'Solana', 'nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near', 'Your Solana wallet address', solanaAddressError), // EPjF…Dt1v
+  chain('sui', 'Sui', 'nep141:sui-c1b81ecaf27933252d31a963bc5e9458f13c18ce.omft.near', '0x… (64 digits)', hex64AddressError), // 0xdba3…::usdc::USDC
+  chain('aptos', 'Aptos', 'nep141:aptos-34ee497f210c5a511e8d5b53bc56d75b63612bb5.omft.near', '0x… (64 digits)', hex64AddressError), // 0xbae2…6f3b
 ];
 
 export interface PayoutAsset {

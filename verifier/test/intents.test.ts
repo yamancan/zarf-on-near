@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 // Recorded 2026-11-10 from GET /v0/status for a real, never-funded mainnet quote (spike S3).
 import recorded from './fixtures/1click-status-pending.json';
 import {
-  checkIntentsStatus, ed25519B58, fetchIntentsStatus, IntentsError, quoteSignedBytes, verifyQuoteSignature, type IntentsClaim,
+  checkIntentsStatus, ed25519B58, PAYOUT_ASSETS, recipientFits, fetchIntentsStatus, IntentsError, quoteSignedBytes, verifyQuoteSignature, type IntentsClaim,
 } from '../src/intents';
 
 const ns = (iso: string) => (BigInt(Date.parse(iso)) * 1_000_000n).toString();
@@ -94,9 +94,9 @@ describe('checkIntentsStatus', () => {
 
   it('compares non-EVM addresses exactly', () => {
     const sol = '13QkxhNMrTPxoCkRdYdJ65tFuwXPhL5gLS2Z5Nr6gjRK';
-    const solQuote = mutate((s) => (s.quoteResponse.quoteRequest.recipient = sol));
-    expect(code(solQuote, { ...claim, recipient: sol })).toBeUndefined();
-    expect(code(solQuote, { ...claim, recipient: sol.toLowerCase() })).toBe('INTENTS_WRONG_RECIPIENT');
+    const solQuote = mutate((s) => Object.assign(s.quoteResponse.quoteRequest, { recipient: sol, destinationAsset: SOL_USDC }));
+    expect(code(solQuote, { ...claim, recipient: sol, destinationAsset: SOL_USDC })).toBeUndefined();
+    expect(code(solQuote, { ...claim, recipient: sol.toLowerCase(), destinationAsset: SOL_USDC })).toBe('INTENTS_WRONG_RECIPIENT');
     const nearRefund = mutate((s) => (s.quoteResponse.quoteRequest.refundTo = 'Alice.near'));
     expect(code(nearRefund, { ...claim, campaignSender: 'alice.near' })).toBe('INTENTS_WRONG_REFUND');
   });
@@ -283,3 +283,53 @@ describe('verifyQuoteSignature (1Click quote signature)', () => {
     expect(await sigCode(recorded, pub)).toBe('INTENTS_BAD_SIGNATURE');
   });
 });
+
+const SOL_USDC = 'nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near';
+const SUI_USDC = 'nep141:sui-c1b81ecaf27933252d31a963bc5e9458f13c18ce.omft.near';
+
+describe('payout allowlist (T-025): Circle native USDC on ten chains, each with its address format', () => {
+  it('is exactly the ten pinned ids, all 6 decimals (the web pins the same list)', () => {
+    expect([...PAYOUT_ASSETS.keys()]).toEqual([
+      'nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near',
+      'nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near',
+      'nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near',
+      'nep245:v2_1.omni.hot.tg:10_A2ewyUyDp6qsue1jqZsGypkCxRJ',
+      'nep141:pol-0x3c499c542cef5e3811e1192ce70d8cc03d5c3359.omdep.near',
+      'nep141:avax-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e.omdep.near',
+      'nep245:v2_1.omni.hot.tg:143_2dmLwYWkCQKyTjeUPAsGJuiVLbFx',
+      SOL_USDC, SUI_USDC,
+      'nep141:aptos-34ee497f210c5a511e8d5b53bc56d75b63612bb5.omft.near',
+    ]);
+    expect([...PAYOUT_ASSETS.values()].every((d) => d === 6)).toBe(true);
+  });
+  it('refuses lookalikes 1Click also lists: BNB, Gnosis, X Layer USDC.e, Stellar, the deprecated Polygon id', () => {
+    for (const id of [
+      'nep141:bnb-0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d.omdep.near', 'nep141:gnosis-0x2a22f9c3b484c3629090feed35f17ff8f88f76f0.omft.near',
+      'nep245:v2_1.omni.hot.tg:196_2dK9kLNR7Ekq7su8FxNGiUW3djTw', 'nep245:v2_1.omni.hot.tg:1100_111bzQBB65GxAPAVoxqmMcgYo5oS3txhqs1Uh1cgahKQUeTUq1TJu',
+      'nep245:v2_1.omni.hot.tg:137_qiStmoQJDQPTebaPjgx5VBxZv6L',
+    ]) {
+      const s = mutate((x) => (x.quoteResponse.quoteRequest.destinationAsset = id));
+      expect(code(s, { ...claim, destinationAsset: id })).toBe('INTENTS_WRONG_DESTINATION_ASSET');
+    }
+  });
+  it('recipientFits: each chain takes only its own address format', () => {
+    const evm = '0x' + 'ab'.repeat(20), sol = '13QkxhNMrTPxoCkRdYdJ65tFuwXPhL5gLS2Z5Nr6gjRK', hex = '0x' + 'cd'.repeat(32);
+    expect([recipientFits(claim.destinationAsset, evm), recipientFits(claim.destinationAsset, sol), recipientFits(claim.destinationAsset, hex)]).toEqual([true, false, false]);
+    expect([recipientFits(SOL_USDC, sol), recipientFits(SOL_USDC, evm), recipientFits(SOL_USDC, '1'.repeat(32)), recipientFits(SOL_USDC, 'z'.repeat(44))]).toEqual([true, false, false, false]);
+    expect([recipientFits(SUI_USDC, hex), recipientFits(SUI_USDC, evm), recipientFits(SUI_USDC, '0x' + '0'.repeat(64))]).toEqual([true, false, false]);
+    expect(recipientFits('nep141:unknown.near', evm)).toBe(false);
+  });
+  it('a Solana address on the Base asset, or a Base address on the Solana asset, is refused', () => {
+    const sol = '13QkxhNMrTPxoCkRdYdJ65tFuwXPhL5gLS2Z5Nr6gjRK';
+    const onBase = mutate((x) => (x.quoteResponse.quoteRequest.recipient = sol));
+    expect(code(onBase, { ...claim, recipient: sol })).toBe('INTENTS_WRONG_RECIPIENT');
+    const onSol = mutate((x) => (x.quoteResponse.quoteRequest.destinationAsset = SOL_USDC));
+    expect(code(onSol, { ...claim, destinationAsset: SOL_USDC })).toBe('INTENTS_WRONG_RECIPIENT');
+  });
+  it('Sui/Aptos hex is compared case-insensitively, like EVM', () => {
+    const hex = '0x' + 'cd'.repeat(32);
+    const s = mutate((x) => Object.assign(x.quoteResponse.quoteRequest, { recipient: hex.toUpperCase().replace('0X', '0x'), destinationAsset: SUI_USDC }));
+    expect(code(s, { ...claim, recipient: hex, destinationAsset: SUI_USDC })).toBeUndefined();
+  });
+});
+

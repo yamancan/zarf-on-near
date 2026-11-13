@@ -237,7 +237,7 @@
       config = await getConfig(rpc, contract);
       if (!config.token_ids.includes(token)) setupError = `${token} is not accepted by this contract.`;
       choose(picks[0] ?? 'date');
-      wallet = await nearConnectWallet(config.network, rpc);
+      wallet = await nearConnectWallet(config.network, rpc, { ethereum: true }); // MetaMask senders (T-025)
       walletReady = true;
       account = wallet.accountId();
       // A funding tx from before a reload: resume checking it instead of offering Create again.
@@ -1022,7 +1022,7 @@
               {/if}
             </div>
             {#if balance !== null && contract}
-              <!-- USDC from Base, Arbitrum or Ethereum through 1Click into this account (T-019); the send itself is unchanged -->
+              <!-- USDC from another chain through 1Click into this account (T-019); the send itself is unchanged -->
               <FundFromChain {account} {contract} need={short} testnet={TESTNET} onArrived={() => balanceTick++} />
             {/if}
             {@render actions(true, 'Continue', ready && short === 0n && balance !== null, prepare, balance === null && balanceFailed ? 'Check your balance first.' : '')}

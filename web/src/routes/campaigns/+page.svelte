@@ -48,7 +48,7 @@
     }
     try {
       config = await getConfig(rpc, contract);
-      wallet = await nearConnectWallet(config.network, rpc);
+      wallet = await nearConnectWallet(config.network, rpc, { ethereum: true }); // the same wallets as /create (T-025)
       walletReady = true;
       account = wallet.accountId();
       if (account) await load();

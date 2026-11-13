@@ -1,11 +1,11 @@
 <script lang="ts">
-  // Step 3 "Wallet": pay for the send with USDC from Base, Arbitrum or Ethereum (T-019). 1Click turns it into NEAR USDC in
+  // Step 3 "Wallet": pay for the send with USDC from another chain (T-019, T-025). 1Click turns it into NEAR USDC in
   // the sender's own account; the page then sees the balance and the send goes on as before (ft_transfer_call, unchanged).
   // We only show a deposit address: the sender pays from any wallet. Testnet: live dry mainnet quotes, nothing to pay.
   import { onMount, tick } from 'svelte';
   import { encode } from 'uqr';
   import { ArrowLeftRight, CheckCircle2, Clock, AlertTriangle } from 'lucide-svelte';
-  import { evmAddressError, getStatus, QuoteError, type StatusView } from '$lib/intents';
+  import { getStatus, QuoteError, type StatusView } from '$lib/intents';
   import {
     archiveFunding, describeFunding, earlierFundings, followFunding, FUNDING_CHAINS, FUNDING_LIFETIME_MS, getFundingQuote, loadFunding, mayPay, mayStartOver, refundConfirmed, saveFunding, unresolved,
     TESTNET_PREVIEW_RECIPIENT, type FundingQuote, type SavedFunding,
@@ -37,7 +37,7 @@
   let request = 0; // the same for quote requests: a reply to an older request is dropped
 
   const chain = $derived(FUNDING_CHAINS.find((c) => c.key === (saved?.chainKey ?? source)) ?? null);
-  const addrError = $derived(refundTo ? evmAddressError(refundTo.trim()) : null);
+  const addrError = $derived(refundTo && chain ? chain.addressError(refundTo.trim()) : null);
   const confirmed = $derived(!addrError && refundConfirmed(refundTo.trim(), last6));
   const line = $derived(saved && status && chain ? describeFunding(status, chain.name, account, saved.refundTo, saved.depositAddress) : null);
   const canPay = $derived(!!saved && mayPay(status?.status, fresh, saved.deadline, now));
@@ -246,7 +246,7 @@
       {#if testnet}
         <Note tone="info">Real cross-chain funding runs on mainnet only: 1Click has no testnet. Here you see a live mainnet price, with nothing to pay.</Note>
       {/if}
-      <ZenInput label="Your {chain.name} Address" hint="Refunds go here. Your own wallet, not an exchange." placeholder="0x…" bind:value={refundTo} error={addrError} disabled={busy} autocomplete="off" spellcheck="false" />
+      <ZenInput label="Your {chain.name} Address" hint="Refunds go here. Your own wallet, not an exchange." placeholder={chain.placeholder} bind:value={refundTo} error={addrError} disabled={busy} autocomplete="off" spellcheck="false" />
       {#if refundTo && !addrError}
         <ZenInput label="Its Last 6 Characters" hint="Read it again from your wallet." bind:value={last6} maxlength={6} disabled={busy} autocomplete="off" spellcheck="false" class="font-mono" />
       {/if}

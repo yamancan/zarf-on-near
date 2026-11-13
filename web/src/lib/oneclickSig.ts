@@ -26,7 +26,7 @@ function b58encode(bytes: Uint8Array): string {
   }
   return out;
 }
-function b58decode(s: string): Uint8Array<ArrayBuffer> {
+export function b58decode(s: string): Uint8Array<ArrayBuffer> {
   let n = 0n;
   for (const ch of s) {
     const i = B58.indexOf(ch);

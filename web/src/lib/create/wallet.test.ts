@@ -21,7 +21,7 @@ describe('walletRequest (what NEAR Connect is handed)', () => {
 describe('pinned wallet list (wallets.json)', async () => {
   const { default: manifest } = await import('./wallets.json');
   it('offers only the reviewed wallets, never MyNearWallet', () => {
-    expect(manifest.wallets.map((w) => w.id).sort()).toEqual(['hot-wallet', 'intear-wallet', 'meteor-wallet', 'nightly-wallet']) // senders never get ethereum-wallets;
+    expect(manifest.wallets.map((w) => w.id).sort()).toEqual(['hot-wallet', 'intear-wallet', 'meteor-wallet', 'nightly-wallet']); // ethereum-wallets is added by nearConnectWallet({ ethereum })
   });
   it('every wallet\'s code is pinned: a GitHub commit URL, or a sha256 the patched loader checks (Intear, T-004)', () => {
     for (const w of manifest.wallets as { executor: string; integrity?: string }[]) {
@@ -57,12 +57,16 @@ describe('patched NEAR Connect loader: integrity pin (patches/@hot-labs__near-co
   });
 });
 
-describe('ethereum-wallets (claim form only, T-002)', async () => {
+describe('ethereum-wallets (T-002 claim form; senders since T-025)', async () => {
   const { default: eth } = await import('./ethereum-wallets.json');
   it('is the upstream entry, sandboxed, and sign-in needs no key', () => {
     expect(eth.id).toBe('ethereum-wallets');
     expect(eth.type).toBe('sandbox');
     expect(eth.executor).toBe('https://evm-on-near.dev/executor.js');
     expect(eth.features.signInWithoutAddKey).toBe(true);
+  });
+  it('its executor is pinned by sha256 like Intear\'s (the patched loader refuses another file), on both networks', () => {
+    expect(eth.integrity).toBe('0480ca7b4d2204b1702a554e92f6d00d69a780ff1dee9dcf67feb6ae7991556b');
+    expect([eth.features.mainnet, eth.features.testnet]).toEqual([true, true]);
   });
 });
