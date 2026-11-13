@@ -1,6 +1,6 @@
 # Clean clone -> `make test` and `make demo`. No secrets, no Google login.
 # Needs Node 24 and pnpm 10.30.3 (pinned per package); `pnpm install` needs network access.
-.PHONY: test demo demo-sandbox install verifier relayer web watcher scripts faucet contract
+.PHONY: test demo demo-sandbox install verifier relayer web watcher scripts faucet proxy contract
 
 PNPM_INSTALL := pnpm install --frozen-lockfile
 
@@ -8,7 +8,7 @@ PNPM_INSTALL := pnpm install --frozen-lockfile
 # Exit 1 if anything that ran failed; a contract skipped for a missing toolchain is not a failure.
 test:
 	@status=""; fail=0; \
-	for t in verifier relayer web watcher scripts; do \
+	for t in verifier relayer web watcher scripts proxy; do \
 	  if $(MAKE) --no-print-directory $$t; then status="$$status $$t ✓"; else status="$$status $$t ✗"; fail=1; fi; \
 	done; \
 	if [ ! -d faucet ]; then status="$$status faucet NOT RUN (no faucet/)"; \
@@ -40,6 +40,10 @@ watcher:
 # The judges' page (/try), once the faucet is merged into this tree.
 faucet:
 	cd faucet && $(PNPM_INSTALL) && pnpm test && pnpm typecheck
+
+# near.zarf.to: the pass-through Worker in the zarf.to zone's account (proxy/src/index.ts).
+proxy:
+	cd proxy && $(PNPM_INSTALL) && pnpm test && pnpm typecheck
 
 # The demo harness's own tests (the --dry mock must refuse a tampered claim tx).
 scripts:
