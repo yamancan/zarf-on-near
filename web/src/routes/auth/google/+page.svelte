@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
-  import { AlertTriangle, ChevronDown, Loader2, Mail } from 'lucide-svelte';
+  import { AlertTriangle, ChevronDown, Loader2 } from 'lucide-svelte';
   import { formatAmount } from '$lib/create/recipients';
   import { UNIT } from '$lib/network';
   import { loadAttempt, parseCallback, signedIn, stateMatches } from '$lib/claim';
@@ -23,7 +23,7 @@
     if ('error' in cb) {
       failed = cb.error === 'access_denied'
         ? { title: 'Sign-In Cancelled', line: back ? `${waiting} Sign in again when you are ready.` : 'Open your claim link again to sign in.', cancelled: true }
-        : { title: 'Sign-In Did Not Finish', line: 'Google could not sign you in this time. Try again.', code: cb.error };
+        : { title: 'Sign-In Did Not Finish', line: back ? 'Google could not sign you in this time. Try again from your claim.' : 'Google could not sign you in this time. Open your claim link again to try once more.', code: cb.error };
     } else if (!stateMatches(attempt, cb.state)) {
       failed = { title: 'Sign-In From Another Tab', line: 'Start the sign-in again from your claim.' };
     } else {
@@ -39,18 +39,13 @@
   <ZenCard variant="elevated" padding="lg">
     <div class="flex flex-col items-center text-center gap-4 py-2">
       {#if failed}
-        {#if failed.cancelled}
-          <Medallion icon={Mail} />
-        {:else}
-          <Medallion icon={AlertTriangle} tone="error" />
-        {/if}
+        {#if !failed.cancelled}<Medallion icon={AlertTriangle} tone="error" />{/if}
         <h1 class="text-xl font-bold">{failed.title}</h1>
         <p class="text-sm text-zen-fg-muted max-w-xs" role={failed.cancelled ? 'status' : 'alert'}>{failed.line}</p>
         {#if back}
           <a href={back} class="block w-full sm:w-auto"><ZenButton tabindex={-1} variant="primary" class="w-full sm:w-auto">Back to Claim</ZenButton></a>
         {:else}
-          {#if !failed.cancelled}<p class="text-xs text-zen-fg-muted max-w-xs">Open your claim link again to try once more.</p>{/if}
-          <a href="/" class="inline-block"><ZenButton tabindex={-1} variant="secondary">What Is Zarf?</ZenButton></a>
+          <a href="/" class="text-xs text-zen-fg-subtle underline underline-offset-2 hover:text-zen-fg">About Zarf</a>
         {/if}
         {#if failed.code}
           <details class="group text-xs text-zen-fg-muted">

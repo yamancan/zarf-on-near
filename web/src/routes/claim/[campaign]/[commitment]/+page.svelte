@@ -272,7 +272,8 @@
 <!-- Terminal states: the main claim app's LoginPrompt anatomy (64 px medallion, bold title, one line, one button) -->
 {#snippet terminal(Icon: typeof Mail, tone: 'success' | 'error' | 'muted', title: string, line: string, action: 'home' | 'recheck' | 'none')}
   <div class="flex flex-col items-center text-center space-y-6 py-2" in:swapIn>
-    <Medallion icon={Icon} {tone} />
+    <!-- A disc only where it carries a verdict (red error); a neutral dead end needs no decoration (T-034) -->
+    {#if tone !== 'muted'}<Medallion icon={Icon} {tone} />{/if}
     <div class="space-y-2">
       <h1 class="text-xl font-bold text-zen-fg">{title}</h1>
       <p class="text-sm text-zen-fg-muted leading-relaxed max-w-xs" role={tone === 'error' ? 'alert' : undefined}>{line}</p>
@@ -280,7 +281,8 @@
     {#if action === 'recheck'}
       <ZenButton variant="primary" class="w-full sm:w-auto" onclick={() => link && checkLink(link)}>Check Again</ZenButton>
     {:else if action === 'home'}
-      <a href="/" class="inline-block"><ZenButton tabindex={-1} variant="secondary">What Is Zarf?</ZenButton></a>
+      <!-- A recipient at a dead end is told the next step in the line above; Zarf itself is only a quiet link -->
+      <a href="/" class="text-xs text-zen-fg-subtle underline underline-offset-2 hover:text-zen-fg">About Zarf</a>
     {/if}
   </div>
 {/snippet}
@@ -331,7 +333,7 @@
     {:else if check === 'pending'}
       {@render terminal(Clock, 'muted', 'Payment in Progress', 'It usually settles within a minute.', 'recheck')}
     {:else if check === 'ended'}
-      {@render terminal(Clock, 'muted', 'Campaign Ended', `Claims closed on ${deadline}. Ask the sender.`, 'home')}
+      {@render terminal(Clock, 'muted', 'Campaign Ended', `Claims closed on ${deadline}. Ask the sender to send it again.`, 'home')}
     {:else if check === 'error'}
       {@render terminal(AlertTriangle, 'error', "Couldn't Check Claim", checkError, 'recheck')}
     {:else if loaded && check === 'checking'}
