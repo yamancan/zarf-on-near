@@ -151,3 +151,14 @@ export const PAYOUT_CHAINS: PayoutChain[] = [
   chain('sui', 'Sui', 'nep141:sui-c1b81ecaf27933252d31a963bc5e9458f13c18ce.omft.near', '0x… (64 digits)', hex64AddressError), // 0xdba3…::usdc::USDC
   chain('aptos', 'Aptos', 'nep141:aptos-34ee497f210c5a511e8d5b53bc56d75b63612bb5.omft.near', '0x… (64 digits)', hex64AddressError), // 0xbae2…6f3b
 ];
+
+let logoInstances = 0;
+/**
+ * `c.logo` with its gradient ids (and their url(#…) references) made unique for this instance. Render logos with
+ * {@html chainLogo(c)}: the same chain shown twice (selected value and its option) would otherwise repeat an id, and a
+ * gradient whose first copy sits in a hidden element does not paint.
+ */
+export function chainLogo(c: PayoutChain): string {
+  const n = ++logoInstances;
+  return c.logo.replace(/(id="|url\(#)([\w-]+__\w+)/g, `$1$2-${n}`);
+}

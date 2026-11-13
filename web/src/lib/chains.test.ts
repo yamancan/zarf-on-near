@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PAYOUT_CHAINS } from './chains';
+import { chainLogo, PAYOUT_CHAINS } from './chains';
 
 describe('chains.ts: the one chain list both pickers render (T-025)', () => {
   it('each entry has an id, name, pinned asset id, logo and address checks', () => {
@@ -21,5 +21,16 @@ describe('chains.ts: the one chain list both pickers render (T-025)', () => {
     expect(new Set(PAYOUT_CHAINS.map((c) => c.logo)).size).toBe(PAYOUT_CHAINS.length);
     const ids = PAYOUT_CHAINS.flatMap((c) => [...c.logo.matchAll(/id="([^"]+)"/g)].map((m) => m[1]));
     expect(new Set(ids).size).toBe(ids.length); // gradients stay distinct when several logos share a page
+  });
+  it('chainLogo: each rendered instance gets its own gradient ids, and every reference points at its own', () => {
+    const sol = PAYOUT_CHAINS.find((c) => c.key === 'sol')!;
+    const [a, b] = [chainLogo(sol), chainLogo(sol)];
+    const ids = (h: string) => [...h.matchAll(/id="([^"]+)"/g)].map((m) => m[1]);
+    const refs = (h: string) => [...h.matchAll(/url\(#([^)]+)\)/g)].map((m) => m[1]);
+    expect(ids(a)).toHaveLength(3);
+    expect(ids(a).some((i) => ids(b).includes(i))).toBe(false);
+    for (const h of [a, b]) expect(refs(h).every((r) => ids(h).includes(r))).toBe(true);
+    const base = PAYOUT_CHAINS[0];
+    expect(chainLogo(base)).toBe(base.logo); // no gradient, nothing to rename
   });
 });
