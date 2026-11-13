@@ -9,6 +9,9 @@
 <div class="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
   <span class="sr-only">{label}</span>
   <Mark svg={MARKS.usdc} class="w-10 h-10" />
-  <span class="text-5xl font-semibold tracking-tight text-zen-fg tabular-nums">{value}</span>
-  <span class="text-base text-zen-fg-muted">{unit}</span>
+  <!-- As ClaimCard (T-033 B): figure and unit trimmed to cap height, so the mark centres on the digits -->
+  <span class="flex flex-wrap items-baseline gap-x-2 min-w-0">
+    <span class="text-5xl font-semibold tracking-tight text-zen-fg tabular-nums [text-box:trim-both_cap_alphabetic]">{value}</span>
+    <span class="text-base text-zen-fg-muted leading-none [text-box:trim-both_cap_alphabetic]">{unit}</span>
+  </span>
 </div>
