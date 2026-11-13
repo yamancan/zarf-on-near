@@ -4,7 +4,8 @@ import tokens from './fixtures/1click-tokens.json';
 // Every USDC-named entry of GET /v0/tokens, recorded 2026-11-14 (T-025): the pinned set is checked against it.
 import usdcTokens from './fixtures/1click-tokens-usdc.json';
 import pending from './fixtures/1click-status-pending.json';
-import { MAX_CROSS_CHAIN_PAYOUT, MAX_LOSS_BPS, payoutCapError, withinLossBound, crossChainOffered, submitDeposit, describeStatus, refusal, evmAddressError, hex64AddressError, solanaAddressError, getQuote, getStatus, loadPayout, lossBps, needsRecheck, nextStep, notReturnedYet, recheckReceipt, savePayout, NEAR_USDC_ASSET, PAYOUT_CHAINS, QuoteError, resolveAssets } from './intents';
+import { MAX_CROSS_CHAIN_PAYOUT, MAX_LOSS_BPS, payoutCapError, withinLossBound, crossChainOffered, submitDeposit, describeStatus, refusal, evmAddressError, hex64AddressError, solanaAddressError, solanaFormatError, ed25519OnCurve, getQuote, getStatus, loadPayout, lossBps, needsRecheck, nextStep, notReturnedYet, recheckReceipt, savePayout, NEAR_USDC_ASSET, PAYOUT_CHAINS, QuoteError, resolveAssets } from './intents';
+import { b58decode } from './oneclickSig';
 import { loadReceipt, saveReceipt, shownAmount, type Receipt } from './claim';
 
 const json = (body: unknown, status = 200) => vi.fn(async (_u: string, _i?: RequestInit) => new Response(JSON.stringify(body), { status }));
@@ -90,6 +91,10 @@ describe('address validators (T-025)', () => {
     expect(solanaAddressError(SOL.replace('W', '0'))).toMatch(/full Solana address/); // 0 is not base58
     expect(solanaAddressError('z'.repeat(44))).toMatch(/not a Solana address/); // decodes to more than 32 bytes
     expect(solanaAddressError(EVM)).toMatch(/full Solana address/);
+    expect(solanaAddressError('8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR')).toMatch(/not a wallet address/); // off-curve, like a token account
+    expect(solanaFormatError('8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR')).toBeNull(); // still a valid deposit-address format
+    expect(solanaFormatError('11111111111111111111111111111111')).toMatch(/system program/);
+    expect([ed25519OnCurve(b58decode(SOL)), ed25519OnCurve(b58decode('8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR'))]).toEqual([true, false]);
   });
   it('Sui and Aptos: 0x and all 64 hex digits, never zero, no short form', () => {
     expect(hex64AddressError(HEX64)).toBeNull();

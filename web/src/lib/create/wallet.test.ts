@@ -33,14 +33,23 @@ describe('pinned wallet list (wallets.json)', async () => {
 
 describe('patched NEAR Connect loader: integrity pin (patches/@hot-labs__near-connect@0.12.0.patch)', async () => {
   const { default: mod } = await import('@hot-labs/near-connect/build/SandboxedWallet/executor.js');
-  const SandboxExecutor = ((mod as { default?: unknown }).default ?? mod) as { prototype: { checkNewVersion(e: unknown, c: string | null): Promise<string> } };
+  type Proto = { checkNewVersion(e: unknown, c: string | null): Promise<string>; loadCode(): Promise<string>; matchesIntegrity(c: string): Promise<boolean> };
+  const SandboxExecutor = ((mod as { default?: unknown }).default ?? mod) as { prototype: Proto };
   const code = 'window.selector.ready({})';
   const sha = async (t: string) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t))), (b) => b.toString(16).padStart(2, '0')).join('');
-  const load = async (integrity?: string) => {
+  // the executor as NEAR Connect builds it (it passes itself to checkNewVersion), with an in-memory cache
+  const executor = (integrity?: string, cached: string | null = null) => {
     const saved: string[] = [];
-    const self = { actualCode: null, connector: { db: { setItem: async (_k: string, v: string) => void saved.push(v) } }, manifest: { id: 'intear-wallet', version: '1' } };
-    const executor = { manifest: { id: 'intear-wallet', executor: 'https://wallet.intear.tech/near-selector.js', integrity } };
-    const got = await SandboxExecutor.prototype.checkNewVersion.call(self, executor, null);
+    const self = Object.assign(Object.create(SandboxExecutor.prototype) as Proto, {
+      actualCode: null,
+      connector: { db: { getItem: async () => cached, setItem: async (_k: string, v: string) => void saved.push(v) } },
+      manifest: { id: 'intear-wallet', version: '1', executor: 'https://wallet.intear.tech/near-selector.js', integrity },
+    });
+    return { self, saved };
+  };
+  const load = async (integrity?: string) => {
+    const { self, saved } = executor(integrity);
+    const got = await self.checkNewVersion(self, null);
     return { got, saved };
   };
   it('runs and caches the file whose hash matches', async () => {
@@ -54,6 +63,14 @@ describe('patched NEAR Connect loader: integrity pin (patches/@hot-labs__near-co
   it('leaves unpinned entries (GitHub commit URLs) as they were', async () => {
     vi.stubGlobal('fetch', async () => new Response(code));
     expect((await load()).got).toBe(code);
+  });
+  it('ignores cached code that does not match the pin and waits for the verified download', async () => {
+    vi.stubGlobal('fetch', async () => new Response(code));
+    const pin = await sha(code);
+    expect(await executor(pin, code + ';steal()').self.loadCode()).toBe(code);
+    expect(await executor(pin, code).self.loadCode()).toBe(code); // a matching cache is used as before
+    vi.stubGlobal('fetch', async () => new Response(code + ';steal()'));
+    await expect(executor(pin, code + ';steal()').self.loadCode()).rejects.toThrow(/pinned hash/); // nothing good to run
   });
 });
 

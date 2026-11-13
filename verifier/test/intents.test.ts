@@ -319,6 +319,12 @@ describe('payout allowlist (T-025): Circle native USDC on ten chains, each with 
     expect([recipientFits(SUI_USDC, hex), recipientFits(SUI_USDC, evm), recipientFits(SUI_USDC, '0x' + '0'.repeat(64))]).toEqual([true, false, false]);
     expect(recipientFits('nep141:unknown.near', evm)).toBe(false);
   });
+  it('recipientFits: a Solana recipient must be an on-curve key and not the USDC mint (web agrees)', () => {
+    // 8qbH…feR decodes to 32 bytes but off the ed25519 curve, like a token account: nobody holds its key
+    expect(recipientFits(SOL_USDC, '8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR')).toBe(false);
+    expect(recipientFits(SOL_USDC, 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v')).toBe(false);
+    expect(recipientFits(SOL_USDC, '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM')).toBe(true);
+  });
   it('a Solana address on the Base asset, or a Base address on the Solana asset, is refused', () => {
     const sol = '13QkxhNMrTPxoCkRdYdJ65tFuwXPhL5gLS2Z5Nr6gjRK';
     const onBase = mutate((x) => (x.quoteResponse.quoteRequest.recipient = sol));

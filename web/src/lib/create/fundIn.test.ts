@@ -205,6 +205,15 @@ describe('each status on the funding screen', () => {
     const sol = { ...f, chainKey: 'sol', depositAddress: '13QkxhNMrTPxoCkRdYdJ65tFuwXPhL5gLS2Z5Nr6gjRK', refundTo: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM' };
     m.set('zarf-near:funding-earlier:c/a.near', JSON.stringify([sol, { ...sol, depositAddress: dep }, { ...f, chainKey: 'gone' }]));
     expect(earlierFundings('c', 'a.near', store)).toEqual([sol]);
+    // an off-curve deposit address is still a deposit address; an off-curve refund address is nobody's wallet
+    const offCurve = '8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR';
+    m.set('zarf-near:funding-earlier:c/a.near', JSON.stringify([{ ...sol, depositAddress: offCurve }, { ...sol, refundTo: offCurve }]));
+    expect(earlierFundings('c', 'a.near', store)).toEqual([{ ...sol, depositAddress: offCurve }]);
+    // base58 is case-sensitive: two Solana deposit addresses that differ only in case are two records
+    m.delete('zarf-near:funding-earlier:c/a.near');
+    const other = { ...sol, depositAddress: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAwWM' };
+    expect(archiveFunding('c', 'a.near', sol, store) && archiveFunding('c', 'a.near', other, store)).toBe(true);
+    expect(earlierFundings('c', 'a.near', store)).toHaveLength(2);
   });
   it('a failed archive write says so: the active record is never dropped without it', () => {
     const full = { getItem: () => null, setItem: () => { throw new Error('QuotaExceededError'); }, removeItem: () => {} } as unknown as Storage;
@@ -221,11 +230,14 @@ describe('each status on the funding screen', () => {
 });
 
 describe('refund address confirmation and the saved funding', () => {
-  it('needs the last 6 characters, any case', () => {
+  it('needs the last 6 characters: any case for 0x addresses, exact for Solana', () => {
     expect(refundConfirmed(REFUND, '1beaed')).toBe(true);
     expect(refundConfirmed(REFUND, ' 1BeAed ')).toBe(true);
     expect(refundConfirmed(REFUND, '1beae')).toBe(false);
     expect(refundConfirmed('', '')).toBe(false);
+    // Solana (base58): case is part of the address, so it must match exactly
+    const solRefund = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
+    expect([refundConfirmed(solRefund, 'YtAWWM'), refundConfirmed(solRefund, ' YtAWWM '), refundConfirmed(solRefund, 'YtAWwM'), refundConfirmed(solRefund, 'ytawwm')]).toEqual([true, true, false, false]);
   });
   it('survives a reload and is cleared on request', () => {
     const m = new Map<string, string>();

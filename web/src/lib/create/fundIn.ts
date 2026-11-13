@@ -32,9 +32,12 @@ export function fundingWithinLossBound(amountIn: string, amountOut: string, inDe
   return BigInt(amountOut) * 10n ** BigInt(inDecimals) * 10_000n >= BigInt(amountIn) * 10n ** BigInt(NEAR_USDC_DECIMALS) * BigInt(10_000 - MAX_LOSS_BPS);
 }
 
-/** "Type its last 6 characters": the refund address is the sender's own, read twice. Case does not matter. */
+/** Hex addresses (0x…) ignore case; base58 (Solana) does not: a different case is a different address. */
+const addressKey = (a: string): string => (a.startsWith('0x') ? a.toLowerCase() : a);
+
+/** "Type its last 6 characters": the refund address is the sender's own, read twice. Case matters only for Solana. */
 export const refundConfirmed = (address: string, typed: string): boolean =>
-  address.length >= 6 && typed.trim().toLowerCase() === address.slice(-6).toLowerCase();
+  address.length >= 6 && (address.startsWith('0x') ? typed.trim().toLowerCase() === address.slice(-6).toLowerCase() : typed.trim() === address.slice(-6));
 
 export interface FundingArgs {
   chain: PayoutChain;
@@ -120,7 +123,7 @@ export async function getFundingQuote(dry: boolean, a: FundingArgs, fetchFn: Fet
   if (amountOut !== a.amount || BigInt(minOut) < BigInt(a.amount)) throw new QuoteError(CANNOT_CHECK);
   if (!fundingWithinLossBound(amountIn, amountOut, a.chain.decimals)) throw new QuoteError(TOO_COSTLY);
   const depositAddress = typeof q.depositAddress === 'string' ? q.depositAddress : undefined;
-  if (!dry && (!depositAddress || a.chain.addressError(depositAddress))) throw new QuoteError(CANNOT_CHECK);
+  if (!dry && (!depositAddress || a.chain.depositAddressError(depositAddress))) throw new QuoteError(CANNOT_CHECK);
   if (!dry && q.depositMemo) throw new QuoteError(CANNOT_CHECK); // we show no memo: a chain that needs one is not listed
   if (!dry && !(Date.parse(String(q.deadline)) > now + MIN_TIME_TO_PAY_MS)) throw new QuoteError(CANNOT_CHECK);
   return {
@@ -233,7 +236,7 @@ const earlierKey = (contract: string, account: string) => `zarf-near:funding-ear
 export function archiveFunding(contract: string, account: string, f: SavedFunding, store?: Storage): boolean {
   try {
     const s = store ?? localStorage;
-    const rest = earlierFundings(contract, account, s).filter((e) => e.depositAddress.toLowerCase() !== f.depositAddress.toLowerCase());
+    const rest = earlierFundings(contract, account, s).filter((e) => addressKey(e.depositAddress) !== addressKey(f.depositAddress));
     s.setItem(earlierKey(contract, account), JSON.stringify([f, ...rest].slice(0, 5)));
     return earlierFundings(contract, account, s).some((e) => e.depositAddress === f.depositAddress);
   } catch {
@@ -244,7 +247,7 @@ export function archiveFunding(contract: string, account: string, f: SavedFundin
 /** A saved funding is only trusted if its chain is still listed and both addresses fit that chain. */
 const savedValid = (f: SavedFunding | null): f is SavedFunding => {
   const c = f && FUNDING_CHAINS.find((x) => x.key === f.chainKey);
-  return !!c && typeof f.depositAddress === 'string' && typeof f.refundTo === 'string' && !c.addressError(f.depositAddress) && !c.addressError(f.refundTo);
+  return !!c && typeof f.depositAddress === 'string' && typeof f.refundTo === 'string' && !c.depositAddressError(f.depositAddress) && !c.addressError(f.refundTo);
 };
 
 export function earlierFundings(contract: string, account: string, store?: Storage): SavedFunding[] {
@@ -253,8 +256,8 @@ export function earlierFundings(contract: string, account: string, store?: Stora
     if (!Array.isArray(list)) return [];
     const seen = new Set<string>(); // one per address, whatever another tab wrote
     return list.filter((f: SavedFunding) => {
-      if (!savedValid(f) || seen.has(f.depositAddress.toLowerCase())) return false;
-      seen.add(f.depositAddress.toLowerCase());
+      if (!savedValid(f) || seen.has(addressKey(f.depositAddress))) return false;
+      seen.add(addressKey(f.depositAddress));
       return true;
     });
   } catch {

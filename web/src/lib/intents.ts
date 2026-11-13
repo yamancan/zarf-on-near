@@ -39,8 +39,26 @@ export function evmAddressError(address: string): string | null {
 
 const SOLANA_USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
-/** A Solana wallet address: base58 of a 32-byte public key. Not the system program or the USDC mint itself. */
-export function solanaAddressError(address: string): string | null {
+const P25519 = 2n ** 255n - 19n;
+const D25519 = 37095705934669439343138083508754565189542113879843219016388785533085940283555n;
+const powP = (b: bigint, e: bigint): bigint => {
+  let r = 1n;
+  for (b %= P25519; e > 0n; e >>= 1n, b = (b * b) % P25519) if (e & 1n) r = (r * b) % P25519;
+  return r;
+};
+/**
+ * Whether 32 bytes decompress to an ed25519 point, the way Solana decides it (curve25519-dalek: y taken mod p, x from
+ * x² = (y²-1)/(d·y²+1) must exist). Off-curve addresses (token accounts, other PDAs) have no private key.
+ */
+export function ed25519OnCurve(key: Uint8Array): boolean {
+  let y = 0n;
+  for (let i = 31; i >= 0; i--) y = (y << 8n) | BigInt(i === 31 ? key[i] & 0x7f : key[i]);
+  const y2 = (y * y) % P25519;
+  const x2 = (((y2 - 1n + P25519) % P25519) * powP((D25519 * y2 + 1n) % P25519, P25519 - 2n)) % P25519;
+  return x2 === 0n || powP(x2, (P25519 - 1n) / 2n) === 1n;
+}
+
+const solanaKey = (address: string): Uint8Array | string => {
   if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) return 'Enter the full Solana address: 32 to 44 letters and digits.';
   let bytes: Uint8Array;
   try {
@@ -50,7 +68,21 @@ export function solanaAddressError(address: string): string | null {
   }
   if (bytes.length !== 32) return 'This is not a Solana address: check that you copied all of it.';
   if (bytes.every((b) => b === 0)) return 'That is the system program; nobody can use funds sent there.';
+  return bytes;
+};
+
+/** Any Solana address (base58 of 32 bytes, not all zeros): what a 1Click deposit address must look like. */
+export const solanaFormatError = (address: string): string | null => {
+  const k = solanaKey(address);
+  return typeof k === 'string' ? k : null;
+};
+
+/** A Solana wallet: a 32-byte public key on the ed25519 curve, not the USDC mint itself. */
+export function solanaAddressError(address: string): string | null {
+  const k = solanaKey(address);
+  if (typeof k === 'string') return k;
   if (address === SOLANA_USDC_MINT) return 'That is the USDC token itself, not a wallet. Paste your own wallet address.';
+  if (!ed25519OnCurve(k)) return 'This is not a wallet address (it may be a token account). Paste your wallet address.';
   return null;
 }
 
@@ -72,18 +104,27 @@ export interface PayoutChain {
   assetId: string; // pinned: never looked up by symbol (a lookalike 'USDC' could be listed first)
   decimals: number; // pinned, not taken from /v0/tokens
   placeholder: string;
-  addressError(address: string): string | null;
+  addressError(address: string): string | null; // a wallet the user holds: payout recipient, funding refund
+  depositAddressError(address: string): string | null; // a 1Click deposit address on this chain
   preflight?(address: string, fetchFn?: Fetch): Promise<string | null>;
   note: string;
 }
 
-const chain = (key: string, name: string, assetId: string, placeholder: string, addressError: (a: string) => string | null): PayoutChain => ({
+const chain = (
+  key: string,
+  name: string,
+  assetId: string,
+  placeholder: string,
+  addressError: (a: string) => string | null,
+  depositAddressError = addressError,
+): PayoutChain => ({
   key,
   name,
   assetId,
   decimals: 6,
   placeholder,
   addressError,
+  depositAddressError,
   note: `Paste your own ${name} wallet address. If it is an exchange address, make sure the exchange credits USDC on ${name} to it without a memo or tag.`,
 });
 const evmChain = (key: string, name: string, assetId: string) => chain(key, name, assetId, '0x…', evmAddressError);
@@ -102,7 +143,7 @@ export const PAYOUT_CHAINS: PayoutChain[] = [
   evmChain('pol', 'Polygon', 'nep141:pol-0x3c499c542cef5e3811e1192ce70d8cc03d5c3359.omdep.near'),
   evmChain('avax', 'Avalanche', 'nep141:avax-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e.omdep.near'),
   evmChain('monad', 'Monad', 'nep245:v2_1.omni.hot.tg:143_2dmLwYWkCQKyTjeUPAsGJuiVLbFx'), // 0x7547…b603
-  chain('sol', 'Solana', 'nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near', 'Your Solana wallet address', solanaAddressError), // EPjF…Dt1v
+  chain('sol', 'Solana', 'nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near', 'Your Solana wallet address', solanaAddressError, solanaFormatError), // EPjF…Dt1v
   chain('sui', 'Sui', 'nep141:sui-c1b81ecaf27933252d31a963bc5e9458f13c18ce.omft.near', '0x… (64 digits)', hex64AddressError), // 0xdba3…::usdc::USDC
   chain('aptos', 'Aptos', 'nep141:aptos-34ee497f210c5a511e8d5b53bc56d75b63612bb5.omft.near', '0x… (64 digits)', hex64AddressError), // 0xbae2…6f3b
 ];

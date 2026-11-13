@@ -99,7 +99,24 @@ const BASE58_32 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const sameAddress = (a: unknown, b: string): boolean =>
   typeof a === 'string' && ((EVM.test(a) && EVM.test(b)) || (HEX64.test(a) && HEX64.test(b)) ? a.toLowerCase() === b.toLowerCase() : a === b);
 
-/** Whether `address` has the format of a wallet on the chain of payout asset `assetId` (never all zeros). */
+const P25519 = 2n ** 255n - 19n;
+const D25519 = 37095705934669439343138083508754565189542113879843219016388785533085940283555n;
+const powP = (b: bigint, e: bigint): bigint => {
+  let r = 1n;
+  for (b %= P25519; e > 0n; e >>= 1n, b = (b * b) % P25519) if (e & 1n) r = (r * b) % P25519;
+  return r;
+};
+/** Solana's on-curve test (curve25519-dalek decompression). Off-curve addresses (token accounts, PDAs) have no key. */
+function ed25519OnCurve(key: Uint8Array): boolean {
+  let y = 0n;
+  for (let i = 31; i >= 0; i--) y = (y << 8n) | BigInt(i === 31 ? key[i] & 0x7f : key[i]);
+  const y2 = (y * y) % P25519;
+  const x2 = (((y2 - 1n + P25519) % P25519) * powP((D25519 * y2 + 1n) % P25519, P25519 - 2n)) % P25519;
+  return x2 === 0n || powP(x2, (P25519 - 1n) / 2n) === 1n;
+}
+const SOLANA_USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+
+/** Whether `address` can be a wallet on the chain of payout asset `assetId` (never all zeros; web/src/lib/intents.ts agrees). */
 export function recipientFits(assetId: string, address: string): boolean {
   switch (PAYOUT_ADDRESS.get(assetId)) {
     case 'evm':
@@ -107,7 +124,9 @@ export function recipientFits(assetId: string, address: string): boolean {
     case 'hex64':
       return HEX64.test(address) && !/^0x0{64}$/i.test(address);
     case 'solana':
-      return BASE58_32.test(address) && b58decode(address).length === 32 && !/^1+$/.test(address);
+      if (!BASE58_32.test(address) || /^1+$/.test(address) || address === SOLANA_USDC_MINT) return false;
+      const key = b58decode(address);
+      return key.length === 32 && ed25519OnCurve(key);
     default:
       return false;
   }
