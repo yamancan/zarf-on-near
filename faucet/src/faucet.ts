@@ -17,11 +17,15 @@ export interface FaucetDeps {
 export type FaucetResult = { status: number; body: Record<string, unknown> };
 
 const MAX_EMAIL = 254;
+const sha256hex = async (s: string) => hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)));
 
 /**
  * POST /faucet { email } → a fresh 1-leaf campaign for that email and its claim link.
  * The link goes back to whoever asked; only the Google account behind `email` can claim it.
  * The email is never stored or logged: the counters hold an HMAC of it, the chain holds the commitment.
+ * With the link comes a random `recovery_token` (the page keeps it in localStorage). Asked again for the same
+ * email, the link is shown only to a request carrying that token; anyone else gets `{ reshown: true }`, so the
+ * email cannot be looked up to find its public claim (red team #1).
  */
 export async function handleFaucet(input: unknown, ip: string, d: FaucetDeps): Promise<FaucetResult> {
   const email = (input as { email?: unknown } | null)?.email;
@@ -30,10 +34,15 @@ export async function handleFaucet(input: unknown, ip: string, d: FaucetDeps): P
   if (!canonical || !/^[^@]+@[^@]+\.[^@]+$/.test(canonical)) return { status: 400, body: { error: 'BAD_EMAIL' } };
 
   const nowMs = d.nowMs ?? Date.now();
-  // Asked again today (Turnstile already passed): the same link, no new campaign, no quota spent. Only the
-  // Google account behind this email can claim it, so showing it again gives nobody else anything.
+  // Asked again today (Turnstile already passed): no new campaign, no quota spent. The link itself only for the
+  // browser that holds the first answer's recovery token; everyone else learns only that it was issued.
   const earlier = await readLink(d.kv, d.limitKey, canonical, nowMs);
-  if (earlier) return { status: 200, body: { ...earlier, reshown: true } };
+  if (earlier) {
+    const { recovery_hash, ...link } = earlier;
+    const token = (input as { recovery?: unknown }).recovery;
+    const mine = typeof token === 'string' && token.length <= 128 && typeof recovery_hash === 'string' && (await sha256hex(token)) === recovery_hash;
+    return { status: 200, body: mine ? { ...link, reshown: true } : { reshown: true } };
+  }
   // A failed create spends the IP and day slots but not the email's (see takeQuota).
   const quota = await takeQuota(d.kv, d.limitKey, d.limits, ip, canonical, nowMs);
   if (!quota.ok) return { status: 429, body: { error: quota.code } };
@@ -62,8 +71,10 @@ export async function handleFaucet(input: unknown, ip: string, d: FaucetDeps): P
     tx_hash: created.txHash,
     ...(d.creator.live ? {} : { stub: true }),
   };
+  const recovery = hex(crypto.getRandomValues(new Uint8Array(16)));
   // Neither write throws; the link is saved first so a spent email counter always has a link to show again.
-  await saveLink(d.kv, d.limitKey, canonical, nowMs, body);
+  // Only the token's hash is kept (sealed with the link).
+  await saveLink(d.kv, d.limitKey, canonical, nowMs, { ...body, recovery_hash: await sha256hex(recovery) });
   await quota.commitEmail();
-  return { status: 200, body };
+  return { status: 200, body: { ...body, recovery_token: recovery } };
 }

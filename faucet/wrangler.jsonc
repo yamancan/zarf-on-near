@@ -9,7 +9,8 @@
   // Testnet only: the worker refuses mainnet ids, a non-testnet RPC and Turnstile test keys off localhost.
   "vars": {
     "NETWORK": "testnet",
-    "CLAIM_HOST": "https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev",
+    // Links name near.zarf.to (proxy/, T-029); /try is also served there, so Turnstile accepts that host too.
+    "CLAIM_HOST": "https://near.zarf.to",
     "CONTRACT_ID": "zarf-near-1112.testnet",
     "TOKEN_ID": "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af", // Circle testnet USDC
     "NEAR_RPC_URL": "https://test.rpc.fastnear.com", // rpc.testnet.near.org is deprecated and rate-limits per IP (Workers share egress)

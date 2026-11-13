@@ -134,23 +134,41 @@ describe('handleFaucet', () => {
       .toEqual({ status: 503, body: { error: 'CREATE_FAILED' } });
     const again = await handleFaucet({ email: 'judge@gmail.com' }, 'ip', deps({ kv: flaky }));
     expect(again.status).toBe(200);
-    // Now the email has its link: asking again shows that same link.
-    expect((await handleFaucet({ email: 'judge@gmail.com' }, 'ip2', deps({ kv: flaky }))).body).toEqual({ ...again.body, reshown: true });
+    // Now the email has its link: asking again with its recovery token shows that same link.
+    const { recovery_token, ...link } = again.body;
+    expect((await handleFaucet({ email: 'judge@gmail.com', recovery: recovery_token }, 'ip2', deps({ kv: flaky }))).body).toEqual({ ...link, reshown: true });
   });
 
-  it('asking again with the same email shows the same link, and spends no funds or quota', async () => {
+  it('asking again with the same email and its recovery token shows the same link, and spends no funds or quota', async () => {
     let creates = 0;
     const creator: CampaignCreator = { live: true, create: async () => (creates++, { campaignId: '8', txHash: 'tx' }) };
     const d = deps({ creator });
     const first = await handleFaucet({ email: 'judge@gmail.com' }, 'ip', d);
+    const { recovery_token, ...link } = first.body;
+    expect(recovery_token).toMatch(/^[0-9a-f]{32}$/);
     const kv = d.kv as ReturnType<typeof memKv>;
     const before = new Map(kv.m);
     for (const [email, ip] of [['judge@gmail.com', 'ip'], [' Judge@Gmail.com ', 'other-ip']]) {
-      const again = await handleFaucet({ email }, ip, d);
-      expect(again).toEqual({ status: 200, body: { ...first.body, reshown: true } });
+      const again = await handleFaucet({ email, recovery: recovery_token }, ip, d);
+      expect(again).toEqual({ status: 200, body: { ...link, reshown: true } });
     }
     expect(creates).toBe(1);
     expect(kv.m).toEqual(before); // no counter moved
+  });
+
+  it('red team #1: a repeat without the recovery token learns only that a link was issued, never the link', async () => {
+    let creates = 0;
+    const creator: CampaignCreator = { live: true, create: async () => (creates++, { campaignId: '8', txHash: 'tx' }) };
+    const d = deps({ creator });
+    const first = await handleFaucet({ email: 'judge@gmail.com' }, 'ip', d);
+    for (const recovery of [undefined, '', 'f'.repeat(32), String(first.body.commitment), 'x'.repeat(10_000), 7]) {
+      const r = await handleFaucet({ email: 'judge@gmail.com', recovery }, 'other-ip', d);
+      expect(r).toEqual({ status: 200, body: { reshown: true } });
+    }
+    expect(creates).toBe(1);
+    // The token is not stored as is: the sealed record holds only its hash.
+    const dump = JSON.stringify([...(d.kv as ReturnType<typeof memKv>).m]);
+    expect(dump).not.toContain(String(first.body.recovery_token));
   });
 
   it('never shows one email\'s link to another email, nor under another key, nor on another day', async () => {
@@ -372,7 +390,27 @@ describe('worker', () => {
     net({ turnstile: 'failed' });
     expect(await post(env, { email: 'judge@gmail.com', turnstile: 'forged' }, local)).toEqual({ status: 403, body: { error: 'TURNSTILE_FAILED' } });
     net();
-    expect((await post(env, { email: 'judge@gmail.com', turnstile: 't' }, local)).body).toEqual({ ...first.body, reshown: true });
+    const { recovery_token, ...link } = first.body as Record<string, unknown>;
+    expect((await post(env, { email: 'judge@gmail.com', turnstile: 't', recovery: recovery_token }, local)).body).toEqual({ ...link, reshown: true });
+    expect((await post(env, { email: 'judge@gmail.com', turnstile: 't' }, local)).body).toEqual({ reshown: true });
+  });
+
+  it('T-029: a token solved on the claim host (near.zarf.to, via proxy/) passes; another host still fails', async () => {
+    net({ tsHost: 'near.zarf.to' });
+    expect((await post({ ...fullEnv(), CLAIM_HOST: 'https://near.zarf.to' })).body).toEqual({ error: 'BAD_EMAIL' }); // past Turnstile
+    net({ tsHost: 'near.zarf.to' });
+    expect(await post(fullEnv())).toEqual({ status: 403, body: { error: 'TURNSTILE_FAILED' } });
+  });
+
+  it('T-029: the proxy-forwarded visitor IP counts only with the shared key', async () => {
+    const { clientIp } = await import('../src/index');
+    const req = (h: Record<string, string>) => new Request('https://f.example/faucet', { headers: h });
+    const via = { 'CF-Connecting-IP': '2a06:98c0:3600::103', 'X-Zarf-Client-IP': '203.0.113.7' };
+    expect(clientIp(req({ ...via, 'X-Zarf-Proxy-Key': 'pk' }), 'pk')).toBe('203.0.113.7');
+    expect(clientIp(req({ ...via, 'X-Zarf-Proxy-Key': 'guess' }), 'pk')).toBe('2a06:98c0:3600::103');
+    expect(clientIp(req(via), 'pk')).toBe('2a06:98c0:3600::103');
+    expect(clientIp(req({ ...via, 'X-Zarf-Proxy-Key': '' }), undefined)).toBe('2a06:98c0:3600::103'); // no key set: never trusted
+    expect(clientIp(req({}), 'pk')).toBe('unknown');
   });
 
   it('refuses a token issued for another hostname', async () => {
@@ -486,7 +524,7 @@ describe('worker', () => {
     const linked = await (await worker.fetch(new Request('https://f.example/try'), { CLAIM_HOST: 'https://claim.example/' } as never)).text();
     expect(linked).toContain('href="https://claim.example/privacy"');
     expect(linked).toContain('href="https://claim.example/"');
-    expect(linked.match(/docs\.near\.org/g)).toHaveLength(1); // only the account-help link
+    expect(linked).not.toMatch(/docs\.near\.org/); // no wallet sign-up link any more (T-024: Face ID instead)
     const hostile = await (await worker.fetch(new Request('https://f.example/try'), { CLAIM_HOST: 'https://x.example/"><script>' } as never)).text();
     expect(hostile).not.toContain('x.example');
     expect(html).not.toMatch(/<script>(?!<)/);
@@ -509,8 +547,9 @@ describe('verifyTurnstile', () => {
   });
   it('checks the hostname when one is given', async () => {
     const ok = async () => Response.json({ success: true, hostname: 'f.example' });
-    expect(await verifyTurnstile('tok', 's', 'ip', 'f.example', ok)).toBe('ok');
-    expect(await verifyTurnstile('tok', 's', 'ip', 'other.example', ok)).toBe('failed');
+    expect(await verifyTurnstile('tok', 's', 'ip', ['f.example'], ok)).toBe('ok');
+    expect(await verifyTurnstile('tok', 's', 'ip', ['near.zarf.to', 'f.example'], ok)).toBe('ok');
+    expect(await verifyTurnstile('tok', 's', 'ip', ['other.example'], ok)).toBe('failed');
   });
   it('HTTP 500 and a thrown fetch are unavailable', async () => {
     expect(await verifyTurnstile('tok', 's', 'ip', null, async () => new Response('', { status: 500 }))).toBe('unavailable');
@@ -548,7 +587,7 @@ describe('judges page presentation', () => {
   it('shows the configured amount, never an unvalidated one', async () => {
     const { default: worker } = await import('../src/index');
     const page = async (AMOUNT: string) => (await worker.fetch(new Request('https://f.example/try'), { AMOUNT } as never)).text();
-    expect(await page('500000')).toContain('<span class="label">Claim Amount</span><span class="figure"><span class="value">0.5</span><span class="unit">test USDC</span>');
+    expect(await page('500000')).toContain('<span class="label">Claim amount</span><span class="figure"><span class="value">0.5</span><span class="unit">test USDC</span>');
     const hostile = await page('5"><script>');
     expect(hostile).not.toContain('class="amount"');
     expect(hostile).not.toContain('"><script>');
@@ -558,7 +597,7 @@ describe('judges page presentation', () => {
     const { default: worker } = await import('../src/index');
     const html = await (await worker.fetch(new Request('https://f.example/try'), { AMOUNT: '500000' } as never)).text();
     expect(html).toContain('<h1>Try Zarf</h1>');
-    expect(html).toContain('Claiming is free: Zarf pays the NEAR gas.');
+    expect(html).toContain('Test USDC has no value, and Zarf pays the NEAR gas.');
     expect(html).toMatch(/<a href="https:\/\/zarf-near-claim-preview\.[^"]+\/gallery\/" target="_blank" rel="noopener noreferrer">See every screen<\/a>/);
     expect(html).toContain('<div class="ts"><div class="cf-turnstile" data-sitekey="" data-size="flexible"');
   });
@@ -591,29 +630,39 @@ describe('judges page presentation', () => {
       expect((await worker.fetch(new Request('https://f.example' + p), {} as never)).status).toBe(404);
   });
 
-  it('opens the account help in a new tab, at a wallet, and says this tab keeps the link', async () => {
+  it('tells a judge without a NEAR account to use Face ID, not a wallet sign-up (T-024)', async () => {
     const { default: worker } = await import('../src/index');
     const html = await (await worker.fetch(new Request('https://f.example/try'), {} as never)).text();
-    const a = html.match(/<a id="wallet"[^>]*>/)![0];
-    expect(a).toContain('href="https://docs.near.org/getting-started/create-account"');
-    expect(a).not.toContain('mynearwallet');
-    expect(a).toContain('target="_blank"');
-    expect(a).toMatch(/rel="[^"]*\bnoopener\b[^"]*"/);
-    expect(html).toContain('This tab keeps your link.');
+    expect(html).toContain('No NEAR account needed: you can create one when you claim.');
+    expect(html).not.toMatch(/Meteor|mynearwallet|id="wallet"/i);
+    expect(html.slice(html.indexOf('<body>'))).not.toContain('zarf.to'); // visible page: "Zarf" (the head's preview URLs name near.zarf.to)
     // Every new-tab link drops the opener.
     for (const t of html.match(/<a [^>]*target="_blank"[^>]*>/g)!) expect(t).toMatch(/rel="noopener noreferrer"/);
   });
 
-  it('links the footer (Send, Campaigns, Privacy) only to a safe https claim host', async () => {
+  it('links the footer (Privacy, as on the app) only to a safe https claim host', async () => {
     const { default: worker } = await import('../src/index');
     const page = async (CLAIM_HOST?: string) => (await worker.fetch(new Request('https://f.example/try'), { CLAIM_HOST } as never)).text();
     const nav = (html: string) => html.match(/<nav aria-label="Footer">(.*?)<\/nav>/)?.[1] ?? null;
     expect(nav(await page('https://claim.example/'))).toBe(
-      '<a href="https://claim.example/create">Send</a><a href="https://claim.example/campaigns">Campaigns</a><a href="https://claim.example/privacy">Privacy</a>');
+      '<a href="https://claim.example/privacy">Privacy</a>');
     for (const bad of [undefined, '', 'http://claim.example', 'javascript:alert(1)', '//claim.example', 'https://claim.example/path', 'https://x.example/"><script>']) {
       const html = await page(bad);
       expect(nav(html)).toBeNull(); // no footer links rather than links to this page's own 404s
       expect(html).not.toContain('claim.example');
     }
+  });
+});
+
+describe('link previews (T-034)', () => {
+  it('/try carries an absolute og:image and a large twitter card', async () => {
+    const { default: worker } = await import('../src/index');
+    const html = await (await worker.fetch(new Request('https://f.example/try'), {} as never)).text();
+    const head = html.slice(0, html.indexOf('</head>'));
+    expect(head).toContain('<meta property="og:image" content="https://near.zarf.to/og.png">');
+    expect(head).toContain('<meta name="twitter:card" content="summary_large_image">');
+    expect(head).toContain('<meta name="twitter:image" content="https://near.zarf.to/og.png">');
+    expect(head).toContain('<meta property="og:title" content="Try Zarf on NEAR Testnet">');
+    expect(head).not.toMatch(/content="\/og\.png"/);
   });
 });
