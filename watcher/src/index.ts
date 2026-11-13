@@ -1,9 +1,15 @@
 // Cron Worker (every 2 min): pages ALERT_WEBHOOK_URL when the escrow shows a proposed upgrade, owner
-// change or verifier-key change, or the live claim page differs from the fingerprint the web deploy
-// recorded. A run that cannot check is itself an alert: silence must mean "checked and clean".
+// change or verifier-key change, when the account's code hash is not the expected one or it has any access
+// key, or when the live claim page differs from the fingerprint the web deploy recorded. A run that cannot
+// check is itself an alert: silence must mean "checked and clean".
+//
+// Subrequest budget (free Workers: 50 per run): 4 RPC reads with one retry each (8), the page (1), the alert
+// (1), and SCRIPTS_PER_RUN recorded scripts (at most 40): exactly 50 at worst. Redirects are not followed (each
+// hop would be one more subrequest): a redirect is a non-OK answer, so it alerts. See bundle.ts for which
+// scripts each run re-hashes.
 
-import { contractFindings, type WatchView } from './contract.ts';
-import { bundleFindings, fingerprint, type Fingerprint } from './bundle.ts';
+import { accountFindings, contractFindings, type AccountView, type WatchView } from './contract.ts';
+import { checkPage, type Fingerprint } from './bundle.ts';
 import testnet from '../expected/testnet.json';
 import mainnet from '../expected/mainnet.json';
 
@@ -14,8 +20,11 @@ export interface Env {
   EXPECTED_OWNER: string;
   /** Comma-separated hex verifier keys, as in the relayer's VERIFIER_SIGNERS. */
   EXPECTED_SIGNERS: string;
+  /** The escrow account's code hash as view_account returns it (base58). */
+  EXPECTED_CODE_HASH: string;
   CLAIM_PAGE_URL: string;
-  MAX_SCRIPTS?: string;
+  /** Recorded scripts re-hashed per run: 4 to 40 (the free plan's budget), default 40. */
+  SCRIPTS_PER_RUN?: string;
   /** Secret. POSTed {text, content} (Slack and Discord incoming-webhook shapes). */
   ALERT_WEBHOOK_URL?: string;
 }
@@ -24,20 +33,21 @@ type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
 
 export const EXPECTED: Record<string, Fingerprint | null> = { testnet, mainnet } as Record<string, Fingerprint | null>;
 
-const timed: Fetcher = (url, init) => fetch(url, { ...init, signal: AbortSignal.timeout(15_000) });
+const timed: Fetcher = (url, init) => fetch(url, { ...init, redirect: 'manual', signal: AbortSignal.timeout(15_000) });
+const MAX_SCRIPTS_PER_RUN = 40; // the free plan's 50 less 8 RPC attempts, the page and the alert
+const MIN_SCRIPTS_PER_RUN = 4; // below 4, pick() has no random share and the schedule alone decides
 
-async function view<T>(env: Env, method: string, fetcher: Fetcher): Promise<T> {
-  const body = JSON.stringify({
-    jsonrpc: '2.0', id: 'watch', method: 'query',
-    params: { request_type: 'call_function', finality: 'optimistic', account_id: env.CONTRACT_ID, method_name: method, args_base64: 'e30=' },
-  });
+/** One NEAR RPC query, tried twice. */
+async function query<T>(env: Env, params: Record<string, unknown>, fetcher: Fetcher): Promise<T> {
+  const body = JSON.stringify({ jsonrpc: '2.0', id: 'watch', method: 'query', params: { finality: 'optimistic', account_id: env.CONTRACT_ID, ...params } });
   let last: unknown;
   for (let i = 0; i < 2; i++) {
     try {
       const res = await fetcher(env.NEAR_RPC_URL, { method: 'POST', headers: { 'content-type': 'application/json' }, body });
-      const j = (await res.json()) as { result?: { result: number[] }; error?: unknown };
-      if (!j.result) throw new Error(`${method}: ${JSON.stringify(j.error)}`);
-      return JSON.parse(new TextDecoder().decode(Uint8Array.from(j.result.result))) as T;
+      if (!res.ok) throw new Error(`${String(params.method_name ?? params.request_type)}: HTTP ${res.status}`); // a redirect too: never parsed
+      const j = (await res.json()) as { result?: T; error?: unknown };
+      if (!j.result) throw new Error(`${String(params.method_name ?? params.request_type)}: ${JSON.stringify(j.error)}`);
+      return j.result;
     } catch (e) {
       last = e;
     }
@@ -45,13 +55,32 @@ async function view<T>(env: Env, method: string, fetcher: Fetcher): Promise<T> {
   throw last;
 }
 
+async function view<T>(env: Env, method: string, fetcher: Fetcher): Promise<T> {
+  const r = await query<{ result: number[] }>(env, { request_type: 'call_function', method_name: method, args_base64: 'e30=' }, fetcher);
+  return JSON.parse(new TextDecoder().decode(Uint8Array.from(r.result))) as T;
+}
+
+async function account(env: Env, fetcher: Fetcher): Promise<AccountView> {
+  const [a, k] = await Promise.all([
+    query<{ code_hash: string }>(env, { request_type: 'view_account' }, fetcher),
+    query<{ keys: AccountView['keys'] }>(env, { request_type: 'view_access_key_list' }, fetcher),
+  ]);
+  if (typeof a.code_hash !== 'string' || !Array.isArray(k.keys)) throw new Error('view_account / view_access_key_list: unexpected answer');
+  return { code_hash: a.code_hash, keys: k.keys };
+}
+
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** Everything that should page someone now; empty means checked and clean. */
-export async function run(env: Env, expected: Fingerprint | null, fetcher: Fetcher = timed): Promise<string[]> {
-  const missing = (['NETWORK', 'CONTRACT_ID', 'NEAR_RPC_URL', 'EXPECTED_OWNER', 'EXPECTED_SIGNERS', 'CLAIM_PAGE_URL'] as const).filter((k) => !env[k]);
+export async function run(env: Env, expected: Fingerprint | null, fetcher: Fetcher = timed, now = Date.now()): Promise<string[]> {
+  const missing = (['NETWORK', 'CONTRACT_ID', 'NEAR_RPC_URL', 'EXPECTED_OWNER', 'EXPECTED_SIGNERS', 'EXPECTED_CODE_HASH', 'CLAIM_PAGE_URL'] as const).filter((k) => !env[k]);
   if (missing.length) return [`WATCHER MISCONFIGURED: ${missing.join(', ')} empty, nothing was checked`];
   const f: string[] = [];
+  let perRun = Number(env.SCRIPTS_PER_RUN || MAX_SCRIPTS_PER_RUN);
+  if (!(Number.isInteger(perRun) && perRun >= MIN_SCRIPTS_PER_RUN && perRun <= MAX_SCRIPTS_PER_RUN)) {
+    f.push(`WATCHER MISCONFIGURED: SCRIPTS_PER_RUN ${env.SCRIPTS_PER_RUN} is not ${MIN_SCRIPTS_PER_RUN}-${MAX_SCRIPTS_PER_RUN} (the free plan's budget); checked ${MAX_SCRIPTS_PER_RUN}`);
+    perRun = MAX_SCRIPTS_PER_RUN;
+  }
   try {
     const [w, owner] = await Promise.all([view<WatchView>(env, 'watch', fetcher), view<string>(env, 'get_owner', fetcher)]);
     f.push(...contractFindings(w, owner, { owner: env.EXPECTED_OWNER, signers: env.EXPECTED_SIGNERS.split(',').map((s) => s.trim()).filter(Boolean) }));
@@ -59,7 +88,13 @@ export async function run(env: Env, expected: Fingerprint | null, fetcher: Fetch
     f.push(`CANNOT READ ${env.CONTRACT_ID}: ${msg(e)}`);
   }
   try {
-    f.push(...bundleFindings(await fingerprint(env.CLAIM_PAGE_URL, fetcher, Number(env.MAX_SCRIPTS || 44)), expected));
+    f.push(...accountFindings(await account(env, fetcher), env.EXPECTED_CODE_HASH));
+  } catch (e) {
+    f.push(`CANNOT READ THE ACCOUNT ${env.CONTRACT_ID}: ${msg(e)}`);
+  }
+  try {
+    // One window per 2-minute cron slot: consecutive runs re-hash consecutive slices of the recorded scripts.
+    f.push(...(await checkPage(env.CLAIM_PAGE_URL, fetcher, expected, perRun, Math.floor(now / 120_000))));
   } catch (e) {
     f.push(`CANNOT CHECK THE CLAIM PAGE: ${msg(e)}`);
   }
@@ -79,15 +114,15 @@ export async function alert(env: Env, findings: string[], fetcher: Fetcher = tim
 }
 
 /** One cron tick. A thrown error marks the run failed in Cloudflare's cron log. */
-export async function tick(env: Env, expected: Fingerprint | null): Promise<void> {
-  const findings = await run(env, expected);
+export async function tick(env: Env, expected: Fingerprint | null, now = Date.now()): Promise<void> {
+  const findings = await run(env, expected, timed, now);
   if (findings.length) await alert(env, findings);
   else console.log(`[zarf-near ${env.NETWORK}] clean`);
 }
 
 export default {
-  async scheduled(_c: unknown, env: Env): Promise<void> {
-    await tick(env, EXPECTED[env.NETWORK] ?? null);
+  async scheduled(c: { scheduledTime?: number }, env: Env): Promise<void> {
+    await tick(env, EXPECTED[env.NETWORK] ?? null, c?.scheduledTime ?? Date.now());
   },
   async fetch(): Promise<Response> {
     return new Response('zarf-near watcher: cron only\n', { status: 404 });
