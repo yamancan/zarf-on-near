@@ -1,5 +1,5 @@
 diff --git a/build/SandboxedWallet/executor.js b/build/SandboxedWallet/executor.js
-index 6e8bdc24a679cecb4ca23f0421ae9d50105b24d6..ac4ee0b2b91bb531f9e15deda9b425982e95fe54 100644
+index 6e8bdc24a679cecb4ca23f0421ae9d50105b24d6..7c81f1739ed4e91d2393e38bf72dabb8ea9f90bc 100644
 --- a/build/SandboxedWallet/executor.js
 +++ b/build/SandboxedWallet/executor.js
 @@ -288,6 +288,10 @@ class SandboxExecutor {
@@ -13,7 +13,7 @@ index 6e8bdc24a679cecb4ca23f0421ae9d50105b24d6..ac4ee0b2b91bb531f9e15deda9b42598
          this.connector.logger?.log(`New version of code fetched`);
          this.actualCode = newVersion;
          if (newVersion === currentVersion) {
-@@ -302,8 +306,18 @@ class SandboxExecutor {
+@@ -302,12 +306,25 @@ class SandboxExecutor {
              .catch((e) => this.connector.logger?.log(`Failed to cache new version of code`, e));
          return newVersion;
      }
@@ -32,4 +32,12 @@ index 6e8bdc24a679cecb4ca23f0421ae9d50105b24d6..ac4ee0b2b91bb531f9e15deda9b42598
 +            cachedCode = null;
          this.connector.logger?.log(`Code loaded from cache`, cachedCode !== null);
          const task = this.checkNewVersion(this, cachedCode);
-         if (cachedCode)
+-        if (cachedCode)
++        if (cachedCode) {
++            // Zarf patch: the background refresh may fail (offline, 5xx, changed file); the verified cache still runs
++            task.catch((e) => this.connector.logger?.log(`Background code check failed`, e));
+             return cachedCode;
++        }
+         return await task;
+     }
+     async call(method, params) {

@@ -72,6 +72,22 @@ describe('patched NEAR Connect loader: integrity pin (patches/@hot-labs__near-co
     vi.stubGlobal('fetch', async () => new Response(code + ';steal()'));
     await expect(executor(pin, code + ';steal()').self.loadCode()).rejects.toThrow(/pinned hash/); // nothing good to run
   });
+  it('a failed background refresh behind a valid cache is handled, not an unhandled rejection', async () => {
+    const pin = await sha(code);
+    const unhandled: unknown[] = [];
+    const onUnhandled = (e: unknown) => void unhandled.push(e);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      vi.stubGlobal('fetch', async () => new Response('down', { status: 503 }));
+      expect(await executor(pin, code).self.loadCode()).toBe(code);
+      vi.stubGlobal('fetch', async () => new Response(code + ';steal()'));
+      expect(await executor(pin, code).self.loadCode()).toBe(code);
+      await new Promise((r) => setTimeout(r, 20));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
 });
 
 describe('ethereum-wallets (T-002 claim form; senders since T-025)', async () => {
