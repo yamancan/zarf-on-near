@@ -395,6 +395,24 @@ describe('worker', () => {
     expect((await post(env, { email: 'judge@gmail.com', turnstile: 't' }, local)).body).toEqual({ reshown: true });
   });
 
+  it('T-029: a token solved on the claim host (near.zarf.to, via proxy/) passes; another host still fails', async () => {
+    net({ tsHost: 'near.zarf.to' });
+    expect((await post({ ...fullEnv(), CLAIM_HOST: 'https://near.zarf.to' })).body).toEqual({ error: 'BAD_EMAIL' }); // past Turnstile
+    net({ tsHost: 'near.zarf.to' });
+    expect(await post(fullEnv())).toEqual({ status: 403, body: { error: 'TURNSTILE_FAILED' } });
+  });
+
+  it('T-029: the proxy-forwarded visitor IP counts only with the shared key', async () => {
+    const { clientIp } = await import('../src/index');
+    const req = (h: Record<string, string>) => new Request('https://f.example/faucet', { headers: h });
+    const via = { 'CF-Connecting-IP': '2a06:98c0:3600::103', 'X-Zarf-Client-IP': '203.0.113.7' };
+    expect(clientIp(req({ ...via, 'X-Zarf-Proxy-Key': 'pk' }), 'pk')).toBe('203.0.113.7');
+    expect(clientIp(req({ ...via, 'X-Zarf-Proxy-Key': 'guess' }), 'pk')).toBe('2a06:98c0:3600::103');
+    expect(clientIp(req(via), 'pk')).toBe('2a06:98c0:3600::103');
+    expect(clientIp(req({ ...via, 'X-Zarf-Proxy-Key': '' }), undefined)).toBe('2a06:98c0:3600::103'); // no key set: never trusted
+    expect(clientIp(req({}), 'pk')).toBe('unknown');
+  });
+
   it('refuses a token issued for another hostname', async () => {
     net({ tsHost: 'evil.example' });
     expect(await post(fullEnv(), { email: 'a@x.io', turnstile: 't' })).toEqual({ status: 403, body: { error: 'TURNSTILE_FAILED' } });
@@ -529,8 +547,9 @@ describe('verifyTurnstile', () => {
   });
   it('checks the hostname when one is given', async () => {
     const ok = async () => Response.json({ success: true, hostname: 'f.example' });
-    expect(await verifyTurnstile('tok', 's', 'ip', 'f.example', ok)).toBe('ok');
-    expect(await verifyTurnstile('tok', 's', 'ip', 'other.example', ok)).toBe('failed');
+    expect(await verifyTurnstile('tok', 's', 'ip', ['f.example'], ok)).toBe('ok');
+    expect(await verifyTurnstile('tok', 's', 'ip', ['near.zarf.to', 'f.example'], ok)).toBe('ok');
+    expect(await verifyTurnstile('tok', 's', 'ip', ['other.example'], ok)).toBe('failed');
   });
   it('HTTP 500 and a thrown fetch are unavailable', async () => {
     expect(await verifyTurnstile('tok', 's', 'ip', null, async () => new Response('', { status: 500 }))).toBe('unavailable');

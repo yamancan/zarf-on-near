@@ -12,7 +12,7 @@ export async function verifyTurnstile(
   token: unknown,
   secret: string,
   ip: string,
-  hostname: string | null, // the request host the token must have been issued for; null skips (local dev, test keys say "example.com")
+  hostnames: readonly string[] | null, // hosts the token may have been issued for; null skips (local dev, test keys say "example.com")
   fetchFn: typeof fetch = (u, i) => fetch(u, i),
 ): Promise<TurnstileResult> {
   if (typeof token !== 'string' || !token || token.length > 2048) return 'failed';
@@ -23,7 +23,7 @@ export async function verifyTurnstile(
     if (!res.ok) return 'unavailable';
     const body = (await res.json()) as { success?: unknown; hostname?: unknown };
     if (body.success !== true) return 'failed';
-    return hostname === null || body.hostname === hostname ? 'ok' : 'failed';
+    return hostnames === null || (typeof body.hostname === 'string' && hostnames.includes(body.hostname)) ? 'ok' : 'failed';
   } catch {
     return 'unavailable';
   }
