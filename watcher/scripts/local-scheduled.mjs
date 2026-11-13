@@ -4,7 +4,7 @@
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { siteResponse, viewResponse } from '../test/fixtures/site.ts';
+import { KEYLESS, rpcResponse, siteResponse } from '../test/fixtures/site.ts';
 
 // Free ports: other projects' dev servers run on this host too.
 const freePort = () => new Promise((ok) => { const s = createServer().listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => ok(port)); }); });
@@ -16,6 +16,8 @@ const FIXTURES = [
   { name: 'cancelled', watch: 'cancelled', site: 'same', alerts: 0 },
   { name: 'changed script', watch: 'clean', site: 'changed', alerts: 1 },
   { name: 'extra script', watch: 'clean', site: 'extra', alerts: 1 },
+  { name: 'code hash changed (watch() looks clean)', watch: 'clean', site: 'same', account: { ...KEYLESS, code_hash: '11111111111111111111111111111111' }, alerts: 1 },
+  { name: 'access key on the escrow', watch: 'clean', site: 'same', account: { ...KEYLESS, keys: [{ public_key: 'ed25519:DcA2MzgpJbrUATQLLceocVckhhAqrkingax4oJ9kZ847', access_key: { nonce: 0, permission: 'FullAccess' } }] }, alerts: 1 },
 ];
 let now = FIXTURES[0];
 const alerts = [];
@@ -25,7 +27,7 @@ const server = createServer(async (req, res) => {
   for await (const c of req) chunks.push(c);
   const body = Buffer.concat(chunks).toString();
   let r;
-  if (req.url === '/rpc') r = viewResponse(JSON.parse(body).params.method_name === 'watch' ? watch(now.watch) : 'zarf-near-owner-1111.testnet');
+  if (req.url === '/rpc') r = rpcResponse(body, { watch: watch(now.watch), get_owner: 'zarf-near-owner-1111.testnet' }, now.account ?? KEYLESS);
   else if (req.url === '/alert') (alerts.push(JSON.parse(body).text), (r = new Response('ok')));
   else r = siteResponse(now.site, new URL(req.url, 'http://x').pathname);
   res.writeHead(r.status, Object.fromEntries(r.headers));
@@ -36,7 +38,7 @@ const base = `http://127.0.0.1:${SINK}`;
 const vars = {
   NETWORK: 'testnet', CONTRACT_ID: 'zarf-near-1112.testnet', NEAR_RPC_URL: `${base}/rpc`, EXPECTED_OWNER: 'zarf-near-owner-1111.testnet',
   EXPECTED_SIGNERS: '2d10ebec1ec795cef82b8d357cc60d39d9119b99908741660b632fc5cf0d4e32', CLAIM_PAGE_URL: `${base}/claim/1/0`,
-  MAX_SCRIPTS: '44', ALERT_WEBHOOK_URL: `${base}/alert`,
+  EXPECTED_CODE_HASH: KEYLESS.code_hash, SCRIPTS_PER_RUN: '40', ALERT_WEBHOOK_URL: `${base}/alert`,
 };
 const wrangler = spawn('npx', ['wrangler', 'dev', '-c', 'test/local/wrangler.json', '--test-scheduled', '--port', String(WORKER), '--ip', '127.0.0.1',
   ...Object.entries(vars).flatMap(([k, v]) => ['--var', `${k}:${v}`])], { stdio: ['ignore', 'pipe', 'pipe'] });

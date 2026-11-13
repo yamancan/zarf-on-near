@@ -15,3 +15,17 @@ export function siteResponse(v: Variant, pathname: string): Response {
 export function viewResponse(value: unknown): Response {
   return Response.json({ jsonrpc: '2.0', id: 'watch', result: { result: [...new TextEncoder().encode(JSON.stringify(value))], logs: [] } });
 }
+
+/** The testnet escrow's code hash (view_account, 14 Nov 2026). */
+export const CODE_HASH = '5GdxDSB4sGW9Ewod4Q4Na613C2sLQjVfFjLbbZbKt6N8';
+export interface AccountFixture { code_hash: string; keys: { public_key: string; access_key: { nonce: number; permission: unknown } }[] }
+export const KEYLESS: AccountFixture = { code_hash: CODE_HASH, keys: [] };
+
+/** The NEAR RPC: call_function views answered from `views` by method name, view_account / view_access_key_list from `account`. */
+export function rpcResponse(body: string, views: Record<string, unknown>, account: AccountFixture = KEYLESS): Response {
+  const p = JSON.parse(body).params;
+  const ok = (result: unknown) => Response.json({ jsonrpc: '2.0', id: 'watch', result });
+  if (p.request_type === 'view_account') return ok({ amount: '1', locked: '0', code_hash: account.code_hash, storage_usage: 1, storage_paid_at: 0 });
+  if (p.request_type === 'view_access_key_list') return ok({ keys: account.keys });
+  return viewResponse(views[p.method_name]);
+}
