@@ -7,7 +7,7 @@
   const TRY_URL = 'https://near.zarf.to/try';
 </script>
 
-<svelte:head><title>Zarf: Send Tokens to an Email</title></svelte:head>
+<svelte:head><title>Zarf: Send USDC to Any Email</title></svelte:head>
 
 <!-- main repo apps/landing +page.svelte:64-68: a fixed ground behind everything, one grain layer above it -->
 <div class="fixed inset-0 bg-base-100 -z-10" aria-hidden="true"></div>

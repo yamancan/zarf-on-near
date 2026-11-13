@@ -144,7 +144,7 @@
     request++; // any reply still out is for the old choice
   };
 
-  // NEAR's mark: simple-icons 13.21.0 near.svg (CC0), the one the footer used to carry.
+  // NEAR's mark: lib/chains.ts MARKS (@web3icons/core, MIT), the same one the header and landing use.
   const SOURCES = $derived([['near', 'NEAR', markLogo(MARKS.near)], ...FUNDING_CHAINS.map((c) => [c.key, c.name, chainLogo(c)])] as [Source, string, string][]);
   function sourceKey(e: KeyboardEvent) {
     const d = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;

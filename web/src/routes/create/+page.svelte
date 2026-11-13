@@ -20,12 +20,12 @@
   import { getClaimState, nearView, type ClaimState } from '$lib/services';
   import { CIRCLE_LINE, TESTNET, UNIT } from '$lib/network';
   import { ArrowRight, ArrowUpRight, Check, CheckCircle2, ChevronDown, Copy, Download, ExternalLink, Eye, FolderOpen, Lock, Mail, Plus, RefreshCw } from 'lucide-svelte';
-  import ClaimCard from '$lib/ClaimCard.svelte';
+  import ClaimCard, { type ClaimMode } from '$lib/ClaimCard.svelte';
+  import { passkeyOffered } from '$lib/passkey';
   import { crossChainOffered } from '$lib/intents';
   import Avatar from '$lib/Avatar.svelte';
   import CopyButton from '$lib/CopyButton.svelte';
   import EmailMark from '$lib/EmailMark.svelte';
-  import GoogleG from '$lib/GoogleG.svelte';
   import Steps from '$lib/Steps.svelte';
   import MicroStepProgress from '$lib/create/MicroStepProgress.svelte';
   import Tooltip from '$lib/zarf-kit/components/ui/Tooltip.svelte';
@@ -243,7 +243,7 @@
       walletReady = true;
       account = wallet.accountId();
       walletId = wallet.walletId();
-      wallet.onChange((a, id) => ((account = a), (walletId = id))); // sign-in/out from any path, including the wallet's own
+      wallet.onChange((a, id) => ((account = a), (walletId = id))); // sign-in/out NEAR Connect reports in this page
       // A funding tx from before a reload: resume checking it instead of offering Create again.
       const f = loadFunding();
       if (!f) {
@@ -604,6 +604,12 @@
     lastStep = s;
   });
   // Before any row the preview shows an example figure, dimmed.
+  // The claim page's own choices (claim/[campaign]/[commitment]/+page.svelte MODES), from the same flags
+  const previewModes = $derived([
+    ['existing', 'NEAR Account'],
+    ...(env.PUBLIC_IMPLICIT_ACCOUNTS === 'on' ? [['new', passkeyOffered(config?.network ?? (TESTNET ? 'testnet' : ''), env.PUBLIC_IMPLICIT_ACCOUNTS, env.PUBLIC_PASSKEY_ACCOUNTS) ? 'Face ID' : 'New Account']] : []),
+    ...(crossChainOffered(config?.network ?? (TESTNET ? 'testnet' : 'mainnet'), env.PUBLIC_CROSS_CHAIN) ? [['chain', 'Other Chain']] : []),
+  ] as [ClaimMode, string][]);
   const previewAmount = $derived(parsed.rows[0] ? formatAmount(BigInt(parsed.rows[0].amount)) : '10');
   const previewEmail = $derived(draft?.recipients[0]?.email ?? parsed.rows[0]?.email ?? null);
   /** "GMT+3": the sender's own time zone, which every date on this page is in. */
@@ -1215,6 +1221,7 @@
         <!-- What They See (T-032, owner point 10): the claim page's own card component, inert; nothing in it takes a click -->
         <aside class="w-full min-w-0 lg:flex-1 lg:max-w-2xl lg:sticky lg:top-24" aria-label="What the first recipient sees">
           <div class="mb-4 ml-1 flex items-center gap-1.5 text-sm text-zen-fg-muted"><Eye class="w-4 h-4" aria-hidden="true" />What They See</div>
+          <p class="sr-only">The claim card the first recipient sees: {previewAmount} {UNIT}, then Sign in with Google. A picture, not a form.</p>
           <ZenCard variant="elevated" class="overflow-hidden {parsed.rows.length ? '' : 'opacity-50'}">
             <div class="p-4 sm:p-8">
             <ClaimCard
@@ -1224,7 +1231,7 @@
               left={previewLeft}
               amount={previewAmount}
               unit={UNIT}
-              modes={TESTNET ? [['existing', 'NEAR Account'], ['new', 'Face ID'], ['chain', 'Other Chain']] : [['existing', 'NEAR Account'], ['chain', 'Other Chain']]}
+              modes={previewModes}
               mode="existing"
             />
             </div>

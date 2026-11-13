@@ -16,7 +16,7 @@ export interface SenderWallet {
   accountId(): string | null;
   /** The connected wallet's manifest id ('ethereum-wallets' for MetaMask), or null. */
   walletId(): string | null;
-  /** Called on every sign-in and sign-out the connector reports, from any path (picker, wallet, disconnect). */
+  /** Called on every sign-in and sign-out NEAR Connect reports in this page (its picker, an injected wallet, disconnect). */
   onChange(cb: (account: string | null, walletId: string | null) => void): void;
   signIn(): Promise<string>;
   signOut(): Promise<void>;
@@ -57,7 +57,8 @@ export async function nearConnectWallet(networkId: string, rpcUrl: string, { eth
   });
   // T-032 wallet finding: this restores the session NEAR Connect stored, read from the wallet's sandboxed code, not a
   // live check. For Ethereum Wallets that is the 0x account from an earlier visit while MetaMask itself is asked only
-  // in the signing popup. So the page names the wallet and follows the connector's own sign-in/out events.
+  // in the signing popup, which then says "Connect Wallet". So an Ethereum Wallets session is never restored: the
+  // page shows Connect Wallet and the person connects MetaMask first. Other wallets restore as before.
   let account: string | null = null;
   let walletId: string | null = null;
   let changed: (account: string | null, walletId: string | null) => void = () => {};
@@ -65,6 +66,7 @@ export async function nearConnectWallet(networkId: string, rpcUrl: string, { eth
     const c = await connector.getConnectedWallet();
     account = c.accounts[0]?.accountId ?? null;
     walletId = account ? c.wallet.manifest.id : null;
+    if (walletId === 'ethereum-wallets') account = walletId = null;
   } catch {
     // not connected yet
   }

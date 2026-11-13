@@ -56,16 +56,19 @@
   let group = $state<HTMLElement>();
 
   function key(e: KeyboardEvent) {
-    const d = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
-    if (!d) return;
-    e.preventDefault();
     const i = modes.findIndex(([v]) => v === mode);
-    onpick(modes[(i + d + modes.length) % modes.length][0]);
+    const next = e.key === 'Home' ? 0 : e.key === 'End' ? modes.length - 1
+      : e.key === 'ArrowRight' || e.key === 'ArrowDown' ? (i + 1) % modes.length
+      : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? (i - 1 + modes.length) % modes.length : -1;
+    if (next < 0) return;
+    e.preventDefault();
+    onpick(modes[next][0]);
     tick().then(() => group?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus());
   }
 </script>
 
-<div class="space-y-8 {preview ? 'select-none cursor-default' : ''}" inert={preview || undefined} aria-hidden={preview || undefined}>
+<!-- inert also hides it from assistive tech; /create says in words what the picture shows -->
+<div class="space-y-8 {preview ? 'select-none cursor-default' : ''}" inert={preview || undefined}>
   <div class="min-w-0">
     {#if preview}<div class="text-xl font-semibold">{title}</div>{:else}<h1 class="text-xl font-semibold">{title}</h1>{/if}
     <p class="text-sm text-zen-fg-muted font-light mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -92,9 +95,9 @@
 
   <div class="space-y-3">
     {#if modes.length > 1}
-      <span id="dest-q" class="block text-sm text-zen-fg-muted">Send to</span>
+      <span id="dest-q" class="block text-sm text-zen-fg-muted">Send To</span>
       <!-- One segmented control; radiogroup semantics: arrows move, one tab stop -->
-      <div bind:this={group} class="grid gap-1 p-1 rounded-[1.25rem] sm:rounded-full bg-zen-fg/5" style="grid-template-columns: repeat({modes.length}, minmax(0, 1fr));" role="radiogroup" aria-labelledby="dest-q" tabindex="-1" onkeydown={key}>
+      <div bind:this={group} class="grid gap-1 p-1 rounded-[1.25rem] bg-zen-fg/5" style="grid-template-columns: repeat({modes.length}, minmax(0, 1fr));" role="radiogroup" aria-labelledby="dest-q" tabindex="-1" onkeydown={key}>
         {#each modes as [value, text] (value)}
           <button
             type="button"
@@ -103,7 +106,7 @@
             tabindex={mode === value ? 0 : -1}
             data-mode={value}
             onclick={() => onpick(value)}
-            class="flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-1.5 min-w-0 h-14 sm:h-11 px-2 rounded-2xl sm:rounded-full text-xs sm:text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zen-fg/40 {mode === value
+            class="flex flex-col items-center justify-center gap-1 min-w-0 h-14 px-2 rounded-2xl text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zen-fg/40 {mode === value
               ? 'bg-zen-bg text-zen-fg shadow-sm'
               : 'text-zen-fg-muted hover:text-zen-fg'}"
           >

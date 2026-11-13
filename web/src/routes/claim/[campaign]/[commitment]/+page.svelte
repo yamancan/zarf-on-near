@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte';
+  import { onMount } from 'svelte';
   import { page } from '$app/state';
   import { env } from '$env/dynamic/public';
   import {
@@ -111,7 +111,6 @@
           ? "Couldn't check. Retry in a minute."
           : null,
   );
-  // Radiogroup keys on the pills: arrows move the choice and the focus, as native radios do.
   function backToField() {
     guideOpen = false;
     document.getElementById('dest')?.focus();

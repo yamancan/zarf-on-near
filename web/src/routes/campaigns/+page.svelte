@@ -53,7 +53,7 @@
       wallet = await nearConnectWallet(config.network, rpc, { ethereum: true }); // the same wallets as /create (T-025)
       walletReady = true;
       account = wallet.accountId();
-      wallet.onChange((a) => { if (a === account) return; account = a; if (a) void load(); }); // sign-in/out from any path (T-032)
+      wallet.onChange((a) => { if (a === account) return; account = a; if (a) void load(); }); // sign-in/out NEAR Connect reports in this page (T-032)
       if (account) await load();
     } catch {
       setupError = 'Could not read the contract. Try again in a minute.';

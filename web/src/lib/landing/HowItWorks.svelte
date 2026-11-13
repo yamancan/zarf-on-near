@@ -6,7 +6,7 @@
 
   const ROWS = [
     { email: 'ana@gmail.com', amount: '25' },
-    { email: 'kerem@acme.com', amount: '40' },
+    { email: 'kerem@gmail.com', amount: '40' },
   ];
   const CHAINS = PAYOUT_CHAINS.filter((c) => ['base', 'sol', 'arb'].includes(c.key));
 </script>
@@ -26,11 +26,16 @@
       <p class="text-sm text-zen-fg-muted">Pay once, in USDC.</p>
     </li>
     <li>
-      <div class="h-36 rounded-2xl border border-zen-border-subtle bg-zen-bg flex items-center justify-center" aria-hidden="true">
-        <span class="inline-flex items-center rounded-full bg-zen-fg text-zen-bg text-sm font-medium h-11 px-5"><GoogleG />Sign in with Google</span>
+      <!-- Google's account chooser, as a still picture: the step is choosing your Google account, not a button here -->
+      <div class="h-36 rounded-2xl border border-zen-border-subtle bg-zen-bg flex flex-col justify-center px-5 gap-3" aria-hidden="true">
+        <span class="inline-flex items-center text-sm text-zen-fg-muted"><GoogleG />Choose an account</span>
+        <span class="flex items-center gap-3 text-sm">
+          <span class="w-8 h-8 rounded-full bg-zen-fg/10 text-zen-fg flex items-center justify-center font-medium">A</span>
+          <span class="min-w-0"><span class="block text-zen-fg">Ana</span><span class="block text-xs text-zen-fg-muted truncate">ana@gmail.com</span></span>
+        </span>
       </div>
       <h2 class="text-xl font-semibold mt-6 mb-1.5 tracking-tight text-base-content">They Sign in with Google</h2>
-      <p class="text-sm text-zen-fg-muted">No wallet, no gas. The email stays off chain.</p>
+      <p class="text-sm text-zen-fg-muted">No wallet and no gas.</p>
     </li>
     <li>
       <div class="h-36 rounded-2xl border border-zen-border-subtle bg-zen-bg flex flex-col items-center justify-center gap-3" aria-hidden="true">
