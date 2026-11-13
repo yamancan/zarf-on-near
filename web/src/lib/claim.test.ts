@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import wranglerJsonc from '../../wrangler.jsonc?raw';
 import vectors from '../../../spec/vectors.json';
 import {
-  classifyDestination, nearAccountReady, missingAccountLine, typedBefore, claimStartedHere, holdPage, CLAIMED_NO_RECORD, INCOMPLETE_LINE, EXPLORER_LABEL, claimState, deadlineText, timeLeft, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isImplicitAccount, isValidAccountId, loadAttempt, newAttemptId,
+  classifyDestination, nearAccountReady, missingAccountLine, typedBefore, claimStartedHere, holdPage, CLAIMED_NO_RECORD, INCOMPLETE_LINE, EXPLORER_LABEL, stateMatches, deadlineText, timeLeft, destinationNonce, googleAuthUrl, isCampaignId, isHex32, isImplicitAccount, isValidAccountId, loadAttempt, newAttemptId,
   decodeProof, encodeProof, parseCallback, parseLinkFragment, saveAttempt, clearAttempt, saveReceipt, loadReceipt, settleReceipt, claimedAt, middle, twoDecimals, shownAmount, confirmRemembered, RECEIPT_TTL_MS,
 } from './claim';
 
@@ -92,15 +92,25 @@ describe('Google redirect', () => {
     expect(parseCallback('#error=access_denied&state=7%2Fabc')).toEqual({ error: 'access_denied' });
     expect(parseCallback('')).toEqual({ error: 'missing_token' });
   });
-  it('state carries a random per-attempt id', () => {
+  it('state is a random per-attempt id', () => {
     const a = newAttemptId(), b = newAttemptId();
     expect(a).toMatch(/^[0-9a-f]{32}$/);
     expect(a).not.toBe(b);
-    expect(claimState('7', 'c', a)).toBe(`7/c/${a}`);
   });
-  it('state round-trips through URL encoding', () => {
-    const s = claimState('7', main.recipients[0].commitment, newAttemptId());
-    expect(parseCallback(`#id_token=t&${new URLSearchParams({ state: s })}`)).toEqual({ idToken: 't', state: s });
+  it('red team #5: the URL sent to Google carries the attempt id, never the campaign or commitment', () => {
+    const c = main.recipients[0].commitment, a = newAttemptId();
+    const url = new URL(googleAuthUrl({ clientId: 'x', redirectUri: 'https://z/auth/google', nonce: 'n', state: a }));
+    expect(url.searchParams.get('state')).toBe(a);
+    expect(url.href).not.toContain(c);
+    expect(parseCallback(`#id_token=t&${new URLSearchParams({ state: a })}`)).toEqual({ idToken: 't', state: a });
+  });
+  it('a callback matches only the attempt this tab started, with a destination', () => {
+    const at = { campaign: '7', commitment: 'c', salt: '', amount: '1', proof: [], destination: 'alice.testnet', attemptId: 'a1' };
+    expect(stateMatches(at, 'a1')).toBe(true);
+    expect(stateMatches(at, '7/c/a1')).toBe(false); // the old campaign/commitment/id form
+    expect(stateMatches(at, 'a2')).toBe(false);
+    expect(stateMatches({ ...at, destination: '' }, 'a1')).toBe(false);
+    expect(stateMatches(null, 'a1')).toBe(false);
   });
 });
 

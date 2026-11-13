@@ -4,7 +4,7 @@
   import { AlertTriangle, ChevronDown, Loader2, Mail } from 'lucide-svelte';
   import { formatAmount } from '$lib/create/recipients';
   import { UNIT } from '$lib/network';
-  import { claimState, loadAttempt, parseCallback, signedIn } from '$lib/claim';
+  import { loadAttempt, parseCallback, signedIn, stateMatches } from '$lib/claim';
   import Medallion from '$lib/Medallion.svelte';
   import ZenButton from '$lib/zarf-kit/components/ui/ZenButton.svelte';
   import ZenCard from '$lib/zarf-kit/components/ui/ZenCard.svelte';
@@ -24,7 +24,7 @@
       failed = cb.error === 'access_denied'
         ? { title: 'Sign-In Cancelled', line: back ? `${waiting} Sign in again when you are ready.` : 'Open your claim link again to sign in.', cancelled: true }
         : { title: 'Sign-In Did Not Finish', line: 'Google could not sign you in this time. Try again.', code: cb.error };
-    } else if (!attempt?.destination || !attempt.attemptId || claimState(attempt.campaign, attempt.commitment, attempt.attemptId) !== cb.state) {
+    } else if (!stateMatches(attempt, cb.state)) {
       failed = { title: 'Sign-In From Another Tab', line: 'Start the sign-in again from your claim.' };
     } else {
       signedIn.idToken = cb.idToken;

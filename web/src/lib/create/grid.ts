@@ -32,10 +32,13 @@ const CONSUMER_MAIL = /@((outlook|hotmail|live|yahoo)\.(com|[a-z]{2}|co\.[a-z]{2
 
 /** The warning every non-Gmail row gets before funding: it may be Workspace, which we cannot tell. Null when all are Gmail. */
 export function googleWarning(rows: readonly { email: string; line: number }[]): string | null {
-  const other = rows.filter((r) => !isGmail(r.email)).map((r) => r.line);
+  const other = rows.filter((r) => !isGmail(r.email));
   if (!other.length) return null;
-  const which = other.length === 1 ? `Row ${other[0]} is` : `Rows ${other.join(', ')} are`;
-  return `Recipients must use Gmail or Google Workspace. ${which} not Gmail: any other address can never claim, and its share waits until the deadline.`;
+  const domains = [...new Set(other.map((r) => r.email.slice(r.email.lastIndexOf('@') + 1)))].join(', ');
+  const which = other.length === 1
+    ? `Row ${other[0].line} is not Gmail: it can claim only if ${domains} uses Google Workspace.`
+    : `Rows ${other.map((r) => r.line).join(', ')} are not Gmail: each can claim only if its domain (${domains}) uses Google Workspace.`;
+  return `Recipients must use Gmail or Google Workspace. ${which}`;
 }
 
 /** One row's email on its own (twins are checkGrid's): null when usable. */

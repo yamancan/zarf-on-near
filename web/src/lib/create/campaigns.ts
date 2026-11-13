@@ -48,8 +48,18 @@ export async function listCampaigns(view: View, sender: string): Promise<{ id: s
   return ids.map((id, i) => ({ id, c: views[i]! })).filter((r) => r.c && r.c.sender === sender).reverse();
 }
 
-/** Paid out so far: what was funded minus what is left or still in flight. */
+/** Out of escrow so far: what was funded minus what is left or still in flight (claims, plus any reclaim). */
 export const claimedAmount = (c: CampaignView): bigint => BigInt(c.amount) - BigInt(c.balance) - BigInt(c.in_flight);
+
+/**
+ * The word for claimedAmount (red team #6). A reclaim needs now > deadline (spec), so before the deadline only claims
+ * moved funds out: "claimed". After it a reclaim may be part of it, and the view does not split the two: "left escrow".
+ */
+export const outLabel = (c: CampaignView, nowMs: number): 'claimed' | 'left escrow' =>
+  BigInt(Math.floor(nowMs)) * 1_000_000n <= BigInt(c.deadline_ns) ? 'claimed' : 'left escrow';
+
+/** The Zarf balance row: once the list is read, with campaigns or with NEAR to withdraw (red team #9: an aborted first send leaves NEAR and no campaign). */
+export const showPrepay = (rows: readonly unknown[] | null, freePrepay: string): boolean => rows !== null && (rows.length > 0 || BigInt(freePrepay) > 0n);
 
 /** spec: reclaim iff now > deadline_ns, and there is a balance or a reservation left (else E117/E118). */
 export function reclaimable(c: CampaignView, nowMs: number): { ok: true } | { ok: false; reason: string } {

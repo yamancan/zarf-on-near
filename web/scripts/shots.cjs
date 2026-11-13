@@ -262,7 +262,7 @@ const S = {
     await ctx.addInitScript(([c, k]) => sessionStorage.setItem('zarf-near:attempt', JSON.stringify({ campaign: c, commitment: k, salt: 's', amount: '10000000', proof: [], destination: 'alice.testnet', attemptId: 'x' })), [CAMP, COMMIT]);
     // "Signing you in" lasts only until the receipt route loads: delay that module and catch the frame.
     await p.route(/receipt\/\+page\.svelte/, async (r) => { await new Promise((ok) => setTimeout(ok, 16000)); await r.continue(); });
-    await p.goto(base + `/auth/google#id_token=h.p.s&state=${encodeURIComponent(`${CAMP}/${COMMIT}/x`)}`, { waitUntil: 'commit' });
+    await p.goto(base + `/auth/google#id_token=h.p.s&state=x`, { waitUntil: 'commit' });
     await p.getByText('Signing In').waitFor({ timeout: 15000 }); return {};
   },
   'auth-cancelled-back': async (p, ctx) => {

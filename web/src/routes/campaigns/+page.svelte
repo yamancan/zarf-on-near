@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { env } from '$env/dynamic/public';
   import { getConfig, getPrepayBalance, txOutcome, type ContractConfig } from '$lib/create/chain';
-  import { claimedAmount, formatNear, listCampaigns, readSent, sentLabel, type SentRecord, reclaimable, reclaimOutcome, reclaimTx, withdrawTx, type CampaignView } from '$lib/create/campaigns';
+  import { claimedAmount, formatNear, listCampaigns, outLabel, readSent, reclaimable, sentLabel, showPrepay, type SentRecord, reclaimOutcome, reclaimTx, withdrawTx, type CampaignView } from '$lib/create/campaigns';
   import { formatAmount } from '$lib/create/recipients';
   import { nearConnectWallet, type SenderWallet } from '$lib/create/wallet';
   import { readSentOutcome } from '$lib/create/funding';
@@ -230,7 +230,7 @@
             <div class="h-1 rounded-full bg-zen-fg/10 overflow-hidden" aria-hidden="true">
               <div class="h-full bg-zen-fg rounded-full" style="width: {total === 0n ? 0 : Number((claimed * 100n) / total)}%"></div>
             </div>
-            <p class="text-sm text-zen-fg-muted tabular-nums">{formatAmount(claimed)} of {formatAmount(total)}{label ? ` ${UNIT}` : ''} claimed</p>
+            <p class="text-sm text-zen-fg-muted tabular-nums">{formatAmount(claimed)} of {formatAmount(total)}{label ? ` ${UNIT}` : ''} {outLabel(r.c, now)}</p>
           </div>
           <details class="group text-xs text-zen-fg-subtle">
             <summary class="inline-flex items-center gap-1.5 py-1 cursor-pointer list-none hover:text-zen-fg">Details <ChevronDown class="w-3.5 h-3.5 transition-transform group-open:rotate-180" aria-hidden="true" /></summary>
@@ -255,9 +255,13 @@
         </section>
       {/each}
     </div>
+  {/if}
 
-    <!-- The sender's Zarf balance (the contract's free pre-pay): a footer row -->
-    <div class="mt-8 flex flex-col items-start gap-2">
+  <!-- The sender's Zarf balance (the contract's free pre-pay): a footer row, outside the list branch so a sender whose
+       first send never became a campaign can still withdraw (red team #9) -->
+  {#if account && !error && showPrepay(rows, freePrepay)}
+    <!-- the page column is flex gap-8, so no margin here -->
+    <div class="flex flex-col items-start gap-2">
       <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
         <span class="tabular-nums" title="{formatNear(freePrepay)} NEAR">{formatNear(freePrepay)} NEAR</span>
         <span class="inline-flex items-center gap-1 text-zen-fg-muted">Zarf Balance
