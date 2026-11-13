@@ -1,13 +1,14 @@
 <script lang="ts">
-  // The amount as a plain row under a hairline (T-023 waste list items 8, 9): the claim app's Amount Highlight type
-  // (ClaimStep5Submit:178-206), without its box and without a visible eyebrow; the label is for screen readers.
+  // The amount, the way the claim card shows it (lib/ClaimCard.svelte amount row, T-033): the USDC mark, the number
+  // large, the unit beside it. One treatment from "Claim" to "Arrived"; the label is for screen readers.
+  import Mark from '$lib/Mark.svelte';
+  import { MARKS } from '$lib/chains';
   let { label, value, unit = 'USDC' }: { label: string; value: string; unit?: string } = $props();
 </script>
 
-<div class="pt-6 border-t border-zen-border-subtle">
+<div class="flex items-center gap-3">
   <span class="sr-only">{label}</span>
-  <div class="flex items-baseline justify-start gap-2">
-    <span class="text-5xl font-light tracking-tighter text-zen-fg tabular-nums">{value}</span>
-    <span class="text-sm font-medium text-zen-primary uppercase tracking-widest">{unit}</span>
-  </div>
+  <Mark svg={MARKS.usdc} class="w-10 h-10" />
+  <span class="text-5xl font-semibold tracking-tight text-zen-fg tabular-nums">{value}</span>
+  <span class="text-base text-zen-fg-muted">{unit}</span>
 </div>

@@ -13,9 +13,13 @@
  */
 html, body { background-color: var(--zen-bg); overscroll-behavior-y: none; }
 
-/* The claim app's deeper fume ground (main repo apps/claim/src/app.css). */
-[data-theme='glass-porcelain'],
-[data-theme='dark'] {
+/*
+ * The claim app's deeper fume ground (main repo apps/claim/src/app.css), on every page but the landing. The landing
+ * keeps the kit's own dark ground, #121212 (main repo apps/landing/src/app.css), which its grain layer is tuned for:
+ * on #0a0a0b the overlay grain all but disappears and the page reads too dark (owner, T-033).
+ */
+[data-theme='glass-porcelain']:not(:has(.landing-grain)),
+[data-theme='dark']:not(:has(.landing-grain)) {
   --zen-bg: #0a0a0b;
   --zen-bg-elevated: #131315;
   --zen-bg-sunken: #1a1a1d;
@@ -66,6 +70,12 @@ html, body { background-color: var(--zen-bg); overscroll-behavior-y: none; }
 .landing-grain {
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='turbulence' baseFrequency='0.7' numOctaves='5' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='1'/%3E%3C/svg%3E");
   background-repeat: repeat;
+}
+/* main repo apps/landing/src/app.css: the landing ground, #121212 */
+[data-theme='glass-porcelain']:has(.landing-grain),
+[data-theme='dark']:has(.landing-grain) {
+  background: #121212;
+  background-color: #121212;
 }
 [data-theme='dark'] .landing-grain,
 [data-theme='glass-porcelain'] .landing-grain {
