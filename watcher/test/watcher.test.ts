@@ -207,11 +207,21 @@ describe('run + alert', () => {
     expect(body.text).toMatch(/^\[zarf-near testnet\] zarf-near-1112\.testnet .*\n- UPGRADE PROPOSED: .*\n- SCRIPT CHANGED: /);
   });
   it('SCRIPTS_PER_RUN above the free-plan budget pages and is held at 40', async () => {
-    for (const v of ['41', '0', 'x']) {
+    for (const v of ['41', '3', '0', 'x']) {
       expect(await run({ ...env, SCRIPTS_PER_RUN: v }, EXP, world(clean, 'same'))).toEqual([
-        `WATCHER MISCONFIGURED: SCRIPTS_PER_RUN ${v} is not 1-40 (the free plan's budget); checked 40`,
+        `WATCHER MISCONFIGURED: SCRIPTS_PER_RUN ${v} is not 4-40 (the free plan's budget); checked 40`,
       ]);
     }
+  });
+  it('an RPC answer that is not HTTP 200 is never parsed, even with a clean-looking body (redirect: manual)', async () => {
+    const w = world(clean, 'same');
+    const redirected = vi.fn(async (url: string, init?: RequestInit) => {
+      const r = await w(url, init);
+      return url === env.NEAR_RPC_URL ? new Response(await r.text(), { status: 302, headers: { location: 'https://evil.example' } }) : r;
+    });
+    expect(await run(env, EXP, redirected)).toEqual([
+      'CANNOT READ zarf-near-1112.testnet: watch: HTTP 302', 'CANNOT READ THE ACCOUNT zarf-near-1112.testnet: view_account: HTTP 302',
+    ]);
   });
   it('a run that cannot read is an alert', async () => {
     const down = vi.fn(async () => { throw new Error('rpc down'); });

@@ -40,7 +40,7 @@ active yet. `guardian_id` is set at `new` and cannot be added later. The testnet
 | `EXPECTED_SIGNERS` | the relayer's `VERIFIER_SIGNERS` (hex, comma-separated) |
 | `EXPECTED_CODE_HASH` | `5GdxDSB4sGW9Ewod4Q4Na613C2sLQjVfFjLbbZbKt6N8` (`view_account`, base58). An honest upgrade changes it here too |
 | `CLAIM_PAGE_URL` | `https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev/claim/1/0` |
-| `SCRIPTS_PER_RUN` | `40` (the most allowed): the free plan's 50 subrequests per run, less 4 RPC reads with one retry each, the page and the alert. Redirects are not followed |
+| `SCRIPTS_PER_RUN` | `40` (allowed 4-40; below 4 there is no random share): the free plan's 50 subrequests per run, less 4 RPC reads with one retry each, the page and the alert. Redirects are not followed |
 | `ALERT_WEBHOOK_URL` | **secret, the owner sets it**: a Slack or Discord incoming-webhook URL. The body is `{"text": …, "content": …}` |
 
 `env.mainnet` is empty until the mainnet escrow exists. `scripts/deploy-mainnet-hosting.sh` refuses to

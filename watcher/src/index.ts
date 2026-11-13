@@ -23,7 +23,7 @@ export interface Env {
   /** The escrow account's code hash as view_account returns it (base58). */
   EXPECTED_CODE_HASH: string;
   CLAIM_PAGE_URL: string;
-  /** Recorded scripts re-hashed per run: 1 to 40 (the free plan's budget), default 40. */
+  /** Recorded scripts re-hashed per run: 4 to 40 (the free plan's budget), default 40. */
   SCRIPTS_PER_RUN?: string;
   /** Secret. POSTed {text, content} (Slack and Discord incoming-webhook shapes). */
   ALERT_WEBHOOK_URL?: string;
@@ -35,6 +35,7 @@ export const EXPECTED: Record<string, Fingerprint | null> = { testnet, mainnet }
 
 const timed: Fetcher = (url, init) => fetch(url, { ...init, redirect: 'manual', signal: AbortSignal.timeout(15_000) });
 const MAX_SCRIPTS_PER_RUN = 40; // the free plan's 50 less 8 RPC attempts, the page and the alert
+const MIN_SCRIPTS_PER_RUN = 4; // below 4, pick() has no random share and the schedule alone decides
 
 /** One NEAR RPC query, tried twice. */
 async function query<T>(env: Env, params: Record<string, unknown>, fetcher: Fetcher): Promise<T> {
@@ -43,6 +44,7 @@ async function query<T>(env: Env, params: Record<string, unknown>, fetcher: Fetc
   for (let i = 0; i < 2; i++) {
     try {
       const res = await fetcher(env.NEAR_RPC_URL, { method: 'POST', headers: { 'content-type': 'application/json' }, body });
+      if (!res.ok) throw new Error(`${String(params.method_name ?? params.request_type)}: HTTP ${res.status}`); // a redirect too: never parsed
       const j = (await res.json()) as { result?: T; error?: unknown };
       if (!j.result) throw new Error(`${String(params.method_name ?? params.request_type)}: ${JSON.stringify(j.error)}`);
       return j.result;
@@ -75,8 +77,8 @@ export async function run(env: Env, expected: Fingerprint | null, fetcher: Fetch
   if (missing.length) return [`WATCHER MISCONFIGURED: ${missing.join(', ')} empty, nothing was checked`];
   const f: string[] = [];
   let perRun = Number(env.SCRIPTS_PER_RUN || MAX_SCRIPTS_PER_RUN);
-  if (!(Number.isInteger(perRun) && perRun >= 1 && perRun <= MAX_SCRIPTS_PER_RUN)) {
-    f.push(`WATCHER MISCONFIGURED: SCRIPTS_PER_RUN ${env.SCRIPTS_PER_RUN} is not 1-${MAX_SCRIPTS_PER_RUN} (the free plan's budget); checked ${MAX_SCRIPTS_PER_RUN}`);
+  if (!(Number.isInteger(perRun) && perRun >= MIN_SCRIPTS_PER_RUN && perRun <= MAX_SCRIPTS_PER_RUN)) {
+    f.push(`WATCHER MISCONFIGURED: SCRIPTS_PER_RUN ${env.SCRIPTS_PER_RUN} is not ${MIN_SCRIPTS_PER_RUN}-${MAX_SCRIPTS_PER_RUN} (the free plan's budget); checked ${MAX_SCRIPTS_PER_RUN}`);
     perRun = MAX_SCRIPTS_PER_RUN;
   }
   try {
