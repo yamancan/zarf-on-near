@@ -88,6 +88,7 @@
   let recoveryAck = $state(false);
   let busy = $state('');
   let error = $state('');
+  let backupNote = $state(''); // a backup from /campaigns waits for an unsettled send in this tab (T-033)
   let errorTitle = $state(''); // step 4 only: the error as Zarf's alert, title + body
   let errorCode = $state(''); // a proven refund's contract code: E119/E127 offer "Change the deadline"
   let result = $state<{ campaignId: string; txHash: string } | null>(null);
@@ -274,8 +275,12 @@
         else if (f.txHash) await check(f.txHash);
         else await checkByRoot(); // reloaded while the wallet popup was open
       }
-      if (backup && f) error = 'A send is still being checked here. When it settles, open the backup again from Campaigns.';
-      else if (backup) await openBackup(backup);
+      // The backup opens once nothing here is unsettled (a resumed send may have just finished); otherwise it waits.
+      if (backup && f && !result) backupNote = 'A send is still being checked here, so the backup did not open. When it settles, open the backup again from Campaigns.';
+      else if (backup) {
+        if (f) clearFunding();
+        await openBackup(backup);
+      }
     } catch {
       setupError = "Couldn't reach NEAR. Nothing was sent.";
       setupRetry = true;
@@ -892,6 +897,7 @@
     </ZenAlert>
   {/if}
   {#if otherTabNote}<p class="mb-6 text-sm text-zen-fg-muted" role="status">{otherTabNote}</p>{/if}
+  {#if backupNote}<p class="mb-6 text-sm text-zen-fg-muted" role="status">{backupNote}</p>{/if}
 
   {#if setupError}
     <ZenAlert variant="error">
