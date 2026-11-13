@@ -38,7 +38,7 @@
         "NETWORK": "testnet", "CONTRACT_ID": "zarf-near-1112.testnet", "RELAYER_ACCOUNT_ID": "zarf-near-relayer-1111.testnet",
         "NEAR_RPC_URL": "https://test.rpc.fastnear.com",
         "VERIFIER_SIGNERS": "2d10ebec1ec795cef82b8d357cc60d39d9119b99908741660b632fc5cf0d4e32",
-        "CLAIM_ORIGINS": "https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev",
+        "CLAIM_ORIGINS": "https://near.zarf.to,https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev", // near.zarf.to: proxy/ (T-029)
         // Testnet starter NEAR (src/starter.ts): "on" sends 0.02 test NEAR once to a paid destination that holds
         // almost none. Needs the GAS_KEY secret (full-access key of GAS_ACCOUNT_ID, never RELAYER_KEY) and STARTER.
         // Local `wrangler dev` passes only the secrets listed in "required" above: add GAS_KEY there to try it locally.
