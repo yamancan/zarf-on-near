@@ -22,6 +22,7 @@ export interface Env {
   FAUCET_SENDER_KEY?: string; // secret
   LIMIT_KEY?: string; // secret
   TURNSTILE_SECRET?: string; // secret
+  PROXY_KEY?: string; // secret shared with proxy/ (near.zarf.to): marks the visitor IP it forwards as trusted
   FAUCET_KV: KvLike;
   PER_IP?: RateLimiter; // Workers rate-limit binding: a burst guard in front of Turnstile and the chain
 }
@@ -48,6 +49,13 @@ function rpcIsTestnet(url: string): Promise<boolean> {
 }
 
 const LOCAL_HOSTS = ['localhost', '127.0.0.1'];
+
+/**
+ * The visitor's IP for the limits. Through near.zarf.to (proxy/) the request arrives from Cloudflare's own address,
+ * so the proxy forwards the visitor's in X-Zarf-Client-IP; it counts only with the shared PROXY_KEY.
+ */
+export const clientIp = (req: Request, proxyKey: string | undefined): string =>
+  (proxyKey && req.headers.get('X-Zarf-Proxy-Key') === proxyKey && req.headers.get('X-Zarf-Client-IP')) || req.headers.get('CF-Connecting-IP') || 'unknown';
 
 /** Fails closed on any missing or malformed setting; never on mainnet. The stub runs only on a local host. */
 function makeCreator(env: Env, host: string): Promise<CampaignCreator> | null {
@@ -139,7 +147,7 @@ export default {
     }
     // A JSON content type forces a CORS preflight, so a cross-site form cannot post here.
     if (!/^application\/json\b/i.test(req.headers.get('Content-Type') ?? '')) return json({ error: 'UNSUPPORTED_MEDIA_TYPE' }, 415);
-    const ip = req.headers.get('CF-Connecting-IP') ?? 'unknown';
+    const ip = clientIp(req, env.PROXY_KEY);
     // A burst from one IP stops here, before the float read, siteverify and the quota.
     if (!(await env.PER_IP.limit({ key: ip })).success) return json({ error: 'RATE_LIMITED_BURST' }, 429);
     if (env.CREATOR === 'testnet') {
@@ -150,7 +158,8 @@ export default {
     }
     const input = (await req.json().catch(() => null)) as { turnstile?: unknown } | null;
     // Before the quota: a bot without a valid token spends nobody's daily allowance.
-    const human = await verifyTurnstile(input?.turnstile, env.TURNSTILE_SECRET, ip, local ? null : url.hostname);
+    // The widget runs on this host or on the claim host (near.zarf.to serves /try through proxy/).
+    const human = await verifyTurnstile(input?.turnstile, env.TURNSTILE_SECRET, ip, local ? null : [url.hostname, new URL(env.CLAIM_HOST).hostname]);
     if (human === 'unavailable') return json({ error: 'TURNSTILE_UNAVAILABLE' }, 503);
     if (human === 'failed') return json({ error: 'TURNSTILE_FAILED' }, 403);
     const { status, body } = await handleFaucet(input, ip, {
