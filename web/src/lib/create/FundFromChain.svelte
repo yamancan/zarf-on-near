@@ -16,6 +16,7 @@
   import { formatAmount } from './recipients';
   import CopyButton from '$lib/CopyButton.svelte';
   import Note from '$lib/Note.svelte';
+  import ZenBadge from '$lib/zarf-kit/components/ui/ZenBadge.svelte';
   import ZenButton from '$lib/zarf-kit/components/ui/ZenButton.svelte';
   import ZenInput from '$lib/zarf-kit/components/ui/ZenInput.svelte';
 
@@ -245,7 +246,7 @@
             class="flex flex-col items-center gap-1 py-2 rounded-xl border text-[11px] font-medium transition-colors {source === k ? 'border-zen-fg text-zen-fg' : 'border-transparent text-zen-fg-muted hover:text-zen-fg'}"
             onclick={() => pick(k)}
           ><span class="w-6 h-6 [&>svg]:w-full [&>svg]:h-full" aria-hidden="true">{@html logo}</span><span class="w-full truncate text-center">{label}</span
-            >{#if testnet && k !== 'near'}<span class="text-[10px] font-normal text-zen-fg-subtle">Mainnet</span>{/if}</button>
+            >{#if testnet && k !== 'near'}<ZenBadge size="sm">Mainnet</ZenBadge>{/if}</button>
         {/each}
       </div>
     </div>

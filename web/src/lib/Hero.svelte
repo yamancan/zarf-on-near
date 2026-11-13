@@ -185,7 +185,7 @@
       class="text-base md:text-lg text-zen-fg/60 max-w-xl text-center leading-normal [text-wrap:balance] transition-all duration-700 ease-out {mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-5'}"
       style="transition-delay: 600ms;"
     >
-      They claim with Google. The email never goes on chain.
+      They claim with Gmail or Google Workspace. The email never goes on chain.
     </p>
 
     <div

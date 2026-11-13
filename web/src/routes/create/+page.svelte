@@ -1233,7 +1233,10 @@
               unit={UNIT}
               modes={previewModes}
               mode="existing"
-            />
+            >
+              {#snippet body()}<ZenInput aria-label="NEAR account" placeholder={TESTNET ? 'alice.testnet' : 'alice.near'} disabled />{/snippet}
+              {#snippet footer()}<p class="text-xs text-zen-fg-subtle text-center">Use the email this link was sent to.</p>{/snippet}
+            </ClaimCard>
             </div>
           </ZenCard>
         </aside>

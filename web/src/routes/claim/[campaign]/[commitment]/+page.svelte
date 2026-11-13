@@ -305,7 +305,7 @@
      card's own title is the one header (T-023 waste list item 5). -->
 <!-- Phones: p-4 shell, no column inset, p-4 card (blue-team gap 2, accepted by main as a departure from the kit's p-8) -->
 <div class="w-full max-w-7xl mx-auto p-4 sm:p-8 lg:p-12">
-  <div class="h-full flex flex-col relative max-w-5xl w-full sm:px-4 md:px-0">
+  <div class="h-full flex flex-col relative max-w-5xl w-full mx-auto sm:px-4 md:px-0">
     <section class="w-full pt-8">
       <div class="max-w-lg mx-auto">
   <ZenCard variant="elevated" class="overflow-hidden">
@@ -445,7 +445,7 @@
           {/snippet}
           {#snippet footer()}
           {#if busy}<Note tone="pending">{busy}</Note>{/if}
-          <p class="text-xs text-zen-fg-subtle text-center">Use the email this link was sent to.</p>
+          {#if !(mode === 'chain' && network !== 'mainnet')}<p class="text-xs text-zen-fg-subtle text-center">Use the email this link was sent to.</p>{/if}
           <!-- T-001: the unaudited note stays visible on mainnet -->
           {#if network === 'mainnet'}<p class="text-xs text-zen-fg-subtle text-center">{UNAUDITED_LINE}</p>{/if}
           {#if error}<Note tone="error" center>{error}</Note>{/if}

@@ -11,7 +11,7 @@
   const CHAINS = PAYOUT_CHAINS.filter((c) => ['base', 'sol', 'arb'].includes(c.key));
 </script>
 
-<section class="py-24" aria-label="How it works">
+<section class="pt-4 md:pt-8 pb-24" aria-label="How it works">
   <ol class="container mx-auto px-6 max-w-6xl grid md:grid-cols-3 gap-12 md:gap-10">
     <li>
       <div class="h-36 rounded-2xl border border-zen-border-subtle bg-zen-bg flex flex-col justify-center px-5" aria-hidden="true">
@@ -34,8 +34,8 @@
           <span class="min-w-0"><span class="block text-zen-fg">Ana</span><span class="block text-xs text-zen-fg-muted truncate">ana@gmail.com</span></span>
         </span>
       </div>
-      <h2 class="text-xl font-semibold mt-6 mb-1.5 tracking-tight text-base-content">They Sign in with Google</h2>
-      <p class="text-sm text-zen-fg-muted">No wallet and no gas.</p>
+      <h2 class="text-xl font-semibold mt-6 mb-1.5 tracking-tight text-base-content">They Claim with Google</h2>
+      <p class="text-sm text-zen-fg-muted">No gas and no seed phrase.</p>
     </li>
     <li>
       <div class="h-36 rounded-2xl border border-zen-border-subtle bg-zen-bg flex flex-col items-center justify-center gap-3" aria-hidden="true">

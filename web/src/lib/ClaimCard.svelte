@@ -68,7 +68,7 @@
 </script>
 
 <!-- inert also hides it from assistive tech; /create says in words what the picture shows -->
-<div class="space-y-8 {preview ? 'select-none cursor-default' : ''}" inert={preview || undefined}>
+<div class="space-y-8 {preview ? 'select-none cursor-default [&_[role=radiogroup]]:opacity-60 [&_input]:opacity-60' : ''}" inert={preview || undefined}>
   <div class="min-w-0">
     {#if preview}<div class="text-xl font-semibold">{title}</div>{:else}<h1 class="text-xl font-semibold">{title}</h1>{/if}
     <p class="text-sm text-zen-fg-muted font-light mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
