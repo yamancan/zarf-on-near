@@ -2,6 +2,7 @@
 // It yields the same Row[] parseRecipients does: canonical email, amount in base units. The leaf format is unchanged.
 
 import { ADDR_SPEC, MAX_LEAVES, canonicalEmail, parseAmount, type Rejected, type Row } from './recipients';
+import type { RowRules } from '$lib/zarf-kit/create/rowChecks';
 
 export interface GridRow {
   email: string; // as typed
@@ -25,6 +26,50 @@ export const isGmail = (email: string) => /@(gmail|googlemail)\.com$/i.test(emai
 
 const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
+/** One row's email on its own (twins are checkGrid's): null when usable. */
+export function emailError(raw: string): string | null {
+  if (!raw.trim()) return 'Add an email';
+  let email: string;
+  try {
+    email = canonicalEmail(raw);
+  } catch {
+    return 'Use plain letters only: no accents or hidden characters';
+  }
+  if (/^mailto:/.test(email) || /^<.*>$/.test(email)) return 'Remove the mailto: or <> around it';
+  if (!ADDR_SPEC.test(email)) return 'Not an email';
+  // Google never puts a +tag Gmail alias in the id_token, so such a row could never be claimed.
+  if (/^[^@]*\+[^@]*@(gmail|googlemail)\.com$/.test(email)) return 'Gmail +alias: use the sign-in address';
+  return null;
+}
+
+/** One row's amount: null when usable. */
+export function amountError(raw: string): string | null {
+  if (!raw.trim()) return 'Add an amount';
+  // T-010 review minor 3: "1,000.5" is a thousands comma, not too many decimals.
+  if (/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(raw.trim())) return 'Write it without commas, like 1000.5';
+  try {
+    parseAmount(raw);
+    return null;
+  } catch (e) {
+    return capital((e as Error).message);
+  }
+}
+
+/** The same checks as Zarf's grid rules (zarf-kit/create/rowChecks.ts); checkGrid stays the gate. */
+export const gridRules: RowRules<GridRow> = {
+  getIdentifier: (r) => r.email,
+  normalizeIdentifier: (v) => {
+    try {
+      return canonicalEmail(v);
+    } catch {
+      return v;
+    }
+  },
+  identifierError: emailError,
+  amountError,
+  duplicateKeyOf: (e) => gmailAccount(e) ?? e,
+};
+
 /**
  * Checks every row. Blank rows are unfinished, never flagged, never sent. At most one problem per row: the email
  * first, then a twin of an earlier row, then the amount. The later row of a pair is the one flagged.
@@ -39,17 +84,9 @@ export function checkGrid(rows: readonly GridRow[]): { problems: (RowProblem | n
     const line = i + 1;
     const flag = (field: RowProblem['field'], message: string) => problems.push({ field, message });
     if (isBlankRow(r)) return problems.push(null);
-    if (!r.email.trim()) return flag('email', 'Add an email');
-    let email: string;
-    try {
-      email = canonicalEmail(r.email);
-    } catch {
-      return flag('email', 'Use plain letters only: no accents or hidden characters');
-    }
-    if (/^mailto:/.test(email) || /^<.*>$/.test(email)) return flag('email', 'Remove the mailto: or <> around it');
-    if (!ADDR_SPEC.test(email)) return flag('email', 'Not an email');
-    // Google never puts a +tag Gmail alias in the id_token, so such a row could never be claimed.
-    if (/^[^@]*\+[^@]*@(gmail|googlemail)\.com$/.test(email)) return flag('email', 'Gmail +alias: use the sign-in address');
+    const bad = emailError(r.email);
+    if (bad) return flag('email', bad);
+    const email = canonicalEmail(r.email);
     const same = firstExact.get(email);
     if (same !== undefined) return flag('email', `Listed twice: same as row ${same}`);
     const account = gmailAccount(email);
@@ -58,15 +95,9 @@ export function checkGrid(rows: readonly GridRow[]): { problems: (RowProblem | n
     if (twin !== undefined) return flag('email', `Gmail dot twin of row ${twin}: use the sign-in address`);
     firstExact.set(email, line);
     if (account !== null) firstAccount.set(account, line);
-    if (!r.amount.trim()) return flag('amount', 'Add an amount');
-    // T-010 review minor 3: "1,000.5" is a thousands comma, not too many decimals.
-    if (/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(r.amount.trim())) return flag('amount', 'Write it without commas, like 1000.5');
-    let amount: bigint;
-    try {
-      amount = parseAmount(r.amount);
-    } catch (e) {
-      return flag('amount', capital((e as Error).message));
-    }
+    const badAmount = amountError(r.amount);
+    if (badAmount) return flag('amount', badAmount);
+    const amount = parseAmount(r.amount);
     // ft_transfer_call sends the sum as one u128.
     if ((total + amount) >> 128n) return flag('amount', 'The total would exceed the token maximum');
     if (out.length >= MAX_LEAVES) return flag('email', `Over the ${MAX_LEAVES} recipient limit`);

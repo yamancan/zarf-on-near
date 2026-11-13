@@ -1,10 +1,13 @@
 <script lang="ts">
-  // Step 3 "Wallet": pay for the send with USDC from another chain (T-019, T-025). 1Click turns it into NEAR USDC in
-  // the sender's own account; the page then sees the balance and the send goes on as before (ft_transfer_call, unchanged).
-  // We only show a deposit address: the sender pays from any wallet. Testnet: live dry mainnet quotes, nothing to pay.
+  // Step 2 "Pay": Pay With, a row of chain logos with USDC on NEAR first (T-019, T-025, T-024 restyle). Another chain:
+  // 1Click turns its USDC into NEAR USDC in the sender's own account; the page then sees the balance and the send goes
+  // on as before (ft_transfer_call, unchanged). We only show a deposit address: the sender pays from any wallet.
+  // Testnet: live dry mainnet quotes, nothing to pay. A MetaMask (0x) sender's refund address is their own account.
   import { onMount, tick } from 'svelte';
   import { encode } from 'uqr';
   import { ArrowLeftRight, CheckCircle2, Clock, AlertTriangle } from 'lucide-svelte';
+  import { chainLogo, evmAddressError } from '$lib/chains';
+  import { middle } from '$lib/claim';
   import { getStatus, QuoteError, type StatusView } from '$lib/intents';
   import {
     archiveFunding, describeFunding, earlierFundings, followFunding, FUNDING_CHAINS, FUNDING_LIFETIME_MS, getFundingQuote, loadFunding, mayPay, mayStartOver, refundConfirmed, saveFunding, unresolved,
@@ -13,8 +16,8 @@
   import { formatAmount } from './recipients';
   import CopyButton from '$lib/CopyButton.svelte';
   import Note from '$lib/Note.svelte';
-  import ZenButton from '$lib/zen/components/ZenButton.svelte';
-  import ZenInput from '$lib/zen/components/ZenInput.svelte';
+  import ZenButton from '$lib/zarf-kit/components/ui/ZenButton.svelte';
+  import ZenInput from '$lib/zarf-kit/components/ui/ZenInput.svelte';
 
   let { account, contract, need, testnet, onArrived }: {
     account: string; contract: string; need: bigint; testnet: boolean; onArrived: () => void;
@@ -37,8 +40,14 @@
   let request = 0; // the same for quote requests: a reply to an older request is dropped
 
   const chain = $derived(FUNDING_CHAINS.find((c) => c.key === (saved?.chainKey ?? source)) ?? null);
+  // A MetaMask sender's NEAR account is its Ethereum address (NEP-518): on an EVM chain that address is theirs, so it is
+  // the refund address, with nothing to type or read back.
+  const ownRefund = $derived(!saved && chain && chain.addressError === evmAddressError && /^0x[0-9a-f]{40}$/.test(account) ? account : '');
+  $effect(() => {
+    if (ownRefund) refundTo = ownRefund;
+  });
   const addrError = $derived(refundTo && chain ? chain.addressError(refundTo.trim()) : null);
-  const confirmed = $derived(!addrError && refundConfirmed(refundTo.trim(), last6));
+  const confirmed = $derived(!addrError && (ownRefund ? refundTo === ownRefund : refundConfirmed(refundTo.trim(), last6)));
   const line = $derived(saved && status && chain ? describeFunding(status, chain.name, account, saved.refundTo, saved.depositAddress) : null);
   const canPay = $derived(!!saved && mayPay(status?.status, fresh, saved.deadline, now));
   const expired = $derived(!!saved && Date.parse(saved.deadline) <= now && (!status || status.status === 'PENDING_DEPOSIT'));
@@ -130,13 +139,16 @@
   }
   const pick = (k: Source) => {
     if (busy) return;
+    if (ownRefund && k !== source) refundTo = ''; // a typed address is never carried over from the own-account prefill
     source = k;
     quote = null;
     error = '';
     request++; // any reply still out is for the old choice
   };
 
-  const SOURCES = $derived([['near', 'USDC on NEAR'], ...FUNDING_CHAINS.map((c) => [c.key, c.name])] as [Source, string][]);
+  // NEAR's mark: simple-icons 13.21.0 near.svg (CC0), the one the footer used to carry.
+  const NEAR_LOGO = '<svg viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M21.443 0c-.89 0-1.714.46-2.18 1.218l-5.017 7.448a.533.533 0 0 0 .792.7l4.938-4.282a.2.2 0 0 1 .334.151v13.41a.2.2 0 0 1-.354.128L5.03.905A2.555 2.555 0 0 0 3.078 0h-.521A2.557 2.557 0 0 0 0 2.557v18.886a2.557 2.557 0 0 0 4.736 1.338l5.017-7.448a.533.533 0 0 0-.792-.7l-4.938 4.283a.2.2 0 0 1-.333-.152V5.352a.2.2 0 0 1 .354-.128l14.924 17.87c.486.574 1.2.905 1.952.906h.521A2.558 2.558 0 0 0 24 21.445V2.557A2.558 2.558 0 0 0 21.443 0Z"/></svg>';
+  const SOURCES = $derived([['near', 'NEAR', NEAR_LOGO], ...FUNDING_CHAINS.map((c) => [c.key, c.name, chainLogo(c)])] as [Source, string, string][]);
   function sourceKey(e: KeyboardEvent) {
     const d = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
     if (!d) return;
@@ -159,7 +171,7 @@
 
 {#snippet row(label: string, value: string, exact = '')}
   <div class="flex items-baseline justify-between gap-4">
-    <div class="text-[10px] text-zen-fg-subtle uppercase shrink-0">{label}</div>
+    <div class="text-sm text-zen-fg-subtle shrink-0">{label}</div>
     <div class="font-medium text-sm text-right tabular-nums" title={exact || undefined}>{value}</div>
   </div>
 {/snippet}
@@ -167,8 +179,8 @@
 <div class="flex flex-col gap-4" data-fund>
   {#if saved && chain}
     <!-- A deposit address is out: follow it until 1Click reports a final status -->
-    <div class="flex flex-col gap-4 py-5 px-5 rounded-2xl bg-zen-fg/5 border border-zen-border-subtle">
-      <p class="text-[10px] uppercase tracking-[0.3em] text-zen-fg-subtle font-bold">Funding from {chain.name}</p>
+    <div class="flex flex-col gap-4 pt-4 border-t border-zen-border-subtle">
+      <p class="text-sm text-zen-fg">From {chain.name}</p>
       {@render row('You Send', `${saved.amountInFormatted} USDC on ${chain.name}`)}
       {@render row('You Get', `${usdc(saved.amountOut)} USDC on NEAR`)}
       {@render row('Fee', `${usdc(feeOf(saved.amountIn, saved.amountOut))} USDC`)}
@@ -221,34 +233,37 @@
       {/each}
     </div>
   {/if}
-  {#if saved}
-    <!-- shown above -->
-  {:else if need > 0n}
+  {#if !saved}
     <div class="flex flex-col gap-3">
-      <div class="text-[10px] uppercase tracking-[0.3em] text-zen-fg-subtle font-bold" id="pay-with">Pay With</div>
-      <div class="flex flex-wrap items-center gap-2" role="radiogroup" aria-labelledby="pay-with" tabindex="-1" onkeydown={sourceKey}>
-        {#each SOURCES as [k, label] (k)}
-          <ZenButton
-            variant={source === k ? 'primary' : 'ghost'}
-            size="sm"
-            class="px-3 rounded-full text-xs font-medium"
+      <div class="text-sm text-zen-fg-muted" id="pay-with">Pay With</div>
+      <div role="radiogroup" aria-labelledby="pay-with" tabindex="-1" class="grid grid-cols-5 gap-1.5" onkeydown={sourceKey}>
+        {#each SOURCES as [k, label, logo] (k)}
+          <button
+            type="button"
             role="radio"
             aria-checked={source === k}
             tabindex={source === k ? 0 : -1}
             data-source={k}
             disabled={busy}
+            class="flex flex-col items-center gap-1 py-2 rounded-xl border text-[11px] font-medium transition-colors {source === k ? 'border-zen-fg text-zen-fg' : 'border-transparent text-zen-fg-muted hover:text-zen-fg'}"
             onclick={() => pick(k)}
-          >{label}</ZenButton>
+          ><span class="w-6 h-6" aria-hidden="true">{@html logo}</span><span class="w-full truncate text-center">{label}</span></button>
         {/each}
       </div>
     </div>
-    {#if chain}
+    {#if chain && need === 0n}
+      <p class="text-sm text-zen-fg-muted">Nothing to bring from {chain.name}: your NEAR account already holds enough USDC.</p>
+    {:else if chain}
       {#if testnet}
-        <Note tone="info">Real cross-chain funding runs on mainnet only: 1Click has no testnet. Here you see a live mainnet price, with nothing to pay.</Note>
+        <Note tone="info">Mainnet only: 1Click has no testnet. This is a live mainnet price, with nothing to pay.</Note>
       {/if}
-      <ZenInput label="Your {chain.name} Address" hint="Refunds go here. Your own wallet, not an exchange." placeholder={chain.placeholder} bind:value={refundTo} error={addrError} disabled={busy} autocomplete="off" spellcheck="false" />
-      {#if refundTo && !addrError}
-        <ZenInput label="Its Last 6 Characters" hint="Read it again from your wallet." bind:value={last6} maxlength={6} disabled={busy} autocomplete="off" spellcheck="false" class="font-mono" />
+      {#if ownRefund}
+        <p class="text-sm text-zen-fg-muted">Refunds go to your own account, <span class="font-mono text-zen-fg" title={ownRefund}>{middle(ownRefund, 6)}</span>, on {chain.name}.</p>
+      {:else}
+        <ZenInput label="Your {chain.name} Address" hint="Refunds go here. Your own wallet, not an exchange." placeholder={chain.placeholder} bind:value={refundTo} error={addrError} disabled={busy} autocomplete="off" spellcheck="false" />
+        {#if refundTo && !addrError}
+          <ZenInput label="Its Last 6 Characters" hint="Read it again from your wallet." bind:value={last6} maxlength={6} disabled={busy} autocomplete="off" spellcheck="false" class="font-mono" />
+        {/if}
       {/if}
       <div class="flex flex-wrap items-center gap-3">
         <ZenButton variant="secondary" size="sm" onclick={ask} disabled={!confirmed || busy}>
@@ -258,7 +273,7 @@
       </div>
       {#if error}<Note tone="error">{error}</Note>{/if}
       {#if quote && testnet}
-        <div class="flex flex-col gap-3 py-5 px-5 rounded-2xl bg-zen-fg/5 border border-zen-border-subtle" data-quote>
+        <div class="flex flex-col gap-3 pt-4 border-t border-zen-border-subtle" data-quote>
           {@render row('You Send', `${quote.amountInFormatted} USDC on ${chain.name}`)}
           {@render row('You Get', `${usdc(quote.amountOut)} USDC on NEAR`)}
           {@render row('Fee', `${usdc(quote.fee)} USDC`, `${quote.fee} base units`)}

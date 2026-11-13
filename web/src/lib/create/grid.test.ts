@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkGrid, gmailAccount, isGmail, parsePaste, type GridRow } from './grid';
+import { checkGrid, gmailAccount, gridRules, isGmail, parsePaste, type GridRow } from './grid';
 import { parseRecipients, sendCapError } from './recipients';
 
 const r = (email: string, amount: string): GridRow => ({ email, amount });
@@ -90,5 +90,27 @@ describe('thousands comma (T-010 review minor 3)', () => {
   it('says to drop the comma, not to use fewer decimals', () => {
     const { problems } = checkGrid([{ email: 'a@gmail.com', amount: '1,000.5' }]);
     expect(problems[0]?.message).toBe('Write it without commas, like 1000.5');
+  });
+});
+
+describe("gridRules: Zarf's grid flags the rows checkGrid refuses (T-024)", () => {
+  it('the same rows are flagged, so what the grid shows and what blocks Continue agree', async () => {
+    const { checkRows, rowIssues } = await import('$lib/zarf-kit/create/rowChecks');
+    const rows: GridRow[] = [
+      { email: 'alice@gmail.com', amount: '10' },
+      { email: 'not-an-email', amount: '5' },
+      { email: 'a.lice@gmail.com', amount: '1' }, // a Gmail dot twin of row 1
+      { email: 'bob+x@gmail.com', amount: '1' }, // Gmail +alias
+      { email: 'carol@example.com', amount: '1,000.5' },
+      { email: '', amount: '' }, // blank: never flagged
+      { email: 'dave@example.com', amount: '' },
+      { email: 'erin@example.com', amount: '2.5' },
+    ];
+    const zarf = rowIssues(checkRows(rows, gridRules)).map((i) => i.index + 1);
+    const ours = checkGrid(rows).rejected.map((r) => r.line);
+    expect(ours).toEqual([2, 3, 4, 5, 7]);
+    // Zarf marks both rows of a twin pair (row 1 "Same recipient as row 3"); the gate refuses the later one. Fixing
+    // either clears both, so the only extra rows are first halves of pairs.
+    expect(zarf).toEqual([1, ...ours]);
   });
 });
