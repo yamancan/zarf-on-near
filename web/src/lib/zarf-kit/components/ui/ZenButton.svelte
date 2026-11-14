@@ -73,6 +73,8 @@
             shadow-[var(--zen-shadow-button)]
             hover:shadow-[var(--zen-shadow-button-hover)]
             active:shadow-[var(--zen-shadow-button-active)]
+            disabled:bg-[var(--zen-btn-disabled-bg)] disabled:text-[var(--zen-btn-disabled-text)]
+            disabled:ring-[var(--zen-btn-disabled-border)] disabled:shadow-none
         `,
         /** Secondary: Alternative paths - Transparent with visible border */
         secondary: `
@@ -116,7 +118,7 @@
         tracking-[0.02em]
         transition-[background-color,box-shadow,transform,color] duration-[var(--zen-motion-base)] ease-zen-out
         active:duration-75
-        disabled:opacity-50 disabled:pointer-events-none
+        disabled:pointer-events-none
         whitespace-nowrap
         cursor-pointer
     `;
@@ -125,7 +127,7 @@
 </script>
 
 <button
-    class="{baseClasses} {sizeClasses[size]} {variantClasses[variant]} {className}"
+    class="{baseClasses} {sizeClasses[size]} {variantClasses[variant]} {variant === 'primary' ? 'disabled:opacity-100' : 'disabled:opacity-50'} {className}"
     data-variant={variant}
     disabled={isDisabled}
     aria-busy={loading || undefined}

@@ -234,8 +234,8 @@
     <div class="flex items-start gap-4">
       <div class="min-w-0">
         <h1 class="text-xl font-semibold">Arrived</h1>
-        <p class="text-sm text-zen-fg-muted font-light mt-1 flex items-center gap-1.5">
-          <span class="text-zen-fg-subtle">To</span><Avatar name={to} /><span class="font-mono truncate" title={to}>{middle(to, 8)}</span>
+        <p class="text-sm text-zen-fg-muted font-light mt-1 flex items-start gap-1.5">
+          <span>To</span><Avatar name={to} /><span class="font-mono break-all min-w-0">{to}</span>
         </p>
       </div>
     </div>
@@ -273,7 +273,7 @@
      lays it out. No page header: the card's own title is the one header (T-023 waste list item 5). -->
 <!-- Phones: p-4 shell, no column inset, p-4 card, as the claim page (blue-team gap 2) -->
 <div class="w-full max-w-7xl mx-auto p-4 sm:p-8 lg:p-12">
-  <div class="h-full flex flex-col relative max-w-5xl w-full sm:px-4 md:px-0">
+  <div class="h-full flex flex-col relative max-w-5xl w-full mx-auto sm:px-4 md:px-0">
     <section class="w-full pt-8">
       <div class="max-w-lg mx-auto">
   <ZenCard variant="elevated" class="overflow-hidden">
@@ -299,7 +299,7 @@
         {:else}
           <h1 class="text-xl font-bold">No Claim Here Yet</h1>
           <p class="text-sm text-zen-fg-muted max-w-xs">Open the claim link from your message.</p>
-          {#if passkeyOn}<PasskeyAccount quiet label="Already Claimed with Face ID? Open Your Account" />{/if}
+          {#if passkeyOn}<PasskeyAccount quiet label="Already Claimed with a Passkey? Open Your Account" />{/if}
         {/if}
         {#if canGoBack}
           {@render back()}

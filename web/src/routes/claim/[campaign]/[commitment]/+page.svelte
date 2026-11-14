@@ -45,7 +45,7 @@
   let busy = $state('');
   let typed = $state('');
   let implicit = $state<ImplicitAccount | null>(null);
-  // true: derived from a passkey's PRF (Face ID unlocks it again); false: that device gave no PRF, so a random key; null: key-file account.
+  // true: derived from a passkey's PRF; false: that device gave no PRF, so a random key; null: key-file account.
   let passkeyPrf = $state<boolean | null>(null);
   // The chain's network once the link is checked; before that (a recalled claim never checks it) the contract id's, as the receipt does.
   const passkeyOn = $derived(passkeyOffered(network || (TESTNET ? 'testnet' : ''), env.PUBLIC_IMPLICIT_ACCOUNTS, env.PUBLIC_PASSKEY_ACCOUNTS));
@@ -60,13 +60,13 @@
   // Back after "Arrived" (the address has no secret part any more): the remembered claim, once the chain confirms it.
   let recalled = $state<Receipt | null>(null);
   let recalling = $state(false);
-  // Blue-team gap 3: "NEAR Account · Face ID · Other Chain", in that order.
+  // NEAR Account, passkey (or its key-file fallback), then Other Chain.
   const MODES = $derived([
     ['existing', 'NEAR Account'],
-    ...(implicitEnabled ? [['new', passkeyOn ? 'Face ID' : 'New Account']] : []),
-    ...(crossChainOffered(network, env.PUBLIC_CROSS_CHAIN) ? [['chain', 'Other Chain']] : []), // testnet: a live mainnet price, "Mainnet Only"; mainnet: behind a flag
+    ...(implicitEnabled ? [['new', implicit && passkeyPrf !== true ? 'Key File' : passkeyOn ? 'Passkey' : 'New Account']] : []),
+    ...(crossChainOffered(network, env.PUBLIC_CROSS_CHAIN) ? [['chain', 'Other Chain']] : []), // testnet: availability preview only; mainnet: behind a flag
   ] as [typeof mode, string][]);
-  // Face ID is a phone gesture: preselect it on touch screens until the person picks a choice themselves.
+  // Preselect passkeys on touch screens until the person picks a choice themselves.
   let modePicked = false;
   $effect(() => {
     if (!modePicked && passkeyOn && mode === 'existing' && matchMedia('(pointer: coarse)').matches) mode = 'new';
@@ -119,7 +119,7 @@
   const whyOff = $derived(
     !link || check !== 'ok' || busy ? ''
       : mode === 'chain' ? 'Pick a chain and paste your address first.'
-      : mode === 'new' ? 'Create your Face ID account first.'
+      : mode === 'new' ? implicit ? 'Download your key and confirm it is saved.' : passkeyOn ? 'Create your passkey account first.' : 'Create your NEAR account first.'
       : acct?.state === 'found' ? 'Confirm the account above first.' : 'Enter your NEAR account first.',
   );
   const ready = $derived(
@@ -216,7 +216,7 @@
       passkeyPrf = r.prf;
       exported = confirmed = false;
     } catch {
-      error = 'Face ID was cancelled or is not available in this browser. Try again, or save a key file instead.';
+      error = 'Passkey creation was cancelled or is not available in this browser. Try again, or save a key file instead.';
     }
   }
 
@@ -289,16 +289,16 @@
       <ZenButton variant="primary" class="w-full sm:w-auto" onclick={() => link && checkLink(link)}>Check Again</ZenButton>
     {:else if action === 'home'}
       <!-- A recipient at a dead end is told the next step in the line above; Zarf itself is only a quiet link -->
-      <a href="/" class="text-xs text-zen-fg-subtle underline underline-offset-2 hover:text-zen-fg">About Zarf</a>
+      <a href="/" class="text-xs text-zen-fg-muted underline underline-offset-2 hover:text-zen-fg">About Zarf</a>
     {/if}
   </div>
 {/snippet}
 
-{#snippet faceIdDetails(made: boolean)}
-  <details class="group text-xs text-zen-fg-subtle">
+{#snippet passkeyDetails(made: boolean)}
+  <details class="group text-xs text-zen-fg-muted">
     <summary class="inline-flex items-center gap-1.5 py-1 cursor-pointer list-none hover:text-zen-fg">Details <ChevronDown class="w-3.5 h-3.5 transition-transform group-open:rotate-180" aria-hidden="true" /></summary>
     <div class="flex flex-col items-start gap-2 pt-1 leading-relaxed">
-      <p>The wallet's key is never stored, here or with us. Face ID unlocks it on any device that syncs your passkeys. Lose both the passkey and a backup key, and the funds are gone.</p>
+      <p>The wallet's key is never stored, here or with us. Your passkey unlocks it on compatible devices that sync your passkeys. Lose both the passkey and a backup key, and the funds are gone.</p>
       {#if made}
         <ZenButton variant="ghost" size="sm" onclick={download}>{exported ? 'Backup Key Saved' : 'Download Backup Key'}</ZenButton>
       {:else}
@@ -324,7 +324,7 @@
     {:else if loaded && !link && recalled}
       <div class="flex flex-col items-center text-center gap-4 py-2" in:swapIn>
         <ClaimRecord r={recalled} amount={recalled.amount} contract={env.PUBLIC_CONTRACT_ID ?? ''} {campaign} {commitment} />
-        {#if passkeyOn}<PasskeyAccount label="Claimed with Face ID? Open Your Account" />{/if}
+        {#if passkeyOn}<PasskeyAccount label="Open Your Passkey Account" />{/if}
       </div>
     {:else if loaded && !link && !recalling}
       {@render terminal(Link2Off, 'muted', 'Incomplete Link', INCOMPLETE_LINE, 'home')}
@@ -335,7 +335,7 @@
     {:else if check === 'claimed'}
       <div class="flex flex-col items-center text-center gap-4 py-2" in:swapIn>
         <ClaimRecord r={paid} amount={link!.amount} title="Already Claimed" contract={env.PUBLIC_CONTRACT_ID ?? ''} {campaign} {commitment} />
-        {#if passkeyOn}<PasskeyAccount label="Claimed with Face ID? Open Your Account" />{/if}
+        {#if passkeyOn}<PasskeyAccount label="Open Your Passkey Account" />{/if}
       </div>
     {:else if check === 'pending'}
       {@render terminal(Clock, 'muted', 'Payment in Progress', 'It usually settles within a minute.', 'recheck')}
@@ -428,10 +428,10 @@
               {/if}
             </div>
           {:else if !implicit && passkeyOn}
-            <!-- Face ID: one line, one button; the risk and the key-file way sit under Details (blue-team gap 3) -->
-            <p class="text-sm text-zen-fg-muted">A new wallet that your Face ID unlocks.</p>
-            <ZenButton variant="secondary" class="self-start" onclick={createWithPasskey}>Create With Face ID</ZenButton>
-            {@render faceIdDetails(false)}
+            <!-- One line, one button; the risk and the key-file way sit under Details. -->
+            <p class="text-sm text-zen-fg-muted">A new wallet you unlock with your face, fingerprint or screen lock.</p>
+            <ZenButton variant="secondary" class="self-start" onclick={createWithPasskey}>Create With a Passkey</ZenButton>
+            {@render passkeyDetails(false)}
           {:else if !implicit}
             <p class="text-sm text-zen-fg-muted">We create a NEAR account in this browser. Only you get its key.</p>
             <ZenButton variant="secondary" class="self-center" onclick={create}>Create NEAR Account</ZenButton>
@@ -439,11 +439,11 @@
             <p class="flex items-center gap-2 text-sm text-zen-fg" role="status">
               <CheckCircle2 class="w-4 h-4 text-zen-success shrink-0" aria-hidden="true" />Wallet <span class="font-mono" title={implicit.accountId}>{middle(implicit.accountId, 4)}</span> ready
             </p>
-            <p class="text-sm text-zen-fg-muted">Unlocks with Face ID on your devices.</p>
-            {@render faceIdDetails(true)}
+            <p class="text-sm text-zen-fg-muted">Unlocks with your passkey on compatible devices.</p>
+            {@render passkeyDetails(true)}
           {:else}
             <p class="text-sm text-zen-fg-muted">Your new account <span class="font-mono text-zen-fg" title={implicit.accountId}>{middle(implicit.accountId, 8)}</span></p>
-            {#if passkeyPrf === false}<Note tone="info">This device could not tie the account to Face ID, so it uses a key file instead.</Note>{/if}
+            {#if passkeyPrf === false}<Note tone="info">This device could not tie the account to a passkey, so it uses a key file instead.</Note>{/if}
             <Note tone="info">Save its key now. Without it nobody can move these funds, and we never see it.</Note>
             <ZenButton variant="secondary" class="self-start" onclick={download}>Download Key</ZenButton>
             <ZenCheckbox bind:checked={confirmed} disabled={!exported} label="I saved the key somewhere safe" />
@@ -451,7 +451,7 @@
           {/snippet}
           {#snippet footer()}
           {#if busy}<Note tone="pending">{busy}</Note>{/if}
-          {#if !(mode === 'chain' && network !== 'mainnet')}<p class="text-xs text-zen-fg-subtle text-center">{!ready && whyOff ? whyOff : 'Use the email this link was sent to.'}</p>{/if}
+          {#if !(mode === 'chain' && network !== 'mainnet')}<p class="text-xs text-zen-fg-muted text-center">{!ready && whyOff ? whyOff : 'Use the email this link was sent to.'}</p>{/if}
           <!-- T-001: the unaudited note stays visible on mainnet -->
           {#if network === 'mainnet'}<p class="text-xs text-zen-fg-subtle text-center">{UNAUDITED_LINE}</p>{/if}
           {#if error}<Note tone="error" center>{error}</Note>{/if}
