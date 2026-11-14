@@ -75,8 +75,8 @@
       <span class="inline-flex items-center gap-1.5 whitespace-nowrap">
         {#if left}<span class="tabular-nums" title={deadline ? `Claim by ${deadline}` : undefined}>{left}</span>{/if}
         {#if !preview}
-          <Tooltip text="Never on chain; our verifier sees it once." position="bottom">
-            <button type="button" class="inline-flex items-center justify-center w-6 h-6 rounded-full text-zen-fg-subtle hover:text-zen-fg" aria-label="Who sees the email: the email never goes on chain. Our verifier sees it once, to check this claim.">
+          <Tooltip text="Never on chain; our verifier sees it when you claim. If Zarf emailed you this link, our mailer and Resend saw it too." position="bottom">
+            <button type="button" class="inline-flex items-center justify-center w-6 h-6 rounded-full text-zen-fg-subtle hover:text-zen-fg" aria-label="Who sees the email: the email never goes on chain. Our verifier sees it when you claim. If Zarf emailed you this link, our mailer and Resend saw it too.">
               <Info class="w-3.5 h-3.5" aria-hidden="true" />
             </button>
           </Tooltip>

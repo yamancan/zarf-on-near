@@ -21,6 +21,7 @@
     "testnet": {
       "name": "zarf-near-mailer-testnet",
       "workers_dev": true,
+      "observability": { "enabled": true }, // logs carry no email, salt or link
       "secrets": { "required": ["RESEND_API_KEY"] },
       "vars": {
         "NETWORK": "testnet",
@@ -28,7 +29,8 @@
         "NEAR_RPC_URL": "https://test.rpc.fastnear.com",
         "CLAIM_ORIGINS": "https://near.zarf.to,https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev",
         "CLAIM_ORIGIN": "https://near.zarf.to",
-        "MAIL_FROM": "Zarf <claim@send.zarf.to>",
+        "MAIL_FROM": "Zarf <claim@zarf.to>", // zarf.to is verified in Resend (send.zarf.to is only its return path)
+        "SENDER_ALLOWLIST": "", // e.g. the demo sender for tonight; empty = every sender
         // Test USDC (the web's PUBLIC_TOKEN_ID): a campaign in any other token gets no email
         "TOKEN_ID": "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af"
       },

@@ -13,6 +13,10 @@ describe('notifyOne', () => {
     expect(await notifyOne('https://m', '7', r(1), reply(409) as never)).toBe('claimed');
     expect(await notifyOne('https://m', '7', r(1), reply(410) as never)).toBe('closed');
     for (const s of [403, 429, 500, 502, 503]) expect(await notifyOne('https://m', '7', r(1), reply(s) as never)).toBe('failed');
+    const err = (status: number, error: string) => (async () => new Response(JSON.stringify({ error }), { status })) as never;
+    expect(await notifyOne('https://m', '7', r(1), err(429, 'IN_PROGRESS'))).toBe('waiting');
+    expect(await notifyOne('https://m', '7', r(1), err(504, 'SEND_UNCONFIRMED'))).toBe('waiting');
+    for (const [st, e] of [[503, 'MAIL_QUOTA'], [500, 'MAILER_MISCONFIGURED'], [429, 'DAILY_CAP'], [429, 'SENDER_DAILY_CAP']] as const) expect(await notifyOne('https://m', '7', r(1), err(st, e))).toBe('limit');
     expect(await notifyOne('https://m', '7', r(1), (async () => { throw new Error('offline'); }) as never)).toBe('failed');
   });
 });
@@ -31,5 +35,11 @@ describe('emailAll', () => {
     expect(peak).toBeLessThanOrEqual(3);
     expect([...seen.values()].every((s) => s === 'sent')).toBe(true);
     expect(seen.size).toBe(10);
+  });
+  it('a limit stops the batch', async () => {
+    let calls = 0;
+    const f = (async () => (++calls, new Response(JSON.stringify({ error: 'MAIL_QUOTA' }), { status: 503 }))) as unknown as typeof fetch;
+    await emailAll('https://m', '7', Array.from({ length: 10 }, (_, i) => r(i)), () => {}, { concurrency: 1, fetchFn: f });
+    expect(calls).toBe(1);
   });
 });

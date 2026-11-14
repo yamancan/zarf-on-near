@@ -1,5 +1,5 @@
 import { MailGate } from './gate';
-import { handleNotify, type RateLimiter } from './notify';
+import { handleNotify, type RateLimiter, type SendResult } from './notify';
 import type { Mail } from './template';
 
 export { MailGate };
@@ -10,7 +10,8 @@ interface Env {
   NEAR_RPC_URL: string;
   CLAIM_ORIGINS: string; // pages allowed to call /notify (CORS + Origin check)
   CLAIM_ORIGIN: string; // the one origin every emailed link uses
-  MAIL_FROM: string; // "Zarf <claim@send.zarf.to>"
+  MAIL_FROM: string; // "Zarf <claim@zarf.to>" (zarf.to is the domain verified in Resend)
+  SENDER_ALLOWLIST?: string; // comma-separated sender accounts; empty = every sender
   TOKEN_ID: string; // the USDC token the emails name
   RESEND_URL?: string; // tests and local dev point this at a stub; default Resend's API
   RESEND_API_KEY: string; // secret
@@ -38,16 +39,46 @@ function view<T>(env: Env, method: string, args: object): Promise<T> {
   });
 }
 
-async function resend(env: Env, to: string, mail: Mail, idempotencyKey: string): Promise<boolean> {
+/**
+ * One email through Resend. Throws when the outcome is unknown (timeout, network, 5xx, or a concurrent request with
+ * the same Idempotency-Key still running), so the mark stays pending. Logs Resend's error name and status only.
+ */
+export async function resend(env: Pick<Env, 'RESEND_URL' | 'RESEND_API_KEY' | 'MAIL_FROM'>, to: string, mail: Mail, idempotencyKey: string): Promise<SendResult> {
   const res = await fetch(env.RESEND_URL || 'https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
     signal: AbortSignal.timeout(10_000),
     body: JSON.stringify({ from: env.MAIL_FROM, to: [to], subject: mail.subject, text: mail.text, html: mail.html }),
   });
-  if (!res.ok) console.log('resend status', res.status); // the status only: never the address or the body
-  if (res.status >= 500) throw new Error('resend unavailable'); // may or may not have sent: keep pending
-  return res.ok;
+  if (res.ok) return { ok: true };
+  const name = String(((await res.json().catch(() => null)) as { name?: unknown } | null)?.name ?? '').replace(/[^a-z_]/gi, '').slice(0, 60);
+  console.log('resend refused', res.status, name); // never the address, the link or the body
+  if (res.status >= 500 || res.status === 409) throw new Error('resend outcome unknown');
+  if (res.status === 429) return { ok: false, kind: 'quota' };
+  if (res.status === 401 || res.status === 403 || res.status === 422) return { ok: false, kind: 'config' };
+  return { ok: false, kind: 'refused' };
+}
+
+/** The body, at most MAX_BODY bytes read; anything longer is cancelled and refused. */
+export async function readLimited(req: Request): Promise<unknown> {
+  if (Number(req.headers.get('Content-Length') ?? 0) > MAX_BODY || !req.body) return null;
+  const reader = req.body.getReader();
+  const parts: Uint8Array[] = [];
+  let n = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    n += value.length;
+    if (n > MAX_BODY) {
+      await reader.cancel();
+      return null;
+    }
+    parts.push(value);
+  }
+  const all = new Uint8Array(n);
+  let off = 0;
+  for (const p of parts) all.set(p, (off += p.length) - p.length);
+  return JSON.parse(new TextDecoder().decode(all));
 }
 
 export default {
@@ -57,7 +88,7 @@ export default {
     const headers: Record<string, string> = allowed ? { 'Access-Control-Allow-Origin': origin, Vary: 'Origin' } : { Vary: 'Origin' };
     const json = (body: unknown, status: number) => Response.json(body, { status, headers });
     const path = new URL(req.url).pathname;
-    if (path === '/health' && req.method === 'GET') return json({ ok: true }, 200);
+    if (path === '/health' && req.method === 'GET') return json({ ok: true, configured: !!(env.RESEND_API_KEY && env.CONTRACT_ID && env.TOKEN_ID && env.MAIL_FROM) }, 200);
     if (path !== '/notify') return json({ error: 'NOT_FOUND' }, 404);
     if (req.method === 'OPTIONS') {
       return new Response(null, {
@@ -68,27 +99,24 @@ export default {
     if (req.method !== 'POST') return json({ error: 'NOT_FOUND' }, 404);
     if (!allowed) return json({ error: 'BAD_ORIGIN' }, 403);
     if (!env.RESEND_API_KEY || !env.CONTRACT_ID || !env.NEAR_RPC_URL || !env.CLAIM_ORIGIN || !env.MAIL_FROM || !env.TOKEN_ID) return json({ error: 'MAILER_MISCONFIGURED' }, 500);
-    // Read only after the rate limit (handleNotify), and never more than MAX_BODY.
-    const readBody = async () => {
-      if (Number(req.headers.get('Content-Length') ?? 0) > MAX_BODY) return null;
-      const text = await req.text();
-      return text.length > MAX_BODY ? null : JSON.parse(text);
-    };
-    const gateCall = async (campaignId: string, c: string, op: string) => {
-      const stub = env.GATE.get(env.GATE.idFromName(`campaign:${campaignId}`));
-      const r = (await (await stub.fetch(`https://gate/?op=${op}&c=${c}`)).json()) as { result: string };
+    const gateCall = async (name: string, c: string, op: string, cap = 1) => {
+      const stub = env.GATE.get(env.GATE.idFromName(name));
+      const r = (await (await stub.fetch(`https://gate/?op=${op}&c=${c}&cap=${cap}`)).json()) as { result: string };
       return r.result;
     };
     try {
-      const out = await handleNotify(readBody, req.headers.get('CF-Connecting-IP') ?? 'unknown', {
+      // The body is read only after the rate limit (handleNotify), and never more than MAX_BODY.
+      const out = await handleNotify(() => readLimited(req), req.headers.get('CF-Connecting-IP') ?? 'unknown', {
         getCampaign: (id) => view(env, 'get_campaign', { campaign_id: id }),
         tokenId: env.TOKEN_ID,
         claimState: (id, c) => view<string>(env, 'claim_state', { campaign_id: id, commitment: c }),
-        gate: {
-          reserve: (id, c) => gateCall(id, c, 'reserve') as Promise<'ok' | 'sent' | 'pending' | 'cap'>,
-          sent: async (id, c) => void (await gateCall(id, c, 'sent')),
-          release: async (id, c) => void (await gateCall(id, c, 'release')),
+        gates: {
+          reserve: (name, c, cap) => gateCall(name, c, 'reserve', cap) as never,
+          sent: async (name, c) => void (await gateCall(name, c, 'sent')),
+          release: async (name, c) => void (await gateCall(name, c, 'release')),
         },
+        scope: env.CONTRACT_ID,
+        senderAllowlist: list(env.SENDER_ALLOWLIST),
         send: (to, mail, key) => resend(env, to, mail, key),
         perIp: env.PER_IP,
         nowMs: Date.now(),

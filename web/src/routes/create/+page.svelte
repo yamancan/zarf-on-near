@@ -181,8 +181,9 @@
   // Counted over the rows this page tried (stable when a recipient claims afterwards), not over today's eligibility
   const mailCounts = $derived.by(() => {
     const v = linkRows.map(({ r }) => mail[r.commitment]).filter(Boolean);
-    const todo = mailable.filter((r) => mail[r.commitment] !== 'sent').length;
-    return { done: v.filter((x) => x === 'sent').length, failed: v.filter((x) => x === 'failed').length, tried: v.length, todo, skipped: linkRows.length - mailable.length };
+    const todo = mailable.filter((r) => !['sent', 'waiting', 'limit'].includes(mail[r.commitment] ?? '')).length;
+    const waiting = mailable.filter((r) => mail[r.commitment] === 'waiting').length;
+    return { done: v.filter((x) => x === 'sent').length, failed: v.filter((x) => x === 'failed').length, tried: v.length, todo, waiting, limit: v.includes('limit'), skipped: linkRows.length - mailable.length };
   });
   // The email Zarf sends, for the first recipient still to email (the preview on the right)
   const zarfMail = $derived.by(() => {
@@ -194,7 +195,7 @@
   async function emailRecipients() {
     if (!result || mailBusy) return;
     mailBusy = true;
-    const todo = mailable.filter((r) => mail[r.commitment] !== 'sent');
+    const todo = mailable.filter((r) => !['sent', 'waiting'].includes(mail[r.commitment] ?? ''));
     try {
       await emailAll(mailerUrl, result.campaignId, todo, (c, st) => (mail = { ...mail, [c]: st }));
     } finally {
@@ -971,15 +972,15 @@
           <ZenAlert variant="warning">These links are long; some apps cut them. Send them by email, or copy them carefully.</ZenAlert>
         {/if}
 
-        {#if mailerUrl && mailable.length}
+        {#if mailerUrl && (mailable.length || mailCounts.tried)}
           <!-- T-039: Zarf emails every link; the per-row mail icon, Copy All and CSV below stay as the manual path -->
           <div class="space-y-2">
-            <ZenButton variant="primary" onclick={emailRecipients} disabled={mailBusy || mailCounts.todo === 0}>
-              {#snippet iconLeft()}<Mail class="w-4 h-4" />{/snippet}{mailBusy ? 'Emailing…' : mailCounts.todo === 0 ? 'All Emailed' : mailCounts.failed ? 'Retry Failed Emails' : 'Email All Recipients'}
+            <ZenButton variant="primary" onclick={emailRecipients} disabled={mailBusy || mailCounts.todo === 0 || mailCounts.limit}>
+              {#snippet iconLeft()}<Mail class="w-4 h-4" />{/snippet}{mailBusy ? 'Emailing…' : mailCounts.limit ? 'Email Limit Reached' : mailCounts.todo === 0 ? (mailCounts.waiting ? 'Awaiting Confirmation' : 'All Emailed') : mailCounts.failed ? 'Retry Failed Emails' : 'Email All Recipients'}
             </ZenButton>
             <p class="text-sm text-zen-fg-muted">Zarf sends the emails through Resend; Resend sees each address and its link.</p>
             {#if mailCounts.tried && !mailBusy}
-              <p class="text-sm text-zen-fg-muted" role="status">Emailed {mailCounts.done} of {mailCounts.tried}.{mailCounts.failed ? ` ${mailCounts.failed} could not be confirmed: retry below.` : ''}</p>
+              <p class="text-sm text-zen-fg-muted" role="status">Emailed {mailCounts.done} of {mailCounts.tried}.{mailCounts.limit ? ' Email limit reached for today: use Copy All Links for the rest.' : ''}{mailCounts.failed ? ` ${mailCounts.failed} not sent: retry below.` : ''}{mailCounts.waiting ? ` ${mailCounts.waiting} awaiting confirmation; the mailer retries within ten minutes.` : ''}</p>
             {:else if mailCounts.skipped}
               <p class="text-sm text-zen-fg-muted">{mailCounts.skipped} already claimed or paying: no email for {mailCounts.skipped === 1 ? 'it' : 'them'}.</p>
             {/if}
@@ -1020,7 +1021,9 @@
                 {#if mail[r.commitment] === 'sent'}<span class="shrink-0 inline-flex items-center gap-1 text-xs text-zen-fg-subtle"><Check class="w-3.5 h-3.5" aria-hidden="true" />Emailed</span>
                 {:else if mail[r.commitment] === 'sending'}<span class="shrink-0 text-xs text-zen-fg-subtle">Sending…</span>
                 {:else if mail[r.commitment] === 'closed'}<span class="shrink-0 text-xs text-zen-fg-subtle">Closed</span>
-                {:else if mail[r.commitment] === 'failed'}<ZenButton variant="ghost" size="xs" onclick={() => retryEmail(r)}>{#snippet iconLeft()}<RefreshCw class="w-3.5 h-3.5" />{/snippet}Retry</ZenButton>{/if}
+                {:else if mail[r.commitment] === 'waiting'}<span class="shrink-0 text-xs text-zen-fg-subtle">Awaiting confirmation</span>
+                {:else if mail[r.commitment] === 'limit'}<span class="shrink-0 text-xs text-zen-fg-subtle">Not sent</span>
+                {:else if mail[r.commitment] === 'failed' && c !== 'claimed' && c !== 'pending'}<ZenButton variant="ghost" size="xs" onclick={() => retryEmail(r)}>{#snippet iconLeft()}<RefreshCw class="w-3.5 h-3.5" />{/snippet}<span aria-hidden="true">Retry</span><span class="sr-only">Retry email to {r.email}</span></ZenButton>{/if}
                 <Tooltip text={copiedRow === i ? 'Copied' : 'Copy Message'} position="top">
                   <button type="button" class="inline-flex items-center justify-center w-8 h-8 rounded-full text-zen-fg-subtle hover:text-zen-fg hover:bg-zen-fg/5" aria-label={copiedRow === i ? 'Copied' : 'Copy Message'} onclick={() => copyOne(i)}>
                     {#if copiedRow === i}<Check class="w-3.5 h-3.5" aria-hidden="true" />{:else}<Copy class="w-3.5 h-3.5" aria-hidden="true" />{/if}
@@ -1224,7 +1227,7 @@
                       <CopyButton value={token} label="Copy token id" />
                     </span>
                   {/if}
-                  <span>Emails never go on chain. Our verifier sees each one once, when that person claims.</span>
+                  <span>Emails never go on chain. Our verifier sees each one when that person claims. If you use Email All Recipients, our mailer and Resend also see each address and its link.</span>
                   <span>Unclaimed {UNIT} returns via Campaigns after the deadline.{#if !TESTNET}{' '}{CIRCLE_LINE}{/if}</span>
                 </div>
               </details>

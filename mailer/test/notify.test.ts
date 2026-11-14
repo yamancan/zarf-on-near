@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import v from '../../spec/vectors.json';
-import worker from '../src/index';
-import { gateStep, PENDING_RETRY_MS } from '../src/gate';
-import { CAP, handleNotify, type Deps } from '../src/notify';
+import worker, { readLimited, resend } from '../src/index';
+import { gateStep, PENDING_GIVE_UP_MS, PENDING_RETRY_MS } from '../src/gate';
+import { CAP, DAY_CAP, SENDER_DAY_CAP, handleNotify, type Deps } from '../src/notify';
 import { claimLink, commitment, rootFromProof } from '../src/proof';
 
 const main = v.campaigns.main;
@@ -25,26 +25,32 @@ const memStore = () => {
 const TOKEN = 'usdc.testnet';
 const body = (x: unknown) => async () => x;
 const clock = { now: 0 };
+const CAMPAIGN_GATE = `c.testnet:campaign:${main.campaign_id}`;
 function deps(o: Partial<Deps> = {}, store = memStore()) {
   clock.now = 0;
+  // One in-memory Durable Object per gate name; `store` is the campaign's, the others start empty.
+  const dos = new Map<string, ReturnType<typeof memStore>>([[CAMPAIGN_GATE, store]]);
+  const at = (name: string) => (dos.has(name) || dos.set(name, memStore()), dos.get(name)!);
   const sent: { to: string; subject: string; text: string; html: string; key: string }[] = [];
   const d: Deps = {
     getCampaign: async (id) => (id === main.campaign_id ? { sender: 'sender.testnet', token: TOKEN, merkle_root: main.merkle_root, deadline_ns: (BigInt(NOW + 86_400_000) * 1_000_000n).toString(), balance: '100000000' } : null),
     tokenId: TOKEN,
     claimState: async () => 'unclaimed',
-    gate: {
-      reserve: async (_id, c) => (await gateStep(store, 'reserve', c, clock.now)) as 'ok',
-      sent: async (_id, c) => void (await gateStep(store, 'sent', c, clock.now)),
-      release: async (_id, c) => void (await gateStep(store, 'release', c, clock.now)),
+    gates: {
+      reserve: (name, c, cap) => gateStep(at(name), 'reserve', c, clock.now, cap),
+      sent: async (name, c) => void (await gateStep(at(name), 'sent', c, clock.now)),
+      release: async (name, c) => void (await gateStep(at(name), 'release', c, clock.now)),
     },
-    send: async (to, mail, key) => (sent.push({ to, ...mail, key }), true),
+    scope: 'c.testnet',
+    senderAllowlist: [],
+    send: async (to, mail, key) => (sent.push({ to, ...mail, key }), { ok: true }),
     perIp: { limit: async () => ({ success: true }) },
     nowMs: NOW,
     claimOrigin: 'https://near.zarf.to',
     testnet: true,
     ...o,
   };
-  return { d, sent, store };
+  return { d, sent, store, at };
 }
 
 describe('claim-link math matches the web (spec/vectors.json, campaign 7)', () => {
@@ -69,8 +75,10 @@ describe('POST /notify', () => {
     expect(sent[0].text).toContain(`https://near.zarf.to${v.links.main[1]}`);
     expect(sent[0].text).toContain('sender.testnet sent you 2.5 Test USDC with Zarf.');
     expect(sent[0].text).toContain('check that the page address starts with https://near.zarf.to/.');
-    expect(sent[0].html).toContain('>Claim at near.zarf.to</a>');
-    expect(sent[0].key).toBe(`zarf-7-${main.recipients[1].commitment}`);
+    expect(sent[0].html).toContain('>Claim 2.5 Test USDC on near.zarf.to</a>');
+    expect(sent[0].subject).toBe('sender.testnet sent you 2.5 Test USDC on Zarf');
+    expect(sent[0].text).toContain('Zarf never asks for a password, a seed phrase or a payment.');
+    expect(sent[0].key).toBe(`zarf-c.testnet-7-${main.recipients[1].commitment}`);
   });
   it('wrong proof, wrong amount, wrong salt or unknown campaign → 403, no email', async () => {
     const { d, sent } = deps();
@@ -114,7 +122,7 @@ describe('POST /notify', () => {
     let first = true;
     const { d, sent } = deps();
     const send = d.send;
-    d.send = async (...a) => (first ? ((first = false), false) : send(...a));
+    d.send = async (...a) => (first ? ((first = false), { ok: false, kind: 'refused' }) : send(...a));
     expect((await handleNotify(body(req(0)), 'ip', d)).status).toBe(502);
     expect(await handleNotify(body(req(0)), 'ip', d)).toEqual({ status: 200, body: { status: 'sent' } });
     expect(sent).toHaveLength(1);
@@ -134,7 +142,7 @@ describe('POST /notify', () => {
   it('while one call is sending, another never reports "sent"', async () => {
     const { d, sent, store } = deps();
     await gateStep(store, 'reserve', main.recipients[0].commitment, 0); // a send in flight
-    expect(await handleNotify(body(req(0)), 'ip', d)).toEqual({ status: 429, body: { error: 'IN_PROGRESS' } });
+    expect(await handleNotify(body(req(0)), 'ip', d)).toEqual({ status: 429, body: { error: 'IN_PROGRESS', retry_after_s: 600 } });
     expect(sent).toHaveLength(0);
   });
   it('an unknown outcome stays pending, then is retried with the same Idempotency-Key, counted once', async () => {
@@ -146,8 +154,39 @@ describe('POST /notify', () => {
     clock.now = PENDING_RETRY_MS + 1;
     d.send = send;
     expect(await handleNotify(body(req(0)), 'ip', d)).toEqual({ status: 200, body: { status: 'sent' } });
-    expect(sent.map((x) => x.key)).toEqual([`zarf-7-${main.recipients[0].commitment}`]);
+    expect(sent.map((x) => x.key)).toEqual([`zarf-c.testnet-7-${main.recipients[0].commitment}`]);
     expect((store.m.get('g') as { count: number }).count).toBe(1);
+  });
+  it('daily caps: in all and per sender, released again when the campaign gate refuses', async () => {
+    const day = new Date(NOW).toISOString().slice(0, 10);
+    for (const [name, cap, error] of [[`c.testnet:day:${day}`, DAY_CAP, 'DAILY_CAP'], [`c.testnet:sender:sender.testnet:${day}`, SENDER_DAY_CAP, 'SENDER_DAILY_CAP']] as const) {
+      const { d, sent, at } = deps();
+      at(name).m.set('g', { count: cap, marks: {} });
+      expect(await handleNotify(body(req(0)), 'ip', d)).toEqual({ status: 429, body: { error } });
+      expect(sent).toHaveLength(0);
+      expect((at(CAMPAIGN_GATE).m.get('g') as { count: number }).count).toBe(0); // the campaign slot was given back
+    }
+  });
+  it('a sender allowlist, when set, refuses everyone else', async () => {
+    const { d, sent } = deps({ senderAllowlist: ['demo.testnet'] });
+    expect(await handleNotify(body(req(0)), 'ip', d)).toEqual({ status: 403, body: { error: 'SENDER_NOT_ALLOWED' } });
+    expect(sent).toHaveLength(0);
+  });
+  it('a send unconfirmed for 23 h is never retried blindly (Resend dedupes for 24 h only)', async () => {
+    const { d, sent } = deps();
+    d.send = async () => { throw new Error('timeout'); };
+    await handleNotify(body(req(0)), 'ip', d);
+    clock.now = PENDING_GIVE_UP_MS;
+    d.send = async (to, mail, key) => (sent.push({ to, ...mail, key }), { ok: true });
+    expect(await handleNotify(body(req(0)), 'ip', d)).toEqual({ status: 504, body: { error: 'SEND_UNCONFIRMED' } });
+    expect(sent).toHaveLength(0);
+  });
+  it('quota and configuration refusals free the slots and say so', async () => {
+    for (const [kind, status, error] of [['quota', 503, 'MAIL_QUOTA'], ['config', 500, 'MAILER_MISCONFIGURED']] as const) {
+      const { d, at } = deps({ send: async () => ({ ok: false, kind }) });
+      expect(await handleNotify(body(req(0)), 'ip', d)).toEqual({ status, body: { error } });
+      expect((at(CAMPAIGN_GATE).m.get('g') as { count: number }).count).toBe(0);
+    }
   });
   it('a body is read only after the rate limit', async () => {
     let read = false;
@@ -206,5 +245,30 @@ describe('MailGate', () => {
     expect(await gateStep(s, 'reserve', c, 0, 2)).toBe('ok');
     expect([...s.m.keys()]).toEqual(['g']); // one value: every change is one atomic put
     expect(Object.keys((s.m.get('g') as { marks: object }).marks).sort()).toEqual([a, c]);
+  });
+});
+
+describe('resend(): outcome classes, logs without the address', () => {
+  const mail = { subject: 's', text: 't', html: 'h' };
+  const env = { RESEND_URL: 'https://resend.stub/emails', RESEND_API_KEY: 'k', MAIL_FROM: 'Zarf <claim@zarf.to>' };
+  const at = (status: number, name = 'x') => vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({ name }), { status }));
+  it('2xx sent; 429 quota; 401/403/422 config; other 4xx refused; 409 and 5xx unknown (throw)', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    at(200); expect(await resend(env, 'bob@gmail.com', mail, 'k1')).toEqual({ ok: true });
+    at(429, 'daily_quota_exceeded'); expect(await resend(env, 'bob@gmail.com', mail, 'k1')).toEqual({ ok: false, kind: 'quota' });
+    for (const s of [401, 403, 422]) { at(s, 'validation_error'); expect(await resend(env, 'bob@gmail.com', mail, 'k1')).toEqual({ ok: false, kind: 'config' }); }
+    at(400); expect(await resend(env, 'bob@gmail.com', mail, 'k1')).toEqual({ ok: false, kind: 'refused' });
+    for (const s of [409, 500, 503]) { at(s, 'concurrent_idempotent_requests'); await expect(resend(env, 'bob@gmail.com', mail, 'k1')).rejects.toThrow(); }
+    expect(JSON.stringify(log.mock.calls)).not.toContain('bob@gmail.com');
+    expect(JSON.stringify(log.mock.calls)).toContain('daily_quota_exceeded');
+    log.mockRestore();
+  });
+});
+
+describe('readLimited: a streamed body over 4 kB is cut off and refused', () => {
+  const stream = (bytes: number) => new ReadableStream({ start(c) { for (let i = 0; i < bytes; i += 1024) c.enqueue(new Uint8Array(1024).fill(32)); c.close(); } });
+  it('no Content-Length, 32 kB → null; a small JSON → parsed', async () => {
+    expect(await readLimited(new Request('https://m/notify', { method: 'POST', body: stream(32 * 1024), duplex: 'half' } as RequestInit))).toBeNull();
+    expect(await readLimited(new Request('https://m/notify', { method: 'POST', body: '{"a":1}' }))).toEqual({ a: 1 });
   });
 });
