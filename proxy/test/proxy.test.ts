@@ -19,6 +19,7 @@ describe('path routing', () => {
     ['/favicon.svg', 'https://claim.example.workers.dev/favicon.svg'],
     ['/try', 'https://faucet.example.workers.dev/try'],
     ['/try.js', 'https://faucet.example.workers.dev/try.js'],
+    ['/health', 'https://faucet.example.workers.dev/health'],
     ['/saira.woff2', 'https://faucet.example.workers.dev/saira.woff2'],
     ['/faucet', 'https://faucet.example.workers.dev/faucet'],
     ['/try/', 'https://claim.example.workers.dev/try/'], // exact paths only
@@ -27,7 +28,7 @@ describe('path routing', () => {
     await proxy(new Request('https://near.zarf.to' + path), env, u.fetchFn);
     expect(u.seen[0].url).toBe(want);
   });
-  it('the faucet paths match the faucet worker', () => expect([...FAUCET_PATHS].sort()).toEqual(['/faucet', '/saira.woff2', '/try', '/try.js']));
+  it('the faucet paths match the faucet worker', () => expect([...FAUCET_PATHS].sort()).toEqual(['/faucet', '/health', '/saira.woff2', '/try', '/try.js']));
 });
 
 describe('pass-through', () => {
