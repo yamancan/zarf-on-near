@@ -324,7 +324,7 @@
     {:else if loaded && !link && recalled}
       <div class="flex flex-col items-center text-center gap-4 py-2" in:swapIn>
         <ClaimRecord r={recalled} amount={recalled.amount} contract={env.PUBLIC_CONTRACT_ID ?? ''} {campaign} {commitment} />
-        {#if passkeyOn}<PasskeyAccount label="Claimed with a Passkey? Open Your Account" />{/if}
+        {#if passkeyOn}<PasskeyAccount label="Open Your Passkey Account" />{/if}
       </div>
     {:else if loaded && !link && !recalling}
       {@render terminal(Link2Off, 'muted', 'Incomplete Link', INCOMPLETE_LINE, 'home')}
@@ -335,7 +335,7 @@
     {:else if check === 'claimed'}
       <div class="flex flex-col items-center text-center gap-4 py-2" in:swapIn>
         <ClaimRecord r={paid} amount={link!.amount} title="Already Claimed" contract={env.PUBLIC_CONTRACT_ID ?? ''} {campaign} {commitment} />
-        {#if passkeyOn}<PasskeyAccount label="Claimed with a Passkey? Open Your Account" />{/if}
+        {#if passkeyOn}<PasskeyAccount label="Open Your Passkey Account" />{/if}
       </div>
     {:else if check === 'pending'}
       {@render terminal(Clock, 'muted', 'Payment in Progress', 'It usually settles within a minute.', 'recheck')}
