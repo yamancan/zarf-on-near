@@ -18,7 +18,7 @@ with no gas of their own. The email never appears on chain.
 | Relayer that pays the recipient's gas | Shipped: a function-call key limited to `claim`, no deposit |
 | Create and claim web apps | Shipped, live on testnet |
 | Judges' page (`/try`): a claim link to your own Google email | Shipped, live on testnet |
-| NEAR Intents (1Click) payout to USDC on Base, Arbitrum or Ethereum | Built in the verifier and the claim page; **not run through the bridge** (Intents has no testnet) |
+| NEAR Intents (1Click) payout to USDC on ten chains (Base, Arbitrum, Ethereum, Optimism, Polygon, Avalanche, Monad, Solana, Sui, Aptos) | Built in the verifier and the claim page; **not run through the bridge** (Intents has no testnet) |
 | Payout to any NEAR account | Shipped for named and implicit accounts; NEP-518 `0x` accounts proven on testnet (receive and spend) and accepted by the claim form behind `PUBLIC_ETH_ACCOUNTS` |
 | Sender funds from USDC on another chain (added 2026-11-13) | Built: 1Click quote, deposit address with QR, status, signature check; **mainnet only and not run with real money**; testnet shows a live dry quote |
 | Recipient with no wallet (added 2026-11-13) | Built, testnet only: a NEAR account created with Face ID/Touch ID (passkey PRF-derived key, never stored; key-file fallback). Unaudited in-browser wallet |
