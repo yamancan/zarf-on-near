@@ -132,8 +132,9 @@ Read this before using it with real money.
   wallet's own approval screen, which shows the receiver and amount, is the last check before signing. The
   claim page uses the same list only to read the recipient's account name ("Use my wallet"), never to sign,
   and the recipient confirms that name before Google sign-in. The send pages, and the claim form with `0x`
-  accounts on, also offer Ethereum Wallets (MetaMask). Its code is served by evm-on-near.dev and is not pinned:
-  a MetaMask sender signs in that popup, and MetaMask's own screen is the only check after it.
+  accounts on, also offer Ethereum Wallets (MetaMask). Its executor script from evm-on-near.dev is pinned by
+  SHA-256 like Intear's, but signing happens in a popup on evm-on-near.dev that we do not pin: a MetaMask sender
+  signs in that popup, and MetaMask's own screen is the only check after it.
 - **The Face ID account is a wallet inside the claim page** (testnet only). Its key is re-derived from the
   passkey on each opening and held in the page's memory while it is open; code running on the claim origin
   could read it then. Deleting the passkey loses the funds unless the key file was kept, and the passkey is
