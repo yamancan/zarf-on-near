@@ -11,7 +11,7 @@
   import { keyFile, type ImplicitAccount } from '$lib/implicit';
 
   // quiet: a text-weight entry where the page's main action is elsewhere (an empty receipt, T-034)
-  let { expected = '', label = 'Open My Account with Face ID', quiet = false }: { expected?: string; label?: string; quiet?: boolean } = $props();
+  let { expected = '', label = 'Open My Account with a Passkey', quiet = false }: { expected?: string; label?: string; quiet?: boolean } = $props();
   let opened = $state<{ id: string; near: bigint; token: bigint } | null>(null);
   let unlocked = $state.raw<ImplicitAccount | null>(null); // the re-derived key, kept only for "Download Key" (B5)
   let saved = $state(false);
@@ -26,7 +26,7 @@
       unlocked = await unlockPasskeyAccount();
       id = unlocked.accountId;
     } catch {
-      error = 'Face ID was cancelled, or this browser cannot open the passkey. Try again.';
+      error = 'Unlocking was cancelled, or this browser cannot open the passkey. Try again.';
       opening = false;
       return;
     }
