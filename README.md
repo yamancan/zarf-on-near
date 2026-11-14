@@ -1,6 +1,18 @@
-# Zarf on NEAR
+<h1 align="center">Zarf on NEAR</h1>
 
-**Send USDC to any Google email. They sign in to collect it.**
+<p align="center"><b>Send USDC to any Google email. They sign in to collect it.</b></p>
+
+<p align="center">
+  <a href="https://near.zarf.to/try"><b>Try it with your Gmail</b></a>
+  &nbsp;·&nbsp;
+  <a href="https://testnet.nearblocks.io/txns/AY7GFZSLZa5R26YTAUyUWA6uTBMJ9MAcmBaZkjnFMa2F">See a real claim on chain</a>
+  &nbsp;·&nbsp;
+  <a href="https://testnet.nearblocks.io/address/zarf-near-1112.testnet">Check the keyless escrow</a>
+</p>
+
+<p align="center">
+  <a href="https://near.zarf.to"><img src="docs/media/zarf-film.webp" width="100%" alt="23-second product film: a wallet address is deleted and an email typed in its place; one USDC payment fans out to six emails; a recipient opens the claim link, signs in with Google, and 250 test USDC arrives."></a>
+</p>
 
 Live on NEAR testnet at **[near.zarf.to](https://near.zarf.to)**, for teams paying freelancers and contributors in
 USDC. Built 7–14 Nov 2026 for the NEAR Hackathon, Real-World Money track.
@@ -9,11 +21,14 @@ A Linkdrop pays whoever holds the link. A forwarded Zarf link still requires the
 sign-in (Gmail or Google Workspace). Our verifier checks the Google sign-in and signs the claim; the NEAR contract checks that
 signature, then pays. Emails never touch the chain.
 
-![Three steps on near.zarf.to: the sender lists emails and amounts, the recipient signs in with Google, USDC arrives in their NEAR account](docs/media/how-it-works.webp)
-
 | Try it | See it on chain | Check the escrow |
 | --- | --- | --- |
 | Get 0.5 test USDC for your Gmail at **[near.zarf.to/try](https://near.zarf.to/try)** and claim it with Google, into your NEAR account or a new one made with Face ID. The relayer pays gas. | A real Google sign-in on near.zarf.to; the escrow paid 0.5 test USDC: **[tx AY7GFZSL…](https://testnet.nearblocks.io/txns/AY7GFZSLZa5R26YTAUyUWA6uTBMJ9MAcmBaZkjnFMa2F)**. More in [Proof](#proof). | The escrow holds the USDC and has **no access keys at all**; its code changes only through a public, delayed upgrade. **[zarf-near-1112.testnet](https://testnet.nearblocks.io/address/zarf-near-1112.testnet)** |
+
+**Reading the code, or sending an agent to?** Start at [`spec/claim.md`](spec/claim.md), the byte-exact claim
+format. The money is enforced in [`contract/src/lib.rs`](contract/src/lib.rs), the Google check is in
+[`verifier/src/`](verifier/src), and the gas-paying relayer is in [`relayer/src/`](relayer/src). `make test`
+runs every suite.
 
 ## The story
 
@@ -31,6 +46,11 @@ no seed phrase. After the deadline, Ayşe can reclaim anything left unclaimed.
 Ayşe never asks anyone for a wallet address again.
 
 ## How it works
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/media/how-it-works-dark.webp">
+  <img src="docs/media/how-it-works-light.webp" width="100%" alt="Three screens from near.zarf.to. 1: the sender lists emails and amounts and pays once, in USDC. 2: the recipient opens the claim and signs in with Google, with no gas and no seed phrase. 3: the USDC arrives in their NEAR account.">
+</picture>
 
 ```mermaid
 sequenceDiagram
