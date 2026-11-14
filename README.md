@@ -84,7 +84,7 @@ Read this before using it with real money.
   than the contract's own views, an escrow code hash other than the expected one or any access key on the
   escrow. Only a guardian can stop a proposal made with a stolen owner key, so `scripts/deploy.sh` refuses
   mainnet without a guardian and without an offline backup verifier key; the testnet escrow has no guardian.
-  On mainnet the owner will hold the guardian himself, in a separate account; that does not help if both keys are stolen together.
+  On mainnet the owner will hold the guardian himself, in a separate account.
 - **The escrow account has no full-access key.** Every full-access key is deleted after deploy and
   `new` (`spec/claim.md`, "Upgrades and ownership"), so nobody can sign as the escrow and move its
   tokens; the only way to change the code is the delayed upgrade. On testnet `zarf-near-1112.testnet` holds no access key
