@@ -17,9 +17,6 @@ const SUN = '<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2
 const MOON = '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>';
 const CHEVRON = '<path d="m6 9 6 6 6-6"/>';
 const X_ICON = '<svg class="icon" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>';
-// Where a judge without an account makes one: a wallet, in a new tab, so this tab keeps the issued link (as the claim card).
-// NEAR's own guide: MyNearWallet ended account creation, and the guide names the wallets that still create testnet accounts.
-const WALLET = 'https://docs.near.org/getting-started/create-account';
 // The screenshot gallery (preview worker): every screen of the flow, for a judge who wants to look first.
 const GALLERY = 'https://zarf-near-claim-preview.sparkling-queen-5e77.workers.dev/gallery/';
 
@@ -198,9 +195,9 @@ const html = (siteKey: string, claimHost: string, usdc: string | null) => `<!doc
 <body>
 <div class="ripple-bg" aria-hidden="true"></div>
 <header>
-  <a class="lockup" href="${claimHost}/" aria-label="zarf.to home">${MARK(12)}<span>zarf.to</span></a>
+  <a class="lockup" href="${claimHost}/" aria-label="Zarf home">${MARK(12)}<span>Zarf</span></a>
   <div class="right">
-    <span class="net">NEAR testnet</span>
+    <span class="net">NEAR Testnet</span>
     <a class="x" href="https://x.com/zarfto" target="_blank" rel="noopener noreferrer" aria-label="Follow Zarf on X">${X_ICON}</a>
     <div class="divider" aria-hidden="true"></div>
     <button id="theme" class="toggle" type="button" aria-label="Switch to light theme" hidden>
@@ -219,11 +216,11 @@ const html = (siteKey: string, claimHost: string, usdc: string | null) => `<!doc
         <label for="email">Your Google email</label>
         <input id="email" name="email" type="email" autocomplete="email" inputmode="email" required spellcheck="false" autocapitalize="off" placeholder="you@gmail.com">
         <div class="ts"><div class="cf-turnstile" data-sitekey="${siteKey}" data-size="flexible" data-response-field="false"></div></div>
-        <button id="go" class="btn primary" type="submit">Create my claim link</button>
+        <button id="go" class="btn primary" type="submit">Get Claim Link</button>
       </form>
     </div>
     <div id="out" role="status" aria-live="polite"></div>
-    <p class="hint">No NEAR testnet account? <a id="wallet" href="${WALLET}" target="_blank" rel="noopener noreferrer">Create a free account in a NEAR wallet</a>, such as Meteor (choose testnet). This tab keeps your link.</p>
+    <p class="hint">No NEAR account needed — create one with Face ID when you claim.</p>
     <p class="hint">Want to look first? <a href="${GALLERY}" target="_blank" rel="noopener noreferrer">See every screen</a>.</p>
     <details>
       <summary>How this works ${ICON(CHEVRON)}</summary>
@@ -238,7 +235,7 @@ const html = (siteKey: string, claimHost: string, usdc: string | null) => `<!doc
 </main>
 <footer>
   <div class="foot">
-    <a class="lockup" href="${claimHost}/" aria-label="zarf.to home">${MARK(9)}<span>zarf.to</span></a>
+    <a class="lockup" href="${claimHost}/" aria-label="Zarf home">${MARK(9)}<span>Zarf</span></a>
     ${claimHost ? `<nav aria-label="Footer"><a href="${claimHost}/create">Send</a><a href="${claimHost}/campaigns">Campaigns</a><a href="${claimHost}/privacy">Privacy</a></nav>` : ''}
     <div class="by"><span>© 2026</span><span class="dot" aria-hidden="true">·</span><span>Built on NEAR by</span><a href="https://trionlabs.dev" target="_blank" rel="noopener noreferrer">trionlabs.dev</a></div>
   </div>
@@ -324,14 +321,14 @@ const JS = `(() => {
   const until = (ms) => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }).format(new Date(ms)) + ' UTC';
   const copyButton = (url) => {
     const btn = el('button', { type: 'button', className: 'btn secondary' });
-    btn.append(icon('copy'), el('span', {}, 'Copy link'));
+    btn.append(icon('copy'), el('span', {}, 'Copy Link'));
     btn.addEventListener('click', async () => {
       try {
         await navigator.clipboard.writeText(url);
         btn.replaceChildren(icon('copied'), el('span', {}, 'Copied'));
       } catch {
         btn.replaceChildren(icon('error'), el('span', {}, 'Copy failed'));
-        if (!btn.dataset.told) { btn.dataset.told = '1'; btn.parentNode.after(note('error', 'Long-press Open it and claim to copy the link.')); }
+        if (!btn.dataset.told) { btn.dataset.told = '1'; btn.parentNode.after(note('error', 'Long-press Open and Claim to copy the link.')); }
       }
     });
     return btn;
@@ -354,8 +351,14 @@ const JS = `(() => {
     busy(true);
     show([el('p', { className: 'sr-only' }, 'Creating your campaign on NEAR testnet…')]);
     try {
-      const res = await fetch('/faucet', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: f.email.value, turnstile }) });
+      // The recovery token from this browser's first answer for this email (red team #1): without it a repeat gets
+      // no link back. Kept per typed email in localStorage; the server compares it with a hash.
+      const rkey = 'zarf_faucet_recovery:' + f.email.value.trim().toLowerCase();
+      let recovery = null;
+      try { recovery = localStorage.getItem(rkey); } catch {}
+      const res = await fetch('/faucet', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: f.email.value, turnstile, recovery }) });
       const body = await res.json().catch(() => ({}));
+      if (res.ok && body.recovery_token) { try { localStorage.setItem(rkey, body.recovery_token); } catch {} }
       if (!res.ok) {
         const [tone, text] = MESSAGES[body.error] || ['error', 'Something went wrong. Please try again in a minute.'];
         if (body.error === 'BAD_EMAIL') email.setAttribute('aria-invalid', 'true');
@@ -372,6 +375,14 @@ const JS = `(() => {
         title.focus();
         return;
       }
+      // A link was made for this email today, in another browser (or this one's storage was cleared): not shown here.
+      if (body.reshown && !body.claim_url) {
+        const title = el('h2', { tabIndex: -1 }, 'Already Sent Today');
+        ask.hidden = true;
+        show([title, note('wait', 'This email got its link today in another browser. Open it there; a new one is possible tomorrow.')]);
+        title.focus();
+        return;
+      }
       const medal = el('div', { className: 'medallion ok' });
       medal.append(icon('copied'));
       const title = el('h2', { tabIndex: -1 }, body.reshown ? 'Your link from earlier' : 'Your link is ready');
@@ -381,7 +392,7 @@ const JS = `(() => {
       amount.append(el('span', { className: 'label' }, 'Waiting for you'), figure, el('span', { className: 'for' }, 'for ' + who));
       // A new tab: this page keeps the link on screen while the claim page strips its secret part.
       const open = el('a', { className: 'btn primary', href: body.claim_url, target: '_blank', rel: 'noopener' });
-      open.append(el('span', {}, 'Open it and claim'), icon('arrow'));
+      open.append(el('span', {}, 'Open and Claim'), icon('arrow'));
       const actions = el('div', { className: 'actions' });
       actions.append(open, copyButton(body.claim_url));
       // The form goes away: a second submit could only replace this link with a quota message.
