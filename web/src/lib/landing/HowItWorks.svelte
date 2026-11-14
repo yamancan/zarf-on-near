@@ -8,11 +8,11 @@
   import AmountPanel from '$lib/AmountPanel.svelte';
   import Avatar from '$lib/Avatar.svelte';
   import ClaimCard from '$lib/ClaimCard.svelte';
-  import { TESTNET, UNIT } from '$lib/network';
   import ZenCard from '$lib/zarf-kit/components/ui/ZenCard.svelte';
 
-  const SENDER = TESTNET ? 'maya.testnet' : 'maya.near';
-  const ACCOUNT = TESTNET ? 'ana.testnet' : 'ana.near';
+  // The landing names no testnet (owner, T-040): the pictures show the product as it reads on mainnet.
+  const SENDER = 'maya.near';
+  const ACCOUNT = 'ana.near';
   const ROWS = [
     { email: 'ana@gmail.com', amount: '25' },
     { email: 'kerem@gmail.com', amount: '40' },
@@ -51,11 +51,11 @@
 {#snippet claim()}
   <ClaimCard
     preview
-    title={TESTNET ? 'Claim Your Test USDC' : 'Claim Your USDC'}
+    title="Claim Your USDC"
     sender={SENDER}
     left="6 days left"
     amount="25"
-    unit={UNIT}
+    unit="USDC"
     modes={[['existing', 'NEAR Account']]}
     mode="existing"
   />
@@ -70,7 +70,7 @@
         <span class="text-zen-fg-subtle">To</span><Avatar name={ACCOUNT} /><span class="font-mono truncate">{ACCOUNT}</span>
       </p>
     </div>
-    <AmountPanel label="You Received" value="25" unit={UNIT} />
+    <AmountPanel label="You Received" value="25" unit="USDC" />
     <p class="text-xs text-zen-fg-subtle">Zarf paid the network fee; the Zarf contract sent the USDC.</p>
   </div>
 {/snippet}
@@ -90,7 +90,7 @@
     <li>
       {@render slice(arrived)}
       <h2 class="text-xl font-semibold mt-6 mb-1.5 tracking-tight text-base-content">USDC Arrives</h2>
-      <p class="text-sm text-zen-fg-muted">{TESTNET ? 'In their NEAR account.' : 'In their NEAR account, or on the chain they pick.'}</p>
+      <p class="text-sm text-zen-fg-muted">In their NEAR account, or on the chain they pick.</p>
     </li>
   </ol>
 </section>
