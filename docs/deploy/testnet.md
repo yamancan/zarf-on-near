@@ -10,8 +10,8 @@ Public data only. Keys live on the deploy host, mode 600, never in this repo.
 | Config (`get_config`) | `upgrade_delay_ns` 600 s, `resolve_delay_ns` 1 h, `min_lifetime_ns` 600 s, token Circle testnet USDC |
 | Verifier signer (Mode W owner key) | `2d10ebec1ec795cef82b8d357cc60d39d9119b99908741660b632fc5cf0d4e32` |
 | Relayer | `zarf-near-relayer-1111.testnet`, function-call key `ed25519:69m6cJwr6KqXhLr58BAUKoTWbtX1oMPtf5daiUbgQ9mm`: receiver `zarf-near-1112.testnet`, methods `["claim"]` |
-| Claim and send app | https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev |
-| Judges' page (1 test USDC to a Gmail) | https://zarf-near-faucet-testnet.sparkling-queen-5e77.workers.dev/try |
+| Claim and send app | https://near.zarf.to (`proxy/`; the Worker itself: https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev) |
+| Judges' page (0.5 test USDC to a Google email) | https://near.zarf.to/try (the Worker itself: https://zarf-near-faucet-testnet.sparkling-queen-5e77.workers.dev/try) |
 | Verifier | https://zarf-near-verifier-testnet.sparkling-queen-5e77.workers.dev (`GET /health`) |
 | Relayer | https://zarf-near-relayer-testnet.sparkling-queen-5e77.workers.dev (`GET /health`) |
 | NEAR RPC | https://test.rpc.fastnear.com |
