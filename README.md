@@ -1,7 +1,7 @@
 # Zarf on NEAR
 
-**Pay any email on NEAR.** A sender funds a campaign with USDC for a list of email addresses. Each
-recipient opens their claim link, signs in with Google, and receives the USDC at a NEAR account they
+**Send USDC to any email, from any chain.** A sender funds a campaign with USDC for a list of email addresses. Each
+recipient opens their claim link, signs in with Google (Gmail or Google Workspace), and receives the USDC at a NEAR account they
 choose; they need no NEAR for gas, because a relayer pays it. The chain stores salted commitments,
 amounts, each campaign's merkle root and sender, and each claim's destination; never an email.
 
@@ -194,7 +194,7 @@ measured about 11.6 Tgas burnt.
 | Claim app | `web/src/routes/claim` | Destination: an existing NEAR account, checked on chain before sign-in; on testnet also a new account with Face ID or a key file (off on mainnet). Cross-chain payout through NEAR Intents to USDC on ten chains: shown on testnet as mainnet only, real on mainnet, not yet run end to end. Then Google sign-in, verifier → relayer; the receipt trusts the relayer's event-based 200 (`claim_paid`) and polls `claim_state` only on a 202 |
 | Judges' page | `faucet/` | Cloudflare Worker behind `/try`: Turnstile, per-IP/per-email/daily limits, then a one-recipient test-USDC campaign and its claim link |
 | Watcher | `watcher/` | Cron Worker: alerts on a proposed upgrade, owner or verifier-key change, the escrow's code hash or any access key on it, and a changed live claim page (`watcher/README.md`) |
-| Proxy | `proxy/` | `near.zarf.to`: passes `/try` to the judges' page and everything else to the claim app |
+| Proxy | `proxy/` | `near.zarf.to`: passes `/try` (with its script, font and API) and `/health` to the judges' page, everything else to the claim app |
 
 ## Run it
 

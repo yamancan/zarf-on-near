@@ -12,7 +12,7 @@ Links that look like buttons follow Zarf's own pattern (apps/landing +page.svelt
 
 `create/`: from the Zarf main repo's `web/apps/create/src/lib/components/recipients/` at that revision, changed only as listed:
 
-- `RecipientAllocationGrid.svelte`: import paths (`../components/ui/ZenButton.svelte`, `./format`).
+- `RecipientAllocationGrid.svelte`: import paths (`../components/ui/ZenButton.svelte`, `./format`); the email input drops `-mx-1.5`.
 - `RecipientImportControls.svelte`: import paths; button labels in Title Case ("Add Row", "Paste List", "Add to List").
 - `rowChecks.ts`: `emailRowRules` and its `@zarf/core` imports removed (NEAR's rules are `gridRules` in `lib/create/grid.ts`).
 - `format.ts`: `formatAmount` from `web/packages/core/lib/utils/format.ts` lines 1-30.

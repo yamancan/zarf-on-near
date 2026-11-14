@@ -2,6 +2,8 @@
 # Builds the integration branch: merges each finished head into the current branch (main) in
 # order, stops at the first conflict for a hand resolution, then runs the secret scan and `make test`.
 # Rerunnable: a head already merged is a no-op. Nothing is pushed here.
+#   Last head, once the judges' README is final: scripts/publish-merge.sh origin/t-018-submission
+#   (a README conflict takes that branch's README: git checkout --theirs README.md).
 #   scripts/publish-merge.sh <head> [<head> ...]      e.g. origin/main <feature-branch>
 set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
