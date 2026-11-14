@@ -9,7 +9,8 @@ export interface Env {
 }
 
 /** The faucet's paths (faucet/src/index.ts); its "/" stays the claim app's landing. */
-export const FAUCET_PATHS = new Set(['/try', '/try.js', '/saira.woff2', '/faucet']);
+// /health: /try asks its own host whether the faucet can still pay ("faucet empty" notice); the claim app has none (T-034).
+export const FAUCET_PATHS = new Set(['/try', '/try.js', '/saira.woff2', '/faucet', '/health']);
 
 /** Headers only this proxy may set: a visitor sending them is ignored. */
 const OWN = ['x-zarf-client-ip', 'x-zarf-proxy-key'];
