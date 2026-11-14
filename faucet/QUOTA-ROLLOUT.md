@@ -1,9 +1,17 @@
 # Atomic daily quota rollout
 
-This change is prepared only; it has not been deployed. It adds the `QUOTA`
+Deployed on 2026-11-14 with `QUOTA_START_DATE=2026-11-15`: new issuance resumes
+at 00:00 UTC / 03:00 Turkey time on November 15. Existing encrypted recovery
+links remain available during the pause. The rollout adds the `QUOTA`
 binding and SQLite Durable Object `FaucetQuota` with migration tag
 `faucet-quota-v1`. Keep that migration and class name on subsequent deployments.
 The KV namespace and its encrypted recovery records are retained unchanged.
+
+For a routine redeploy, explicitly pass the existing activation date with
+`--var QUOTA_START_DATE:2026-11-15` and preserve existing bindings/secrets. Do not
+replace it with the checked-in empty value or advance it unless deliberately
+pausing issuance. The next-day cutover below applies when replacing legacy
+counters, not to routine redeploys of this already-activated ledger.
 
 ## Counter continuity and activation
 
