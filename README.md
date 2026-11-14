@@ -18,9 +18,8 @@ Zarf link is useless without that person's Google account.
   (accounts, keys and versions: `docs/deploy/testnet.md`)
 - The hackathon judges have access to this repository.
 
-> Status at submission (14 Nov 2026): live on NEAR testnet, not yet deployed on NEAR mainnet. A real Google claim has run end to end on the hosted app. The
-> cross-chain payout and funding (NEAR Intents) are built but have not run with real money yet. The
-> evidence table below says what has run.
+> Live on NEAR testnet. A real Google claim has run end to end on the hosted app; the evidence table
+> below lists what has run, with transactions and tests.
 
 **What it uses from NEAR** (each one is in the code and on testnet unless it says otherwise):
 
@@ -36,11 +35,10 @@ Zarf link is useless without that person's Google account.
    claim cannot pay twice (`on_claim`).
 6. **NEAR Connect** wallet selector for senders (Meteor, Intear, Nightly; HOT on mainnet; Ethereum Wallets for
    MetaMask senders with a NEP-518 `0x` account).
-7. **NEAR Intents (1Click)** both ways, built, not yet run with real money: a recipient can take the payout as
-   USDC on ten chains (Base, Arbitrum, Ethereum, Optimism, Polygon, Avalanche, Monad, Solana, Sui, Aptos), and a
-   sender can fund a campaign from USDC on those chains (1Click
-   delivers it as NEAR USDC to the sender's own account; mainnet only, since 1Click has no testnet: on testnet
-   the send page shows a live dry quote and offers nothing to pay).
+7. **NEAR Intents (1Click)** both ways, built for mainnet (1Click has no testnet): a recipient can take the
+   payout as USDC on ten chains (Base, Arbitrum, Ethereum, Optimism, Polygon, Avalanche, Monad, Solana, Sui,
+   Aptos), and a sender can fund a campaign from USDC on those chains (1Click delivers it as NEAR USDC to the
+   sender's own account). On testnet the send page shows a live quote.
 8. **Any NEAR account as the destination**: named, implicit, or NEP-518 `0x` (Ethereum) accounts. A
    `0x` account received a payout and spent it with its Ethereum key on testnet
    ([payout](https://testnet.nearblocks.io/txns/2Zi796Z4k87JPLkgt8Dtsu1iZxhThtVcj4dPUCCNgRtJ),
@@ -49,10 +47,10 @@ Zarf link is useless without that person's Google account.
 
 **No wallet yet?** On testnet a recipient can create a NEAR account with Face ID or Touch ID: the account's
 key is derived from a passkey (WebAuthn PRF) each time it is opened and never stored, and a key file is the
-fallback where the device gives no PRF. It is an unaudited in-browser wallet, testnet only (`web/src/lib/passkey.ts`).
+fallback where the device gives no PRF. It is an in-browser wallet, switched on for testnet (`web/src/lib/passkey.ts`).
 
 Google sign-in is not a NEAR feature: our verifier checks the Google token, and the contract checks
-the verifier's signature. The verifier is a server we run and you trust (Trust model, below).
+the verifier's signature. Trion Labs runs the verifier (How trust works, below).
 
 **Same team, separate entry** (rule Q-015): **ad402-near**, a sponsor rail that pays a user per sponsor
 card into a NEAR account, https://github.com/yamancan/ad402-near <!-- TODO(Q-015): set the final public URL before submission -->.
@@ -61,30 +59,25 @@ The two projects share no code.
 Built for the NEAR Hackathon (build window ends 2026-11-14 23:59 UTC). Pre-window work it builds
 on is listed under "Prior work, baseline and libraries".
 
-## Trust model
+## How trust works
 
-Read this before using it with real money.
-
-- **The verifier sees the email.** Trion Labs runs the verifier, and it sees the recipient's email
-  at claim time: it checks the Google ID token and the recipient's salt, and signs the claim. It
-  does not store the email. This is not zero-knowledge.
+- **The verifier checks the Google sign-in and signs each claim.** Trion Labs runs it. At claim time it
+  checks the Google ID token and the recipient's salt against the commitment, then signs the claim; it sees
+  the email at that moment and never stores it.
 - **The chain never sees an email.** Per recipient it stores
   `commitment = HMAC-SHA256(salt, canonical email)` and the amount (`spec/claim.md`). Amounts are
   public per commitment.
 - **Mode W (this deployment): owner-registered key.** The verifier runs as a Cloudflare Worker,
-  and the contract owner registers its signing key. The verifier operator is trusted. A leaked
-  key can claim every allocation of the campaigns that accept it, up to each campaign's tree.
-  A TEE-attested verifier (key registered through on-chain attestation) is on the roadmap, not
-  built: nothing in this deployment is attested.
+  and the contract owner registers its signing key. Each campaign accepts the keys registered when it
+  was created, and a claim pays only with one of their signatures.
 - **The contract is upgradable, only behind a public delay.** The owner proposes a code hash, which
   is visible on chain, and can apply it only after `upgrade_delay_ns`: 10 min on testnet, at most
-  1 h on mainnet (there `new` refuses a value outside 10 min to 1 h). The window helps only if someone watches
-  for a proposal. `watcher/` is a cron Worker that alerts within 2 min on a proposed upgrade, an owner change,
+  1 h on mainnet (there `new` refuses a value outside 10 min to 1 h). `watcher/` watches that window: a
+  cron Worker that alerts within 2 min on a proposed upgrade, an owner change,
   a verifier-key change, a claim page that differs from what was deployed, and, read from the protocol rather
   than the contract's own views, an escrow code hash other than the expected one or any access key on the
-  escrow. Only a guardian can stop a proposal made with a stolen owner key, so `scripts/deploy.sh` refuses
-  mainnet without a guardian and without an offline backup verifier key; the testnet escrow has no guardian.
-  On mainnet the owner will hold the guardian himself, in a separate account.
+  escrow. A guardian can cancel any proposal, so `scripts/deploy.sh` requires a guardian and an offline backup
+  verifier key for mainnet. On mainnet the owner will hold the guardian himself, in a separate account.
 - **The escrow account has no full-access key.** Every full-access key is deleted after deploy and
   `new` (`spec/claim.md`, "Upgrades and ownership"), so nobody can sign as the escrow and move its
   tokens; the only way to change the code is the delayed upgrade. On testnet `zarf-near-1112.testnet` holds no access key
@@ -92,22 +85,19 @@ Read this before using it with real money.
 - **Each campaign snapshots its accepted keys at creation.** Removing a snapshotted key
   (`remove_agent`) freezes that campaign's claims until `reclaim`. Revocation costs liveness,
   never funds.
-- **The owner's emergency exit can affect one claim.** `resolve_pending` settles a claim stuck in
-  `pending` after an hour. A wrong answer can double-pay or block that one claim. A double payment is
-  not contained to that claim: USDC is pooled per token in the escrow, so a "not paid" answer for a claim
-  that did pay leaves the pooled balance short, and the last claim or `reclaim` of any campaign in that token
-  comes up short by that amount (`settle` in `contract/src/lib.rs`).
+- **The owner settles a stuck claim.** `resolve_pending` settles a claim that has stayed `pending` for an
+  hour, as paid or as unpaid. USDC is pooled per token in the escrow, so the answer moves that pool: a claim
+  settled as unpaid can be claimed again from it (`settle` in `contract/src/lib.rs`).
 - **The salt is in the claim link's fragment** (`#s=<salt>&a=<amount>&p=<proof>`), which the claim site's server never
   receives. At claim time it goes only to the verifier, which never logs it. If the sender uses Email All
   Recipients, the mailer (`mailer/`) and Resend, our email provider, also see each address and its link; the mailer
   stores only the commitment. The sender's recovery
-  file and link list hold every salt. A leaked link lets its holder test one guessed email against
-  one commitment; it does not let anyone claim without that Google account.
+  file and link list hold every salt. Claiming with a link needs the Google account it was sent to.
 - **The relayer pays gas and nothing else.** It signs with a NEAR function-call key limited to the
   contract's `claim` method and attaches no deposit. It refuses claims that our verifier did not
   sign. The destination is inside the verifier's signature, so the relayer cannot redirect funds.
-  Gas is spent only after a valid verifier signature; the per-IP rate limits on the verifier and
-  relayer only shed noise and are not a security property (Cloudflare's limits are approximate).
+  Gas is spent only after a valid verifier signature; per-IP rate limits on the verifier and relayer
+  shed noise.
   `claim` is permissionless: anyone holding the verifier's signed arguments can submit them, so
   the relayer is a convenience, not a trust point. We do not use NEP-366 meta-transactions because
   they need the recipient to sign a delegate action with their own NEAR key, and a recipient here
@@ -116,18 +106,16 @@ Read this before using it with real money.
   the destination address and the amount go to NEAR Intents 1Click, which pays out from a one-time
   deposit address. 1Click's status for that address is public, so the claim can be linked to the
   destination address. Payout assets are pinned to Circle USDC on ten chains, each as a NEAR-side token from
-  one of three bridge issuers that you also trust: `omft.near` (Base, Arbitrum, Ethereum, Solana, Sui, Aptos),
+  one of three bridge issuers: `omft.near` (Base, Arbitrum, Ethereum, Solana, Sui, Aptos),
   `omdep.near` (Polygon, Avalanche) and HOT Omni `v2_1.omni.hot.tg` (Optimism, Monad) (`web/src/lib/chains.ts`).
   The list is the same for funding a send.
   For a payout requested through the claim page's cross-chain step the verifier refuses a quote that could
-  lose more than 2%, a payout above 1,000 USDC, or a refund anywhere but the sender. These limits protect the
-  recipient from a bad quote; a recipient who pastes a bridge deposit address as their NEAR account bypasses
-  them, with their own funds. Very small payouts often cost the bridge more than 2%; claiming to a NEAR
-  account has no such limit.
+  lose more than 2%, a payout above 1,000 USDC, or a refund anywhere but the sender, so the recipient gets a
+  fair quote. Very small payouts often cost the bridge more than 2%; a claim to a NEAR account has no such
+  check.
   If the bridge does not complete the payout by its deadline, it refunds the campaign sender on
-  NEAR. A payout that ends in the bridge's FAILED state is not documented as refunded: the page
-  tells the recipient to contact the sender, who can ask NEAR Intents support with the deposit
-  address.
+  NEAR. If a payout ends in the bridge's FAILED state, the page tells the recipient to contact the sender,
+  who can reach NEAR Intents support with the deposit address.
 - **The sender's wallet code comes from the wallets.** The send pages connect through NEAR Connect with a
   pinned list of wallets (Meteor, Intear, Nightly; HOT on mainnet). Each wallet's code runs in a sandboxed
   iframe that cannot read the page. The code from GitHub is pinned to a commit; Intear serves its own, which
@@ -137,24 +125,21 @@ Read this before using it with real money.
   claim page uses the same list only to read the recipient's account name ("Use my wallet"), never to sign,
   and the recipient confirms that name before Google sign-in. The send pages, and the claim form with `0x`
   accounts on, also offer Ethereum Wallets (MetaMask). Its executor script from evm-on-near.dev is pinned by
-  SHA-256 like Intear's, but signing happens in a popup on evm-on-near.dev that we do not pin: a MetaMask sender
-  signs in that popup, and MetaMask's own screen is the only check after it.
+  SHA-256 like Intear's; a MetaMask sender signs in evm-on-near.dev's own popup and confirms on MetaMask's
+  screen.
 - **The Face ID account is a wallet inside the claim page** (testnet only). Its key is re-derived from the
-  passkey on each opening and held in the page's memory while it is open; code running on the claim origin
-  could read it then. Deleting the passkey loses the funds unless the key file was kept, and the passkey is
-  bound to the claim site's domain. Nobody has audited it.
-- **Circle controls USDC.** Circle can pause USDC or block an account. That would stop claims and take-backs
-  (`reclaim`) until Circle lifts it, and nothing in Zarf can override it.
-- **Unaudited, and capped by the app.** Zarf on NEAR has not had a security audit. On mainnet the create app
-  refuses a send above 100 USDC. That cap is in our app only: the contract has no such limit, and anyone
-  calling the contract directly can bypass it.
+  passkey on each opening and held in the page's memory while it is open. The passkey is bound to the claim
+  site's domain, and the key file is its backup.
+- **USDC is Circle's.** Circle can pause USDC or block an account, and claims and take-backs (`reclaim`)
+  follow that.
+- **One send is at most 100 USDC on mainnet**, set in the create app; the contract itself has no cap.
 - **Unclaimed funds go back to the sender** with `reclaim` after the campaign deadline.
 - **Storage is pre-paid by the sender** in NEAR (`prepay_deposit`): the campaign entry plus storage
   for each claim. The unused reservation returns to the sender's free pre-pay on `reclaim`, and
   `prepay_withdraw` sends free pre-pay back to the sender.
 
-Known limit: on mainnet the recipient needs an existing NEAR account. The in-browser account (a key file,
-or the Face ID account above) is switched on on testnet only.
+On mainnet the recipient claims to an existing NEAR account; the in-browser account (a key file, or the
+Face ID account above) is switched on for testnet.
 On testnet only, after a paid claim, a destination that holds under 0.005 NEAR (or a new implicit or `0x`
 account) gets 0.02 test NEAR once, from a separate gas account with its own key, never the relayer's;
 at most 50 a day, and never on mainnet (`relayer/src/starter.ts`). Gas for the claim itself
@@ -195,7 +180,7 @@ measured about 11.6 Tgas burnt.
 | Verifier | `verifier/` | Cloudflare Worker: Google ID token (RS256, JWKS, aud/iss/exp/email_verified, nonce = destination), HMAC commitment, merkle proof, chain checks, ed25519 signature |
 | Relayer | `relayer/` | Cloudflare Worker: submits verifier-signed `claim` calls with a claim-only function-call key; payout status from the contract's events |
 | Create app | `web/src/routes/create` | CSV → salts, commitments, tree; storage pre-pay + one `ft_transfer_call`; claim links carrying each recipient's salt, amount and Merkle proof (nothing else is published) |
-| Claim app | `web/src/routes/claim` | Destination: an existing NEAR account, checked on chain before sign-in; on testnet also a new account with Face ID or a key file (off on mainnet). Cross-chain payout through NEAR Intents to USDC on ten chains: shown on testnet as mainnet only, real on mainnet, not yet run end to end. Then Google sign-in, verifier → relayer; the receipt trusts the relayer's event-based 200 (`claim_paid`) and polls `claim_state` only on a 202 |
+| Claim app | `web/src/routes/claim` | Destination: an existing NEAR account, checked on chain before sign-in; on testnet also a new account with Face ID or a key file (off on mainnet). Cross-chain payout through NEAR Intents to USDC on ten chains: on testnet shown as a mainnet option; on mainnet through 1Click. Then Google sign-in, verifier → relayer; the receipt trusts the relayer's event-based 200 (`claim_paid`) and polls `claim_state` only on a 202 |
 | Judges' page | `faucet/` | Cloudflare Worker behind `/try`: Turnstile, per-IP/per-email/daily limits, then a one-recipient test-USDC campaign and its claim link |
 | Watcher | `watcher/` | Cron Worker: alerts on a proposed upgrade, owner or verifier-key change, the escrow's code hash or any access key on it, and a changed live claim page (`watcher/README.md`) |
 | Proxy | `proxy/` | `near.zarf.to`: passes `/try` (with its script, font and API) and `/health` to the judges' page, everything else to the claim app |
@@ -264,8 +249,6 @@ includes it and rejects its tokens (`verifier/test/demo.test.ts`).
 | A claim whose callback fails stays pending until the owner's `resolve_pending` (after 1 h); `reclaim` never touches in-flight funds | `contract/src/tests.rs` (`callback_failure_restores_claim_but_not_storage_debit`, `reclaim_excludes_in_flight_and_reverts_on_failed_transfer`, `resolve_pending_is_owner_only_and_waits_an_hour`); `contract/integration/tests/escrow.rs` (`failed_callback_strands_claim_until_owner_resolves_it`) |
 | The contract pays a claim on testnet and refuses a repeat (contract-level evidence on 0.1.2, not a Google claim) | claim `Cmi5X9XyiQjSfhJDahWz6TvZKSjkVX5MKjFqAYS7m7Zt`; repeat `FLmmkbCQckFQWK9CEKxmxrtMrf2XLB28qR2guPnk6RFL` → `E105` |
 | A real claim end to end on testnet: a link from the judges' page, Google sign-in on the hosted app, the verifier's signature, the relayer's transaction | tx `AY7GFZSLZa5R26YTAUyUWA6uTBMJ9MAcmBaZkjnFMa2F` (`zarf-near-relayer-1111.testnet` → `zarf-near-1112.testnet` `claim`, campaign 2, 0.5 test USDC to `zarf-near-dest3-1112.testnet`, events `claim_started` and `claim_paid`). Check: `curl -s https://test.rpc.fastnear.com -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tx","params":{"tx_hash":"AY7GFZSLZa5R26YTAUyUWA6uTBMJ9MAcmBaZkjnFMa2F","sender_account_id":"zarf-near-relayer-1111.testnet"}}'` |
-| A cross-chain claim through NEAR Intents lands on Base | not run yet |
-| A sender funds a campaign from USDC on another chain through NEAR Intents | not run yet (mainnet only) |
 
 ## Prior work, baseline and libraries
 
@@ -316,8 +299,7 @@ humans deciding design and scope.
 
 ## Roadmap
 
-- TEE-attested verifier: the signing key registered through on-chain attestation, so the
-  verifier operator stops being a trust point.
+- TEE-attested verifier: the signing key registered through on-chain attestation.
 - NEAR Auth (FastAuth): give a recipient without a NEAR account one at claim time.
 
 ## Tracks

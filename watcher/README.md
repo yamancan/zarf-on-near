@@ -41,7 +41,7 @@ active yet. `guardian_id` is set at `new` and cannot be added later. The testnet
 | `NEAR_RPC_URL` | `https://test.rpc.fastnear.com` |
 | `EXPECTED_OWNER` | `zarf-near-owner-1111.testnet` |
 | `EXPECTED_SIGNERS` | the relayer's `VERIFIER_SIGNERS` (hex, comma-separated) |
-| `EXPECTED_CODE_HASH` | `5GdxDSB4sGW9Ewod4Q4Na613C2sLQjVfFjLbbZbKt6N8` (`view_account`, base58). An honest upgrade changes it here too |
+| `EXPECTED_CODE_HASH` | `5GdxDSB4sGW9Ewod4Q4Na613C2sLQjVfFjLbbZbKt6N8` (`view_account`, base58). A planned upgrade changes it here too |
 | `CLAIM_PAGE_URL` | `https://near.zarf.to/claim/1/0` (what visitors load, through `proxy/`) |
 | `SCRIPTS_PER_RUN` | `40` (allowed 4-40; below 4 there is no random share): the free plan's 50 subrequests per run, less 4 RPC reads with one retry each, the page and the alert. Redirects are not followed |
 | `ALERT_WEBHOOK_URL` | **secret, the owner sets it**: a Slack or Discord incoming-webhook URL. The body is `{"text": …, "content": …}` |
@@ -50,7 +50,7 @@ active yet. `guardian_id` is set at `new` and cannot be added later. The testnet
 deploy until it names the same contract and signers as the relayer and sets `EXPECTED_CODE_HASH`, and until
 the mainnet watcher has its `ALERT_WEBHOOK_URL` secret.
 
-## Honest deploys are not alerts
+## Planned deploys are not alerts
 
 Every web deploy ends with `scripts/watcher-refresh.sh <network>` (`scripts/deploy-web.sh testnet`,
 `scripts/deploy-mainnet-hosting.sh` and `scripts/enable-google-testnet.sh` call it). It works in four steps:

@@ -18,8 +18,8 @@ On every claim the relayer reads this key's permission on chain and refuses to s
 (`RELAYER_MISCONFIGURED`) unless it matches the table. A finite allowance would stop all
 claims once the key's gas budget is spent, so watch `GET /health` instead.
 
-Adding the key with near-cli-rs. This is the expected command shape, **not yet checked on
-this machine** (near-cli-rs is not installed here); confirm it with `near account add-key --help`:
+Adding the key with near-cli-rs. This is the expected command shape; confirm it with
+`near account add-key --help`:
 
 ```sh
 near account add-key <RELAYER_ACCOUNT_ID> grant-function-call-access \

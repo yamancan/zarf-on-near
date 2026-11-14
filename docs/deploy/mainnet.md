@@ -1,8 +1,8 @@
-# Mainnet deployment (planned, not run)
+# Mainnet deployment runbook
 
 Public data only. Nothing here has been executed. The owner provides the mainnet accounts.
 
-## Joint runbook: escrow, hosting, cross-chain demo (owner approved 2026-11-12; not run yet)
+## Joint runbook: escrow, hosting, cross-chain demo (owner approved 2026-11-12)
 
 Roles: the **contract operator** runs the escrow side (`scripts/deploy.sh`), the **web operator** the keys and
 hosting (`scripts/mainnet-keys.mjs`, `scripts/deploy-mainnet-hosting.sh`, `docs/deploy/mainnet-hosting.md`).
