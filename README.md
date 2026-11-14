@@ -295,7 +295,7 @@ rejects its tokens (`verifier/test/demo.test.ts`).
 ## Prior work, baseline and libraries
 
 Prior work: **Zarf on Stellar, same team, interface reused.** Everything else here was built in the build
-window, starting from the first commit on 2026-11-07:
+window, starting from the first commit on 2026-11-07 through the final submission tag:
 [hackathon-submission](https://github.com/yamancan/zarf-on-near/tree/hackathon-submission).
 
 <details>

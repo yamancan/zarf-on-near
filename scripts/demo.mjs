@@ -86,7 +86,7 @@ async function main() {
     const campaignId = process.env.DEMO_CAMPAIGN_ID ?? (dry ? campaign.campaign_id : undefined);
     const missing = Object.entries({ NEAR_RPC_URL: rpcUrl, CONTRACT_ID: contractId, RELAYER_ACCOUNT_ID: relayerAccount, RELAYER_KEY: relayerKey, DEMO_CAMPAIGN_ID: campaignId }).filter(([, v]) => !v).map(([k]) => k);
     if (missing.length) return fail(`set ${missing.join(', ')} (see the header of scripts/demo.mjs), or run with --dry`);
-    console.log(`      rpc ${rpcUrl}, contract ${contractId}, campaign ${campaignId} (${which}), relayer ${relayerAccount}`);
+    console.log(`      RPC configured, contract ${contractId}, campaign ${campaignId} (${which}), relayer ${relayerAccount}`);
 
     step(2, 'start the verifier (demo build: throwaway issuer, never deployed) and the relayer');
     const verifier = await unstable_dev(`${root}verifier/src/demo.ts`, {
@@ -139,4 +139,5 @@ async function main() {
   }
 }
 
-main().catch((e) => fail(e.stack ?? String(e)));
+// Upstream errors may contain the configured RPC URL or request data.
+main().catch(() => fail('demo runtime failed; check the local sandbox and Worker configuration. Upstream error details are omitted.'));

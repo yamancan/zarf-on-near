@@ -18,20 +18,25 @@ On every claim the relayer reads this key's permission on chain and refuses to s
 (`RELAYER_MISCONFIGURED`) unless it matches the table. A finite allowance would stop all
 claims once the key's gas budget is spent, so watch `GET /health` instead.
 
-Adding the key with near-cli-rs. This is the expected command shape; confirm it with
-`near account add-key --help`:
+Use the repository's file-based key generation; do not print a private key to the terminal.
+For testnet, `scripts/deploy.sh` creates the claim-only relayer key in a mode-600
+file outside the repository (`RELAYER_KEY_FILE`) and registers its public key when
+`RELAYER_ID` is set. Follow [the deployment guide](../docs/deploy/testnet.md).
+For mainnet, `scripts/mainnet-keys.mjs` creates new mode-600 key files without overwriting
+existing ones; follow [the mainnet owner-kit procedure](../docs/deploy/mainnet.md) to register
+the public key. Both scripts print public keys only.
+
+After the testnet key has been registered, upload it through standard input from its saved
+file, without copying its value into a command or a file in this repository:
 
 ```sh
-near account add-key <RELAYER_ACCOUNT_ID> grant-function-call-access \
-  --allowance unlimited --contract-account-id <CONTRACT_ID> --function-names claim \
-  autogenerate-new-keypair print-to-terminal network-config testnet sign-with-keychain send
+key_file=${RELAYER_KEY_FILE:?set the mode-600 relayer key file}
+tr -d '\n' <"$key_file" | (cd relayer && npx wrangler secret put RELAYER_KEY --env testnet)
 ```
 
-Then store the new private key as the secret (it never goes in a file in this repo):
-
-```sh
-npx wrangler secret put RELAYER_KEY   # ed25519:<base58>
-```
+Run this from the repository root with the correct Cloudflare account configured.
+The [mainnet hosting script](../scripts/deploy-mainnet-hosting.sh) uses the same stdin
+pattern for the mainnet key.
 
 Set the vars in `wrangler.jsonc`: `CONTRACT_ID`, `RELAYER_ACCOUNT_ID`, `NEAR_RPC_URL`,
 `VERIFIER_SIGNERS` (the verifier's `signer` hex) and `CLAIM_ORIGINS`.

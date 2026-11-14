@@ -82,7 +82,7 @@ throwaway worktree (not committed): 316,376 B, sha256 `e1438712…2a7036`, so no
 
 | Step | Transaction | Result |
 | --- | --- | --- |
-| `propose_upgrade` (owner), source for 0.1.0 -> 0.1.1 | `BCbYmYST3c6zhVXVGtZZrkAvBg8JymCawnR4VkV56uyi` | `upgrade_proposed`, `ready_at_ns` 1794406398030794170 |
+| `propose_upgrade` (owner), source revision (0.1.0 → 0.1.1) | `BCbYmYST3c6zhVXVGtZZrkAvBg8JymCawnR4VkV56uyi` | `upgrade_proposed`, `ready_at_ns` 1794406398030794170 |
 | `apply_upgrade` before `ready_at_ns` | `ALtDLJMMJK43P5gLJYHHxQxoyiGsvRKRa27xs8xicXy8` | refused, `E107_UNAUTHORIZED` |
 | campaign 0 created under v1 (3 × 1 USDC; prepay `CJbXmMgsEQVPnEWoR7eiVk3DMKtXsv4t8TVakGEcZgcY`) | `DhNZapacaAQqwfR7Eghpvx6XSCfjshZPMtSkHCQk6zS1` | `campaign_created` |
 | `apply_upgrade` after `ready_at_ns` (raw wasm via `file-args`, 300 Tgas) | `32iwv98Te8d6oSqECSbbGXDXYa9FNfJ3FucT49TjK5mu` | `upgrade_applied` |
@@ -133,7 +133,8 @@ After: code hash `5GdxDSB4sGW9Ewod4Q4Na613C2sLQjVfFjLbbZbKt6N8`; `view_access_ke
 `pending_upgrade` = null; `get_config` unchanged (testnet, `upgrade_delay_ns` 600000000000,
 `guardian_id` null, Circle testnet USDC); campaign 0 unchanged (balance 2000000, in_flight 0);
 `contract_source_metadata` =
-`{"version":"0.1.2","link":"https://github.com/yamancan/zarf-on-near","standards":[{"standard":"nep330","version":"1.3.0"}],"build_info":null}`.
+version `0.1.2`, NEP-330 standard `1.3.0`, and `build_info: null`. Its `link` records the
+repository used for the deployment build.
 `build_info` stays null: near-sdk fills it only for reproducible builds (cargo-near
 `reproducible-wasm`, Docker), not for `non-reproducible-wasm`.
 

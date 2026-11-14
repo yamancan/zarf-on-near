@@ -29,6 +29,24 @@ describe('path routing', () => {
     expect(u.seen[0].url).toBe(want);
   });
   it('the faucet paths match the faucet worker', () => expect([...FAUCET_PATHS].sort()).toEqual(['/faucet', '/health', '/saira.woff2', '/try', '/try.js']));
+  it.each([
+    '//attacker.invalid/login?next=%2Fclaim',
+    '///attacker.invalid/login',
+    '/\\attacker.invalid/login',
+    '/%2Fattacker.invalid/login',
+    '/%5Cattacker.invalid/login',
+    '//attacker.invalid/faucet?email=synthetic',
+  ])('keeps an authority-like path on the configured upstream: %s', async (path) => {
+    const req = new Request('https://near.zarf.to' + path);
+    const incoming = new URL(req.url);
+    const u = upstream(() => new Response('trusted app'));
+    await proxy(req, env, u.fetchFn);
+    const target = new URL(u.seen[0].url);
+    expect(target.origin).toBe(env.CLAIM_ORIGIN);
+    expect(target.pathname).toBe(incoming.pathname);
+    expect(target.search).toBe(incoming.search);
+    expect(u.seen[0].headers.has('x-zarf-proxy-key')).toBe(false);
+  });
 });
 
 describe('pass-through', () => {

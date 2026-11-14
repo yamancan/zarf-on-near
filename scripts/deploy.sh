@@ -332,12 +332,12 @@ fi
 # From here on the escrow exists: on failure, print how to resume without redeploying.
 rerun_cmd() {
   local v out="SKIP_DEPLOY=1"
-  for v in DRY_RUN NETWORK LOCK_CONTRACT CONTRACT_ID OWNER_ID RELAYER_ID GUARDIAN_ID USDC_ID SIGNER_PUBKEY RELAYER_KEY_FILE RPC; do
+  for v in DRY_RUN NETWORK LOCK_CONTRACT CONTRACT_ID OWNER_ID RELAYER_ID GUARDIAN_ID USDC_ID SIGNER_PUBKEY RELAYER_KEY_FILE; do
     [[ -n ${!v:-} ]] && out+=" $v=$(printf '%q' "${!v}")"
   done
   echo "$out $(printf '%q' "$0")"
 }
-on_fail() { echo "FAILED after deploy. Resume with:" >&2; echo "  $(rerun_cmd)" >&2; }
+on_fail() { echo "FAILED after deploy. Keep any custom RPC configured in your environment; its value is omitted here. Resume with:" >&2; echo "  $(rerun_cmd)" >&2; }
 set -E
 trap on_fail ERR
 

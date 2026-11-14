@@ -19,7 +19,10 @@ export async function proxy(req: Request, env: Env, fetchFn: typeof fetch = (u, 
   const url = new URL(req.url);
   const faucet = FAUCET_PATHS.has(url.pathname);
   const upstream = new URL(faucet ? env.FAUCET_ORIGIN : env.CLAIM_ORIGIN);
-  const target = new URL(url.pathname + url.search, upstream.origin);
+  // Set the path separately: resolving a visitor's //host/path as a URL would replace the upstream.
+  const target = new URL(upstream.origin);
+  target.pathname = url.pathname;
+  target.search = url.search;
 
   const headers = new Headers(req.headers);
   for (const h of [...OWN, 'host']) headers.delete(h);

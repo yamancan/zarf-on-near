@@ -6,3 +6,28 @@ node_modules/
 *.key
 .DS_Store
 .dev.vars*
+
+# Local signing material and provider credential exports
+*.seed
+*.pem
+*.p12
+*.pfx
+credentials*.json
+id_rsa
+id_ed25519
+id_ecdsa
+.netrc
+.pypirc
+
+# Local agent instructions and chat/session exports
+.claude/
+.codex/
+.agents/
+CLAUDE.md
+AGENTS.md
+CODEX.md
+GEMINI.md
+conversations/
+transcripts/
+*.jsonl
+*.har
