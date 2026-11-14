@@ -4,7 +4,8 @@
   // with the same values. Differences: the headline is the core line (no rotating word), the hashes are NEAR
   // style (hex) instead of Stellar strkeys, the eyebrow is "Built for NEAR Hackathon" in the "Built on Stellar"
   // lockup's shape (T-040), the CTAs are this app's, and (design spec 3.5) the hero is its content plus py-24/32
-  // with no 90vh minimum and no scroll cue. The landing names no testnet except CTA 2 (owner, T-040).
+  // with no 90vh minimum and no scroll cue. The landing body names no testnet except CTA 2; the
+  // header keeps its "NEAR Testnet" label (owner, T-040). "any chain" carries the rotating chain mark (CHAIN_LOOP).
   import { onMount } from 'svelte';
   import Mark from '$lib/Mark.svelte';
   import { MARKS, PAYOUT_CHAINS } from '$lib/chains';
@@ -205,13 +206,13 @@
       class="text-4xl sm:text-5xl md:text-6xl font-bold tracking-tighter text-zen-fg leading-[1.12] [text-wrap:balance] transition-opacity duration-1000 ease-out {mounted ? 'opacity-100' : 'opacity-0'}"
       style="transition-delay: 400ms;"
     >
-      Send USDC to any email, from any<span class="inline-grid align-[-0.08em] mx-[0.22em] w-[0.78em] h-[0.78em]" aria-hidden="true"
+      Send USDC to any email, from any <span class="inline-grid align-[-0.08em] w-[0.78em] h-[0.78em]" aria-hidden="true"
         >{#each CHAIN_LOOP as c, i (c.name)}<span
             class="col-start-1 row-start-1 transition-all duration-500 ease-out motion-reduce:transition-none {i === chainIdx
               ? 'opacity-100 blur-none scale-100'
               : 'opacity-0 blur-sm scale-75'}"><Mark svg={c.svg} class="w-full h-full text-zen-fg" /></span
           >{/each}</span
-      >chain.
+      > chain.
     </h1>
 
     <p

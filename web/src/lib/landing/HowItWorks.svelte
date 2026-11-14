@@ -3,7 +3,7 @@
   // describes, drawn with that screen's own parts and type, at real size, in the same card, cropped at the same height
   // and faded out at the bottom: the send grid (RecipientAllocationGrid's rows), the claim card the recipient opens
   // (ClaimCard itself, inert), and the receipt (its own header and AmountPanel). One story runs through all three:
-  // ana@gmail.com is sent 25 USDC, opens it, and it arrives in ana.testnet. Pictures only: inert, hidden from
+  // ana@gmail.com is sent 25 USDC, opens it, and it arrives in ana.near. Pictures only: inert, hidden from
   // assistive tech; the heading and line under each say what it shows.
   import AmountPanel from '$lib/AmountPanel.svelte';
   import Avatar from '$lib/Avatar.svelte';
