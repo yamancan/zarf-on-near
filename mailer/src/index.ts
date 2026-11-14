@@ -11,6 +11,7 @@ interface Env {
   CLAIM_ORIGINS: string; // pages allowed to call /notify (CORS + Origin check)
   CLAIM_ORIGIN: string; // the one origin every emailed link uses
   MAIL_FROM: string; // "Zarf <claim@send.zarf.to>"
+  TOKEN_ID: string; // the USDC token the emails name
   RESEND_URL?: string; // tests and local dev point this at a stub; default Resend's API
   RESEND_API_KEY: string; // secret
   PER_IP: RateLimiter;
@@ -18,6 +19,7 @@ interface Env {
 }
 
 const RPC_TIMEOUT_MS = 8000;
+const MAX_BODY = 4096; // one recipient's leaf with a 20-level proof is under 2 kB
 const list = (s: string | undefined) => (s ?? '').split(',').map((x) => x.trim()).filter(Boolean);
 
 function view<T>(env: Env, method: string, args: object): Promise<T> {
@@ -44,6 +46,7 @@ async function resend(env: Env, to: string, mail: Mail, idempotencyKey: string):
     body: JSON.stringify({ from: env.MAIL_FROM, to: [to], subject: mail.subject, text: mail.text, html: mail.html }),
   });
   if (!res.ok) console.log('resend status', res.status); // the status only: never the address or the body
+  if (res.status >= 500) throw new Error('resend unavailable'); // may or may not have sent: keep pending
   return res.ok;
 }
 
@@ -64,26 +67,32 @@ export default {
     }
     if (req.method !== 'POST') return json({ error: 'NOT_FOUND' }, 404);
     if (!allowed) return json({ error: 'BAD_ORIGIN' }, 403);
-    if (!env.RESEND_API_KEY || !env.CONTRACT_ID || !env.NEAR_RPC_URL || !env.CLAIM_ORIGIN || !env.MAIL_FROM) return json({ error: 'MAILER_MISCONFIGURED' }, 500);
-    const body = await req.json().catch(() => null);
+    if (!env.RESEND_API_KEY || !env.CONTRACT_ID || !env.NEAR_RPC_URL || !env.CLAIM_ORIGIN || !env.MAIL_FROM || !env.TOKEN_ID) return json({ error: 'MAILER_MISCONFIGURED' }, 500);
+    // Read only after the rate limit (handleNotify), and never more than MAX_BODY.
+    const readBody = async () => {
+      if (Number(req.headers.get('Content-Length') ?? 0) > MAX_BODY) return null;
+      const text = await req.text();
+      return text.length > MAX_BODY ? null : JSON.parse(text);
+    };
     const gateCall = async (campaignId: string, c: string, op: string) => {
       const stub = env.GATE.get(env.GATE.idFromName(`campaign:${campaignId}`));
       const r = (await (await stub.fetch(`https://gate/?op=${op}&c=${c}`)).json()) as { result: string };
       return r.result;
     };
     try {
-      const out = await handleNotify(body, req.headers.get('CF-Connecting-IP') ?? 'unknown', {
+      const out = await handleNotify(readBody, req.headers.get('CF-Connecting-IP') ?? 'unknown', {
         getCampaign: (id) => view(env, 'get_campaign', { campaign_id: id }),
+        tokenId: env.TOKEN_ID,
         claimState: (id, c) => view<string>(env, 'claim_state', { campaign_id: id, commitment: c }),
         gate: {
-          reserve: (id, c) => gateCall(id, c, 'reserve') as Promise<'ok' | 'already' | 'cap'>,
+          reserve: (id, c) => gateCall(id, c, 'reserve') as Promise<'ok' | 'sent' | 'pending' | 'cap'>,
+          sent: async (id, c) => void (await gateCall(id, c, 'sent')),
           release: async (id, c) => void (await gateCall(id, c, 'release')),
         },
         send: (to, mail, key) => resend(env, to, mail, key),
         perIp: env.PER_IP,
         nowMs: Date.now(),
         claimOrigin: env.CLAIM_ORIGIN,
-        home: env.CLAIM_ORIGIN,
         testnet: env.NETWORK !== 'mainnet',
       });
       return json(out.body, out.status);

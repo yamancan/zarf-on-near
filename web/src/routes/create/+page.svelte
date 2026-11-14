@@ -22,6 +22,7 @@
   import { CIRCLE_LINE, TESTNET, UNIT } from '$lib/network';
   import { ArrowRight, ArrowUpRight, Check, CheckCircle2, ChevronDown, Copy, Download, ExternalLink, Eye, Lock, Mail, Plus, RefreshCw } from 'lucide-svelte';
   import { emailAll, notifyOne, type MailStatus } from '$lib/create/mailer';
+  import { claimEmail } from '$lib/create/claimEmail';
   import ClaimCard, { type ClaimMode } from '$lib/ClaimCard.svelte';
   import Mark from '$lib/Mark.svelte';
   import { MARKS } from '$lib/chains';
@@ -177,9 +178,18 @@
   let mailBusy = $state(false);
   // Rows still worth an email: not claimed or paying (the mailer refuses those anyway)
   const mailable = $derived(linkRows.filter((_, i) => claims[i] !== 'claimed' && claims[i] !== 'pending').map(({ r }) => r));
+  // Counted over the rows this page tried (stable when a recipient claims afterwards), not over today's eligibility
   const mailCounts = $derived.by(() => {
-    const v = mailable.map((r) => mail[r.commitment]);
-    return { done: v.filter((x) => x === 'sent').length, failed: v.filter((x) => x === 'failed').length, started: v.some(Boolean), all: mailable.length };
+    const v = linkRows.map(({ r }) => mail[r.commitment]).filter(Boolean);
+    const todo = mailable.filter((r) => mail[r.commitment] !== 'sent').length;
+    return { done: v.filter((x) => x === 'sent').length, failed: v.filter((x) => x === 'failed').length, tried: v.length, todo, skipped: linkRows.length - mailable.length };
+  });
+  // The email Zarf sends, for the first recipient still to email (the preview on the right)
+  const zarfMail = $derived.by(() => {
+    const r = mailable.find((x) => mail[x.commitment] !== 'sent') ?? mailable[0];
+    if (!r || !result) return null;
+    const m = claimEmail({ sender: sentFrom ?? account ?? '', email: r.email, amount: r.amount, deadlineNs: (BigInt(Math.floor(deadlineMs)) * 1_000_000n).toString(), link: `${claimHost}/claim/${result.campaignId}/${r.commitment.slice(0, 8)}…`, testnet: TESTNET, origin: claimOrigin });
+    return { email: r.email, m: { subject: m.subject, body: m.text } };
   });
   async function emailRecipients() {
     if (!result || mailBusy) return;
@@ -943,7 +953,7 @@
           <div class="space-y-2 min-w-0">
             <h1 id="done-h" bind:this={stepHeading} tabindex="-1" class="text-2xl md:text-3xl font-light tracking-tight outline-hidden">Your Campaign Is Live</h1>
             <p class="text-sm text-zen-fg-muted tabular-nums">
-              Campaign {result.campaignId} · {formatAmount(BigInt(draft.total))} {UNIT} to {people(draft.recipients.length)}
+              {formatAmount(BigInt(draft.total))} {UNIT} to {people(draft.recipients.length)}
               {#if env.PUBLIC_EXPLORER_TX_URL && result.txHash}<a href="{env.PUBLIC_EXPLORER_TX_URL}{result.txHash}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center align-middle ml-1 text-zen-fg-subtle hover:text-zen-fg" aria-label="View Transaction"><ExternalLink class="w-3.5 h-3.5" aria-hidden="true" /></a>{/if}
             </p>
             {#if claimCounts}
@@ -964,12 +974,14 @@
         {#if mailerUrl && mailable.length}
           <!-- T-039: Zarf emails every link; the per-row mail icon, Copy All and CSV below stay as the manual path -->
           <div class="space-y-2">
-            <ZenButton variant="primary" onclick={emailRecipients} disabled={mailBusy || mailCounts.done === mailCounts.all}>
-              {#snippet iconLeft()}<Mail class="w-4 h-4" />{/snippet}{mailBusy ? 'Emailing…' : mailCounts.done === mailCounts.all ? 'All Emailed' : 'Email All Recipients'}
+            <ZenButton variant="primary" onclick={emailRecipients} disabled={mailBusy || mailCounts.todo === 0}>
+              {#snippet iconLeft()}<Mail class="w-4 h-4" />{/snippet}{mailBusy ? 'Emailing…' : mailCounts.todo === 0 ? 'All Emailed' : mailCounts.failed ? 'Retry Failed Emails' : 'Email All Recipients'}
             </ZenButton>
-            <p class="text-xs text-zen-fg-subtle">Zarf sends the emails through Resend; Resend sees each address and its link.</p>
-            {#if mailCounts.started && !mailBusy}
-              <p class="text-sm text-zen-fg-muted" role="status">Emailed {mailCounts.done} of {mailCounts.all}.{mailCounts.failed ? ` ${mailCounts.failed} did not go out: retry below.` : ''}</p>
+            <p class="text-sm text-zen-fg-muted">Zarf sends the emails through Resend; Resend sees each address and its link.</p>
+            {#if mailCounts.tried && !mailBusy}
+              <p class="text-sm text-zen-fg-muted" role="status">Emailed {mailCounts.done} of {mailCounts.tried}.{mailCounts.failed ? ` ${mailCounts.failed} could not be confirmed: retry below.` : ''}</p>
+            {:else if mailCounts.skipped}
+              <p class="text-sm text-zen-fg-muted">{mailCounts.skipped} already claimed or paying: no email for {mailCounts.skipped === 1 ? 'it' : 'them'}.</p>
             {/if}
           </div>
         {/if}
@@ -994,10 +1006,14 @@
           <ul class="links divide-y divide-zen-border-subtle border-y border-zen-border-subtle">
             {#each linkRows as { r, link }, i (r.commitment)}
               {@const c = claims[i]}
-              <li class="flex items-center gap-2 py-2.5">
-                <EmailMark email={r.email} />
-                <span class="flex-1 min-w-0 truncate text-sm" title={r.email}>{r.email}</span>
-                <span class="shrink-0 whitespace-nowrap text-sm tabular-nums">{formatAmount(BigInt(r.amount))}</span>
+              <!-- Phones: address and amount on one line, status and actions under it -->
+              <li class="flex flex-wrap items-center gap-x-2 gap-y-1 py-2.5">
+                <span class="flex items-center gap-2 min-w-0 basis-full sm:basis-0 sm:flex-1">
+                  <EmailMark email={r.email} />
+                  <span class="flex-1 min-w-0 truncate text-sm" title={r.email}>{r.email}</span>
+                  <span class="shrink-0 whitespace-nowrap text-sm tabular-nums">{formatAmount(BigInt(r.amount))}</span>
+                </span>
+                <span class="ml-auto flex items-center gap-2">
                 {#if c === 'claimed'}<ZenBadge variant="success" size="sm">Claimed</ZenBadge>
                 {:else if c === 'pending'}<ZenBadge variant="info" size="sm">Paying</ZenBadge>
                 {:else if c === 'unclaimed'}<ZenBadge variant="default" size="sm">Waiting</ZenBadge>{/if}
@@ -1013,6 +1029,7 @@
                 <Tooltip text="Email" position="top">
                   <a href={mailtoHref(r, message(r, link))} class="inline-flex items-center justify-center w-8 h-8 rounded-full text-zen-fg-subtle hover:text-zen-fg hover:bg-zen-fg/5" aria-label="Email"><Mail class="w-3.5 h-3.5" aria-hidden="true" /></a>
                 </Tooltip>
+                </span>
               </li>
             {/each}
           </ul>
@@ -1037,10 +1054,25 @@
 
       {#if shown}
         <aside class="w-full min-w-0 lg:flex-1 lg:max-w-2xl lg:sticky lg:top-24 space-y-6" aria-label="The message for {shown.r.email}">
-          {@render nameField()}
-          <div>
-            {@render messageCard(shown.r.email, message(shown.r, `${claimHost}/claim/${result.campaignId}/${shown.r.commitment.slice(0, 8)}…`))}
-          </div>
+          {#if mailerUrl && zarfMail}
+            <!-- T-039: exactly the email the mailer sends (lib/create/claimEmail.ts), from Zarf <claim@send.zarf.to> -->
+            <div>
+              <div class="mb-4 ml-1 flex items-center gap-1.5 text-sm text-zen-fg-muted"><Mail class="w-4 h-4" aria-hidden="true" />What Zarf Emails</div>
+              {@render messageCard(zarfMail.email, zarfMail.m)}
+            </div>
+            <details class="group text-sm">
+              <summary class="inline-flex items-center gap-1.5 py-1 cursor-pointer list-none text-zen-fg-muted hover:text-zen-fg">Share Manually <ChevronDown class="w-3.5 h-3.5 transition-transform group-open:rotate-180" aria-hidden="true" /></summary>
+              <div class="mt-4 space-y-6">
+                {@render nameField()}
+                {@render messageCard(shown.r.email, message(shown.r, `${claimHost}/claim/${result.campaignId}/${shown.r.commitment.slice(0, 8)}…`))}
+              </div>
+            </details>
+          {:else}
+            {@render nameField()}
+            <div>
+              {@render messageCard(shown.r.email, message(shown.r, `${claimHost}/claim/${result.campaignId}/${shown.r.commitment.slice(0, 8)}…`))}
+            </div>
+          {/if}
         </aside>
       {/if}
     </div>

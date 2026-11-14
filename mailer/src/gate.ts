@@ -1,26 +1,42 @@
-// MailGate: one Durable Object per campaign (idFromName(campaign_id)). It holds which commitments already got
-// their email and how many went out, and runs one request at a time, so a double click or a replay never sends
-// twice and a campaign never passes CAP. It stores commitments only, never an email or a salt.
+// MailGate: one Durable Object per campaign (idFromName(campaign_id), canonical decimal). It records, per commitment,
+// whether its email is "pending" (handed to Resend, outcome not yet known) or "sent", and how many slots the campaign
+// used. The whole record is one storage value, so every change is a single atomic put. It stores commitments only,
+// never an email or a salt.
 
 import { CAP } from './notify';
 
-type Storage = { get<T>(k: string): Promise<T | undefined>; put(k: string, v: unknown): Promise<void>; delete(k: string): Promise<boolean> };
+export const PENDING_RETRY_MS = 10 * 60_000; // a pending send older than this may be tried again (same Idempotency-Key)
 
-export async function gateStep(storage: Storage, op: string, commitmentHex: string, cap = CAP): Promise<string> {
-  const key = `c:${commitmentHex}`;
-  const count = (await storage.get<number>('count')) ?? 0;
+type Mark = { s: 'pending' | 'sent'; t: number };
+type Record_ = { count: number; marks: Record<string, Mark> };
+type Storage = { get<T>(k: string): Promise<T | undefined>; put(k: string, v: unknown): Promise<void> };
+
+/**
+ * reserve → 'ok' (send it now) | 'sent' (it went out) | 'pending' (another call is sending it) | 'cap'.
+ * sent → marks it sent. release → frees a slot whose send definitely failed. A pending mark whose send was cut off
+ * (timeout, crash) is retried after PENDING_RETRY_MS with the same Idempotency-Key, so Resend sends it at most once
+ * within its 24-hour window; the slot is not counted twice.
+ */
+export async function gateStep(storage: Storage, op: string, c: string, now: number, cap = CAP): Promise<string> {
+  const g = (await storage.get<Record_>('g')) ?? { count: 0, marks: {} };
+  const m = g.marks[c];
+  let out = 'ok';
   if (op === 'reserve') {
-    if (await storage.get(key)) return 'already';
-    if (count >= cap) return 'cap';
-    await storage.put(key, 1);
-    await storage.put('count', count + 1);
-    return 'ok';
+    if (m?.s === 'sent') return 'sent';
+    if (m?.s === 'pending' && now - m.t < PENDING_RETRY_MS) return 'pending';
+    if (!m && g.count >= cap) return 'cap';
+    if (!m) g.count += 1;
+    g.marks[c] = { s: 'pending', t: now };
+  } else if (op === 'sent' && m) {
+    g.marks[c] = { s: 'sent', t: now };
+  } else if (op === 'release' && m?.s === 'pending') {
+    delete g.marks[c];
+    g.count = Math.max(0, g.count - 1);
+  } else {
+    return out;
   }
-  if (op === 'release' && (await storage.get(key))) {
-    await storage.delete(key);
-    await storage.put('count', Math.max(0, count - 1));
-  }
-  return 'ok';
+  await storage.put('g', g);
+  return out;
 }
 
 export class MailGate {
@@ -31,8 +47,8 @@ export class MailGate {
     const u = new URL(req.url);
     const op = u.searchParams.get('op') ?? '';
     const c = u.searchParams.get('c') ?? '';
-    if (!/^(reserve|release)$/.test(op) || !/^[0-9a-f]{64}$/.test(c)) return Response.json({ result: 'bad' }, { status: 400 });
-    const run = this.queue.then(() => gateStep(this.state.storage, op, c));
+    if (!/^(reserve|sent|release)$/.test(op) || !/^[0-9a-f]{64}$/.test(c)) return Response.json({ result: 'bad' }, { status: 400 });
+    const run = this.queue.then(() => gateStep(this.state.storage, op, c, Date.now()));
     this.queue = run.catch(() => {});
     return Response.json({ result: await run });
   }

@@ -11,7 +11,8 @@
     "NEAR_RPC_URL": "",
     "CLAIM_ORIGINS": "",
     "CLAIM_ORIGIN": "",
-    "MAIL_FROM": ""
+    "MAIL_FROM": "",
+    "TOKEN_ID": ""
   },
   // RESEND_API_KEY: the owner puts it with `wrangler secret put RESEND_API_KEY --env testnet`; never in a file.
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["MailGate"] }],
@@ -27,7 +28,9 @@
         "NEAR_RPC_URL": "https://test.rpc.fastnear.com",
         "CLAIM_ORIGINS": "https://near.zarf.to,https://zarf-near-claim-testnet.sparkling-queen-5e77.workers.dev",
         "CLAIM_ORIGIN": "https://near.zarf.to",
-        "MAIL_FROM": "Zarf <claim@send.zarf.to>"
+        "MAIL_FROM": "Zarf <claim@send.zarf.to>",
+        // Test USDC (the web's PUBLIC_TOKEN_ID): a campaign in any other token gets no email
+        "TOKEN_ID": "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af"
       },
       // One MailGate per campaign: once-per-commitment marks and the per-campaign count (CAP).
       "durable_objects": { "bindings": [{ "name": "GATE", "class_name": "MailGate" }] },
