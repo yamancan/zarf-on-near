@@ -35,19 +35,19 @@
         w-full transition-all duration-[var(--zen-motion-base)]
         text-zen-fg placeholder:text-zen-fg-subtle
         disabled:opacity-50 disabled:cursor-not-allowed
-        focus:outline-none
+        focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--zen-input-focus)]
     `;
 
     const variantClasses = {
         bordered: `
             bg-[oklch(from_var(--zen-bg)_l_c_h_/_0.5)]
-            border-[0.5px] border-zen-border
+            border border-[var(--zen-input-border)]
             rounded-[var(--zen-radius-input)]
             px-4 py-3
-            hover:border-zen-border-strong
+            hover:border-[var(--zen-input-border-hover)]
             hover:bg-zen-bg
             focus:bg-zen-bg
-            focus:border-[oklch(from_var(--zen-primary)_l_c_h_/_0.5)]
+            focus:border-[var(--zen-input-focus)]
         `,
         ghost: `
             bg-transparent border-none px-0
@@ -108,7 +108,7 @@
             {error}
         </div>
     {:else if hint}
-        <div id={hintId} class="pt-1 pl-1 text-xs text-zen-fg-subtle">
+        <div id={hintId} class="pt-1 pl-1 text-xs text-zen-fg-muted">
             {hint}
         </div>
     {/if}

@@ -460,7 +460,7 @@ const S = {
   for (const [name, fn] of Object.entries(S)) {
     if (filter && !new RegExp(filter).test(name)) continue;
     if (!filter && name.startsWith('implicit-')) continue; // needs the flagged server
-    for (const theme of (process.env.THEMES || 'dark,light').split(',')) for (const [w, h] of [[390, 844], [1280, 800]].filter(([w]) => (process.env.WIDTHS || '390,1280').split(',').includes(String(w)))) {
+    for (const theme of (process.env.THEMES || 'dark,light').split(',')) for (const [w, h] of [[360, 780], [390, 844], [1280, 800]].filter(([w]) => (process.env.WIDTHS || '390,1280').split(',').includes(String(w)))) {
       const ctx = await b.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: process.env.CROPS ? 2 : 1, javaScriptEnabled: name !== 'boot', colorScheme: theme });
       await ctx.addInitScript((t) => localStorage.setItem('zarf_theme', t), theme);
       await ctx.route(/chaindefuser/, (r) => r.abort()); // nothing reaches the real bridge: a page that needs it stubs it itself

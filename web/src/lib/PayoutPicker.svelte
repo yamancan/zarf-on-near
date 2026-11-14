@@ -108,6 +108,8 @@
 {:else if !assets}
   <Note tone="pending">Loading chains…</Note>
 {:else}
+  <!-- T-042 (craft finding 3): on testnet say it first, before any chain or address is asked for -->
+  {#if !mainnet}<Note tone="info">Price preview only: nothing is sent on testnet. Payouts to other chains run on mainnet.</Note>{/if}
   <p class="text-xs text-zen-fg-subtle">Very small payouts may be refused when the bridge's cost is above 2%. Claiming to a NEAR account has no such limit.</p>
   <!-- One eyebrow per screen ("Send To" above): the chain and address fields carry their names for screen readers -->
   <span id="chain-l" class="sr-only">Chain</span>
@@ -165,8 +167,6 @@
           {/if}
           {#if mainnet}
             <p class="text-xs text-zen-fg-subtle">If the bridge does not complete the payout by its deadline, it refunds <span class="font-mono">{refundTo}</span> on NEAR (the sender), not this address.</p>
-          {:else}
-            <p class="text-xs text-zen-fg-subtle">Payouts to other chains run on mainnet only. On testnet this is a live mainnet price, and nothing is sent.</p>
           {/if}
         </div>
       </details>

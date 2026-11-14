@@ -25,14 +25,13 @@
     <meta name="twitter:title" content="Send USDC to any email, from any chain." />
     <meta name="twitter:description" content="They claim with Gmail or Google Workspace. The email never goes on chain." />
     <meta name="twitter:image" content="https://near.zarf.to/og.png" />
-    <!-- Theme before first paint, as the main claim app's app.html: the saved choice, else dark (saved). -->
+    <!-- Theme before first paint: the saved choice, else the device's (T-042; nothing saved until the person picks). -->
     <script nonce="%sveltekit.nonce%">
       (function () {
         try {
           var t = localStorage.getItem('zarf_theme');
           if (t !== 'light' && t !== 'dark') {
-            t = 'dark';
-            localStorage.setItem('zarf_theme', 'dark');
+            t = window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
           }
           document.documentElement.setAttribute('data-theme', t === 'light' ? 'paper-porcelain' : 'glass-porcelain');
         } catch (e) {}
