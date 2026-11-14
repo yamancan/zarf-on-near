@@ -1,1 +1,6 @@
-{ "name": "relayer-workerd-test", "main": "entry.ts", "compatibility_date": "2026-06-01" }
+{
+  "name": "relayer-workerd-test", "main": "entry.ts", "compatibility_date": "2026-06-01",
+  "vars": { "NEAR_RPC_URL": "https://starter-rpc.test", "GAS_ACCOUNT_ID": "gas.testnet" },
+  "durable_objects": { "bindings": [{ "name": "STARTER", "class_name": "TestStarterGate" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TestStarterGate"] }]
+}

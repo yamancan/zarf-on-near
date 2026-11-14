@@ -3,9 +3,10 @@
   import { page } from '$app/state';
   import { env } from '$env/dynamic/public';
   import { CLAIMED_NO_RECORD, EXPLORER_LABEL, claimStartedHere, holdPage, claimedAt, clearAttempt, confirmRemembered, isImplicitAccount, loadAttempt, loadReceipt, middle, saveReceipt, settleReceipt, shownAmount, signedIn, type Receipt } from '$lib/claim';
+  import { clearPendingClaim, loadPendingClaim, recoverPendingClaim, savePendingClaim } from '$lib/claim-recovery';
   import { accountExplorerUrl, TESTNET, UNIT } from '$lib/network';
   import ClaimRecord from '$lib/ClaimRecord.svelte';
-  import { canRetry, ClaimError, describeError, errorCode, failureHeading, getClaimState, isUnmapped, relayAndSettle, requestSignature, starterLine, submitClaim } from '$lib/services';
+  import { canRetry, ClaimError, describeError, errorCode, failureHeading, getClaimState, isUnmapped, relayAndSettle, relayAnswerLost, requestSignature, starterLine, submitClaim } from '$lib/services';
   import { formatAmount } from '$lib/create/recipients';
   import { AlertTriangle, ArrowUpRight, Check, CheckCircle2, ChevronDown, Clock, ExternalLink, Loader2, Undo2 } from 'lucide-svelte';
   import AmountPanel from '$lib/AmountPanel.svelte';
@@ -17,7 +18,7 @@
   import Note from '$lib/Note.svelte';
   import ZenButton from '$lib/zarf-kit/components/ui/ZenButton.svelte';
   import ZenCard from '$lib/zarf-kit/components/ui/ZenCard.svelte';
-  import { describeStatus, getStatus, loadPayout, nextStep, notReturnedYet, savePayout, submitDeposit, type StatusView } from '$lib/intents';
+  import { describeStatus, getStatus, nextStep, notReturnedYet, submitDeposit, type StatusView } from '$lib/intents';
   import BridgeDetails from '$lib/BridgeDetails.svelte';
   import { passkeyOffered } from '$lib/passkey';
   import PasskeyAccount from '$lib/PasskeyAccount.svelte';
@@ -39,18 +40,23 @@
   let starterNear = $state(''); // the relayer's testnet starter NEAR, when it sent some with this claim
   const explorer = $derived(env.PUBLIC_EXPLORER_TX_URL && txHash ? `${env.PUBLIC_EXPLORER_TX_URL}${txHash}` : '');
   // A reload after the NEAR claim has no sign-in left, but the payout it started can still be followed.
-  const resumed = ok ? null : loadPayout(contract, campaignId, commitmentId);
-  const payout = ok ? attempt!.intents : resumed;
-  const depositAddress = ok ? attempt!.destination : (resumed?.depositAddress ?? '');
+  const network = TESTNET ? 'testnet' : 'mainnet';
+  const pending = loadPendingClaim(network, contract, campaignId, commitmentId);
+  const remembered = loadReceipt(contract, campaignId, commitmentId);
+  const payout = pending?.chainName ? { chainName: pending.chainName, recipient: pending.destination, refundTo: pending.refundTo! } : ok ? attempt!.intents : null;
+  const depositAddress = pending?.depositAddress ?? (ok ? attempt!.destination : '');
+  const claimAmount = pending?.amount ?? attempt?.amount ?? '0';
+  const claimDestination = pending?.destination ?? attempt?.destination ?? '';
+  const claimPasskey = pending?.passkey ?? attempt?.passkey;
   // A reload or another tab after a claim: what this browser remembers (claim.ts saveReceipt), shown only once
   // the chain says this claim is claimed (security review m1).
-  const remembered = ok || resumed ? null : loadReceipt(contract, campaignId, commitmentId);
   let stored = $state<Receipt | null>(null);
   let recall = $state<'checking' | 'error' | null>(remembered ? 'checking' : null);
   async function verifyRemembered() {
     recall = 'checking';
     try {
       stored = await confirmRemembered(remembered, () => getClaimState(env.PUBLIC_NEAR_RPC_URL, contract, campaignId, commitmentId));
+      if (stored) clearPendingClaim(network, contract, campaignId, commitmentId);
       recall = null;
     } catch {
       recall = 'error';
@@ -73,7 +79,7 @@
           bridge = s;
           checkedAt = Date.now();
           // Every answer is remembered with its time; "paid" only after SUCCESS (describeStatus).
-          settleReceipt(contract, campaignId, commitmentId, bridgeView!.outcome, s.amountOutFormatted);
+          settleReceipt(contract, campaignId, commitmentId, bridgeView!.outcome, s.amountOutFormatted, undefined, Date.now(), s);
         }
         if (bridgeView?.done) return;
       } catch {
@@ -87,16 +93,22 @@
   let checkedAt = $state(0); // when the bridge last answered
   let final = $state(false); // the claim can never succeed from this link: no way back to it
   const working = $derived(step === 'checking' || step === 'paying' || step === 'settling');
-  $effect(() => (ok && working ? holdPage(window) : undefined));
+  $effect(() => ((ok || pending) && working ? holdPage(window) : undefined));
+
+  async function recover() {
+    if (!pending || working && step !== 'checking') return;
+    step = 'settling';
+    txHash = pending.txHash;
+    const result = await recoverPendingClaim(network, contract, campaignId, commitmentId, pending,
+      () => getClaimState(env.PUBLIC_NEAR_RPC_URL, contract, campaignId, commitmentId));
+    stored = result.receipt;
+    step = result.state === 'claimed' ? 'done' : 'unsettled';
+    if (result.state === 'claimed' && canGoBack) clearAttempt();
+  }
 
   onMount(async () => {
     if (remembered) return verifyRemembered();
-    if (resumed) {
-      step = 'done';
-      txHash = resumed.txHash;
-      void followPayout(resumed.depositAddress);
-      return;
-    }
+    if (pending) { signedIn.idToken = null; return recover(); }
     if (!ok || !attempt) return;
     signedIn.idToken = null; // single use from here on
     try {
@@ -114,10 +126,17 @@
         salt: attempt.salt,
         ...(attempt.intents ? { intents: { destination_asset: attempt.intents.assetId, recipient: attempt.intents.recipient } } : {}),
       });
+      savePendingClaim(network, contract, attempt); // durable before the request can leave this tab
       step = 'paying';
       // A reverted transfer (409 E115) and other refusals throw; a lost answer follows the chain (relayAndSettle).
       const settled = await relayAndSettle(
-        () => submitClaim(env.PUBLIC_RELAYER_URL, args).then((r) => ((txHash = r.txHash), (starterNear = r.starterNear ?? ''), (step = 'settling'), r)),
+        () => submitClaim(env.PUBLIC_RELAYER_URL, args).then((r) => {
+          txHash = r.txHash;
+          starterNear = r.starterNear ?? '';
+          step = 'settling';
+          try { savePendingClaim(network, contract, attempt, txHash); } catch { /* the pre-submit record still recovers without a hash */ }
+          return r;
+        }),
         () => getClaimState(env.PUBLIC_NEAR_RPC_URL, env.PUBLIC_CONTRACT_ID, attempt.campaign, attempt.commitment),
       );
       const state = settled.state;
@@ -128,17 +147,20 @@
           amount: attempt.amount, txHash, at: Date.now(), destination: attempt.intents?.recipient ?? attempt.destination, ...(attempt.passkey ? { passkey: true as const } : {}),
           ...(attempt.intents ? { chainName: attempt.intents.chainName, bridge: 'in-transit' as const, depositAddress, refundTo: attempt.intents.refundTo } : {}),
         });
+        if (loadReceipt(contract, attempt.campaign, attempt.commitment)) clearPendingClaim(network, contract, attempt.campaign, attempt.commitment);
         if (attempt.intents) {
-          const i = attempt.intents;
-          savePayout(contract, attempt.campaign, attempt.commitment, {
-            depositAddress, txHash, chainName: i.chainName, recipient: i.recipient, refundTo: i.refundTo, amountOutFormatted: i.amountOutFormatted, amount: attempt.amount,
-          });
           void followPayout(depositAddress);
         }
       } else {
-        step = state === 'unclaimed' ? 'reverted' : 'unsettled'; // the attempt stays, so a retry keeps the salt
+        // A view can lag a submitted tx; only the relayer's explicit refusal proves it did not pay.
+        step = 'unsettled';
       }
     } catch (e) {
+      if ((relayAnswerLost(e) || e instanceof ClaimError && e.code === 'E123_CLAIM_PENDING') && loadPendingClaim(network, contract, campaignId, commitmentId)) {
+        step = 'unsettled';
+        return;
+      }
+      if (!relayAnswerLost(e)) clearPendingClaim(network, contract, campaignId, commitmentId);
       // The relayer saw claim_reverted: same state as a reopened claim, with the retry link.
       if (e instanceof ClaimError && e.code === 'E115_TOKEN_TRANSFER_FAILED') step = 'reverted';
       else {
@@ -216,7 +238,9 @@
     {@render back()}
   {:else if step === 'unsettled'}
     <p class="text-sm text-zen-fg-muted max-w-xs">Sent, not settled yet. No need to claim again.</p>
+    <p class="text-xs text-zen-fg-muted max-w-xs">If it stays here, ask the sender to check this claim.</p>
     {#if explorer}{@render explorerButton(explorer, 'View Transaction')}{/if}
+    <ZenButton variant="secondary" onclick={() => location.reload()}>Check Again</ZenButton>
   {:else if step === 'failed' && failureHeading(failCode).muted}
     <p class="text-sm text-zen-fg-muted max-w-xs" role="status">{error}</p>
     {@render back()}
@@ -291,7 +315,7 @@
         {@render nearDone(stored.amount, stored.destination, stored.txHash, '', !!stored.passkey)}
       {:else if stored}
         <ClaimRecord r={stored} amount={stored.amount} {contract} campaign={campaignId} commitment={commitmentId} />
-      {:else if !resumed && (!ok || !attempt)}
+      {:else if !pending && (!ok || !attempt)}
         {#if claimStartedHere(attempt, campaignId, commitmentId)}
           <!-- Reloaded mid-claim: the sign-in was in memory only; the claim page reads where it stands on chain -->
           <h1 class="text-xl font-bold">Page Reloaded</h1>
@@ -313,7 +337,7 @@
         {@const refunding = outcome === 'refunding'}
         {@const lost = outcome === 'failed'}
         {@const waiting = stalled && outcome === 'in-transit'}
-        {@const shown = shownAmount({ chainName: payout.chainName, bridge: outcome, amountOut: bridge?.amountOutFormatted }, formatAmount(BigInt(ok ? attempt!.amount : (resumed?.amount ?? '0'))), UNIT)}
+        {@const shown = shownAmount({ chainName: payout.chainName, bridge: outcome, amountOut: bridge?.amountOutFormatted }, formatAmount(BigInt(claimAmount)), UNIT)}
         {#if step === 'done' || working}
           {#if arrived}
             <!-- no disc: "Arrived on …" says it -->
@@ -367,18 +391,18 @@
             <BridgeDetails {depositAddress} lines={[lost && checkedAt ? notReturnedYet(payout.refundTo, claimedAt(checkedAt)) : '', bridge?.refundReason ? `The bridge said: ${bridge.refundReason}` : '']} />
           {/if}
         {/if}
-      {:else if attempt}
+      {:else if attempt || pending}
         {#if step === 'done'}
-          {@render nearDone(attempt.amount, attempt.destination, txHash, starterNear, !!attempt.passkey)}
+          {@render nearDone(claimAmount, claimDestination, txHash, starterNear, !!claimPasskey)}
         {:else if working}
           <div class="w-full text-left space-y-8" in:swapIn>
             <div class="space-y-1">
               <h1 class="text-xl font-semibold">{step === 'checking' ? 'Checking Claim…' : 'Sending Your Tokens…'}</h1>
               <p class="text-sm text-zen-fg-muted font-light flex items-center gap-1.5">
-                <span class="text-zen-fg-subtle">To</span><Avatar name={attempt.destination} /><span class="font-mono truncate" title={attempt.destination}>{middle(attempt.destination, 8)}</span>
+                <span class="text-zen-fg-subtle">To</span><Avatar name={claimDestination} /><span class="font-mono truncate" title={claimDestination}>{middle(claimDestination, 8)}</span>
               </p>
             </div>
-            <AmountPanel label="Claiming" value={formatAmount(BigInt(attempt.amount))} unit={UNIT} />
+            <AmountPanel label="Claiming" value={formatAmount(BigInt(claimAmount))} unit={UNIT} />
             <Steps
               label="Claiming"
               rows={[

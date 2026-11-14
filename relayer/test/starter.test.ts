@@ -22,7 +22,13 @@ const memKv = (): KvLike & { m: Map<string, string> } => {
 /** Durable Object storage as StarterGate sees it (absent keys read as undefined). */
 const memStorage = () => {
   const m = new Map<string, unknown>();
-  return { m, get: async <T>(k: string) => m.get(k) as T | undefined, put: async (k: string, v: unknown) => void m.set(k, v) };
+  let alarm: number | null = null;
+  return { m, get: async <T>(k: string) => structuredClone(m.get(k)) as T | undefined,
+    put: async (k: string, v: unknown) => void m.set(k, structuredClone(v)),
+    delete: async (k: string) => m.delete(k),
+    list: async <T>({ prefix }: { prefix: string }) => new Map([...m].filter(([k]) => k.startsWith(prefix))) as Map<string, T>,
+    getAlarm: async () => alarm, setAlarm: async (at: number) => { alarm = at; }, deleteAlarm: async () => { alarm = null; } };
+
 };
 
 /** Accounts: id → yoctoNEAR balance; missing ids answer UNKNOWN_ACCOUNT, as the RPC does. */
@@ -107,10 +113,61 @@ describe('sendStarter', () => {
     expect(t.sent).toHaveLength(0);
     expect(t.kv.m.size).toBe(0);
   });
-  it('a transfer that fails on chain is reported as failed, not sent, and is not retried', async () => {
-    const t = deps({}, memKv(), undefined, 'testnet', { Failure: { ActionError: {} } });
-    expect(await sendStarter(IMPLICIT, t.d)).toMatchObject({ result: 'failed' });
-    expect(await sendStarter(IMPLICIT, t.d)).toEqual({ result: 'already' });
+  it('a failed transfer stays retryable and a later successful transfer is remembered', async () => {
+    const kv = memKv();
+    const failed = deps({}, kv, undefined, 'testnet', { Failure: { ActionError: {} } });
+    expect(await sendStarter(IMPLICIT, failed.d)).toMatchObject({ result: 'failed' });
+    const retry = deps({}, kv);
+    expect(await sendStarter(IMPLICIT, retry.d)).toMatchObject({ result: 'sent' });
+    expect(await sendStarter(IMPLICIT, retry.d)).toEqual({ result: 'already' });
+    expect(decodeSignedTransaction(retry.sent[0]).transaction.nonce).toBe(11n);
+    expect(retry.sent).toHaveLength(1);
+  });
+
+  it('reconciles a timed-out transfer after restart without sending a second payment', async () => {
+    const t = deps({});
+    const original = t.d.rpc;
+    t.d.rpc = { call: async (method, params) => {
+      if (method === 'send_tx') {
+        await original.call(method, params);
+        throw new RpcError({ name: 'TIMEOUT_ERROR' });
+      }
+      return original.call(method, params);
+    } };
+    await expect(sendStarter(IMPLICIT, t.d)).rejects.toBeInstanceOf(RpcError);
+    const pending = decodeSignedTransaction(t.sent[0]).transaction;
+    const retry = deps({}, t.kv);
+    const retryRpc = retry.d.rpc;
+    retry.d.rpc = { call: async (method, params) => {
+      if (method === 'tx') {
+        expect(params).toMatchObject({ sender_account_id: GAS, tx_hash: expect.any(String) });
+        return { status: { SuccessValue: '' } } as never;
+      }
+      return retryRpc.call(method, params);
+    } };
+    expect(await sendStarter(IMPLICIT, retry.d)).toMatchObject({ result: 'sent' });
+    expect(retry.sent).toHaveLength(0);
+    expect(await sendStarter(IMPLICIT, retry.d)).toEqual({ result: 'already' });
+    expect(t.kv.m.get('nonce')).toBe(pending.nonce.toString());
+  });
+
+  it('an unresolved transfer remains pending and never sends another payment', async () => {
+    const t = deps({});
+    const original = t.d.rpc;
+    t.d.rpc = { call: async (method, params) => {
+      if (method === 'send_tx') {
+        await original.call(method, params);
+        throw new RpcError({ name: 'TIMEOUT_ERROR' });
+      }
+      return original.call(method, params);
+    } };
+    await expect(sendStarter(IMPLICIT, t.d)).rejects.toBeInstanceOf(RpcError);
+    t.d.rpc = { call: async (method, params) => {
+      if (method === 'tx') throw new RpcError({ name: 'UNKNOWN_TRANSACTION' });
+      return original.call(method, params);
+    } };
+    expect(await sendStarter(IMPLICIT, t.d)).toMatchObject({ result: 'pending' });
+    expect(t.sent).toHaveLength(1);
   });
   it('never reuses its own last nonce when the RPC shows an older one', async () => {
     const t = deps({});
@@ -139,9 +196,15 @@ describe('StarterGate: one send at a time', () => {
     });
     return sent;
   };
-  const gate = (storage = memStorage()) => ({ storage, g: new StarterGate({ storage }, { NEAR_RPC_URL: 'https://rpc.test', GAS_ACCOUNT_ID: GAS, GAS_KEY: OTHER }) });
+  const gate = (storage = memStorage()) => ({ storage, g: new StarterGate({ storage }, { NEAR_RPC_URL: 'https://rpc.test', GAS_ACCOUNT_ID: GAS, GAS_KEY: OTHER, STARTER_NEAR: 'on', NETWORK: 'testnet', CONTRACT_ID: vectors.context.contract_id, RELAYER_ACCOUNT_ID: 'relayer.testnet', RELAYER_KEY: SECRET }) });
   const ask = (g: StarterGate, d: string) => g.fetch(new Request(`https://starter/?d=${d}`)).then((r) => r.json() as Promise<{ result: string }>);
 
+  it('the legacy internal GET path cannot bypass an absent starter enable flag', async () => {
+    const sent = chain();
+    const g = new StarterGate({ storage: memStorage() }, { NEAR_RPC_URL: 'https://rpc.test', GAS_ACCOUNT_ID: GAS, GAS_KEY: OTHER, NETWORK: 'testnet', CONTRACT_ID: vectors.context.contract_id, RELAYER_ACCOUNT_ID: 'relayer.testnet', RELAYER_KEY: SECRET });
+    expect(await ask(g, IMPLICIT)).toEqual({ result: 'error' });
+    expect(sent).toHaveLength(0);
+  });
   it('two concurrent claims to the same new account: one transfer, the other is told "already"', async () => {
     const sent = chain();
     const { g } = gate();
@@ -196,17 +259,20 @@ describe('worker: after a paid claim only', () => {
   const { context, claims } = vectors;
   const valid = claims.valid[0].call_args;
   const allow = { limit: async () => ({ success: true }) };
-  const env = (over: Record<string, unknown> = {}) => {
+  const env = (over: Record<string, unknown> = {}, storage = memStorage()) => {
     const e: Record<string, unknown> = {
       NETWORK: context.network, CONTRACT_ID: context.contract_id, RELAYER_ACCOUNT_ID: 'relayer.testnet', NEAR_RPC_URL: 'https://rpc.test',
       VERIFIER_SIGNERS: vectors.keys.signer, CLAIM_ORIGINS: '', RELAYER_KEY: SECRET, PER_IP: allow, PER_COMMITMENT: allow,
       STARTER_NEAR: 'on', GAS_ACCOUNT_ID: GAS, GAS_KEY: OTHER, ...over,
     };
-    const g = new StarterGate({ storage: memStorage() }, e as never); // reads the same env, as the binding would
-    return { STARTER: { idFromName: (n: string) => n, get: () => g }, ...e };
+    const g = new StarterGate({ storage }, e as never); // reads the same env, as the binding would
+    return { STARTER: { idFromName: (n: string) => n, get: (): Pick<StarterGate, 'fetch'> => g }, ...e };
   };
   // The relayer's RPC: claim-only key, the claim pays; the destination exists with 0 NEAR.
   const net = (paid = true) => {
+    let settlement: { event: string; commitment: string; executor: string } | undefined;
+    let transferFails = false;
+
     const transfers: string[] = [];
     const signers: string[] = [];
     vi.stubGlobal('fetch', async (_u: unknown, init: RequestInit) => {
@@ -218,23 +284,30 @@ describe('worker: after a paid claim only', () => {
         return ok({ nonce: 5, block_hash: BLOCK, permission: relayer ? { FunctionCall: { receiver_id: context.contract_id, method_names: ['claim'], allowance: null } } : 'FullAccess' });
       }
       if (method === 'query' && params.request_type === 'view_account') {
-        if (params.account_id === GAS) return ok({ amount: (3n * NEAR).toString() });
+        if (params.account_id === GAS || params.account_id === 'relayer.testnet') return ok({ amount: (3n * NEAR).toString() });
         if (params.account_id === valid.destination) return ok({ amount: '0' }); // exists, holds no NEAR
         return Response.json({ jsonrpc: '2.0', id: 1, error: { name: 'HANDLER_ERROR', cause: { name: 'UNKNOWN_ACCOUNT' } } });
       }
+      if (method === 'tx') {
+        if (!settlement) return Response.json({ error: { name: 'UNKNOWN_TRANSACTION' } });
+        if (settlement.event === 'claim_failed') return ok({ status: { Failure: {} } });
+        const log = `EVENT_JSON:${JSON.stringify({ standard: 'zarf-near', event: settlement.event, data: [{ commitment: settlement.commitment }] })}`;
+        return ok({ status: { SuccessValue: '' }, receipts_outcome: [{ outcome: { executor_id: settlement.executor, logs: [log] } }] });
+      }
       if (method === 'status') return ok({ chain_id: 'testnet' });
+      if (method === 'query' && params.method_name === 'get_campaign') return view(vectors.campaigns.main);
       if (method === 'query' && params.method_name === 'get_config') return view({ token_ids: ['usdc.testnet'] });
       if (method === 'query' && params.method_name === 'required_claim_gas') return view('150000000000000');
       if (method === 'query' && params.method_name === 'claim_state') return view('unclaimed');
       if (method === 'send_tx') {
         const tx = decodeSignedTransaction(Uint8Array.from(atob(params.signed_tx_base64), (c) => c.charCodeAt(0))).transaction;
-        if (tx.signerId === GAS) return (transfers.push(tx.receiverId), signers.push(base58Encode(Uint8Array.from((tx.publicKey as unknown as { ed25519Key: { data: number[] } }).ed25519Key.data))), ok({ status: { SuccessValue: '' } }));
+        if (tx.actions.some((action) => action.transfer)) return (transfers.push(tx.receiverId), signers.push(base58Encode(Uint8Array.from((tx.publicKey as unknown as { ed25519Key: { data: number[] } }).ed25519Key.data))), ok({ status: transferFails ? { Failure: {} } : { SuccessValue: '' } }));
         const ev = `EVENT_JSON:${JSON.stringify({ standard: 'zarf-near', version: '1.0.0', event: paid ? 'claim_paid' : 'claim_started', data: [{ campaign_id: '7', commitment: valid.commitment }] })}`;
         return ok({ status: { SuccessValue: '' }, receipts_outcome: [{ outcome: { executor_id: context.contract_id, logs: [ev] } }] });
       }
       throw new Error(`unexpected ${method}`);
     });
-    return Object.assign(transfers, { signers });
+    return Object.assign(transfers, { signers, settle: (event: string, commitment = valid.commitment, executor = context.contract_id) => { settlement = { event, commitment, executor }; }, failTransfer: (value: boolean) => { transferFails = value; } });
   };
   const post = async (e: Record<string, unknown>) => {
     vi.useFakeTimers({ now: Number(BigInt(context.now_ns) / 1_000_000n), toFake: ['Date'] });
@@ -242,6 +315,117 @@ describe('worker: after a paid claim only', () => {
     const res = await worker.fetch(new Request('https://r.test/claim', { method: 'POST', body: JSON.stringify(valid) }), e as never);
     return (await res.json()) as Record<string, unknown>;
   };
+
+  it('a submitted claim is paid later and gets starter NEAR after the Durable Object restarts', async () => {
+    const transfers = net(false);
+    const storage = memStorage();
+    const e = env({}, storage);
+    expect(await post(e)).toMatchObject({ status: 'submitted' });
+    expect([...transfers]).toEqual([]);
+    expect(await storage.getAlarm()).toEqual(expect.any(Number));
+    transfers.settle('claim_paid');
+    vi.setSystemTime(Date.now() + 2_000);
+    await new StarterGate({ storage }, e as never).alarm();
+    expect([...transfers]).toEqual([valid.destination]);
+    await new StarterGate({ storage }, e as never).alarm();
+    expect([...transfers]).toEqual([valid.destination]);
+  });
+
+  it.each(['claim_started', 'claim_reverted', 'claim_failed', 'wrong_commitment', 'wrong_contract'])('never tops up from an unconfirmed or unrelated receipt: %s', async (event) => {
+    const transfers = net(false);
+    const storage = memStorage();
+    const e = env({}, storage);
+    await post(e);
+    expect(await storage.getAlarm()).toEqual(expect.any(Number));
+    transfers.settle(event.startsWith('wrong') ? 'claim_paid' : event,
+      event === 'wrong_commitment' ? '00'.repeat(32) : valid.commitment,
+      event === 'wrong_contract' ? 'evil.testnet' : context.contract_id);
+    vi.setSystemTime(Date.now() + 2_000);
+    await new StarterGate({ storage }, e as never).alarm();
+    expect([...transfers]).toEqual([]);
+    if (event === 'claim_reverted' || event === 'claim_failed') expect(await storage.getAlarm()).toBeNull();
+    else expect(await storage.getAlarm()).toBeGreaterThan(Date.now());
+  });
+
+  it('retries a confirmed failed starter send without another browser request', async () => {
+    const transfers = net();
+    transfers.failTransfer(true);
+    const storage = memStorage();
+    const e = env({}, storage);
+    expect(await post(e)).toMatchObject({ status: 'paid' });
+    expect([...transfers]).toEqual([valid.destination]);
+    expect(await storage.getAlarm()).toEqual(expect.any(Number));
+    transfers.failTransfer(false);
+    vi.setSystemTime(Date.now() + 120_000);
+    await new StarterGate({ storage }, e as never).alarm();
+    expect([...transfers]).toEqual([valid.destination, valid.destination]);
+    expect(await storage.getAlarm()).toBeNull();
+  });
+
+  it.each([{ name: 'disabled', over: { STARTER_NEAR: '' } }, { name: 'mainnet', over: { NETWORK: 'mainnet' } },
+    { name: 'shared account', over: { GAS_ACCOUNT_ID: 'relayer.testnet' } }, { name: 'shared key', over: { GAS_KEY: SECRET } }])('honors disabled or unsafe configuration when a persisted claim settles: $name', async ({ over }) => {
+    const transfers = net(false);
+    const storage = memStorage();
+    const e = env({}, storage);
+    await post(e);
+    transfers.settle('claim_paid');
+    vi.setSystemTime(Date.now() + 2_000);
+    await new StarterGate({ storage }, { ...e, ...over } as never).alarm();
+    expect([...transfers]).toEqual([]);
+    expect(await storage.getAlarm()).toBeGreaterThan(Date.now());
+    vi.setSystemTime(Date.now() + 120_000);
+    await new StarterGate({ storage }, e as never).alarm();
+    expect([...transfers]).toEqual([valid.destination]);
+  });
+
+  it.each(['storage', 'transport'])('retries an initial %s enqueue failure without losing the late starter', async (failure) => {
+    const transfers = net(false);
+    const storage = memStorage();
+    const put = storage.put;
+    let failed = false;
+    if (failure === 'storage') storage.put = async (key, value) => {
+      if (!failed && key.startsWith('claim:')) { failed = true; throw new Error('storage unavailable'); }
+      return put(key, value);
+    };
+    const e = env({}, storage);
+    const original = e.STARTER;
+    let gets = 0;
+    e.STARTER = { idFromName: original.idFromName, get: () => {
+      gets++;
+      if (failure === 'transport' && gets === 1) return { fetch: async () => { throw new Error('broken stub'); } };
+      return original.get();
+    } };
+    expect(await post(e)).toMatchObject({ status: 'submitted' });
+    transfers.settle('claim_paid');
+    vi.setSystemTime(Date.now() + 2_000);
+    await new StarterGate({ storage }, e as never).alarm();
+    expect([...transfers]).toEqual([valid.destination]);
+  });
+
+  it('exhausts three enqueue attempts with a fixed tag while preserving the claim response', async () => {
+    const transfers = net(false);
+    let attempts = 0;
+    const e = env({ STARTER: { idFromName: (name: string) => name, get: () => ({ fetch: async () => {
+      attempts++;
+      return Response.json({ result: 'error' });
+    } }) } });
+    expect(await post(e)).toMatchObject({ status: 'submitted' });
+    expect(attempts).toBe(3);
+    expect(console.log).toHaveBeenCalledWith('starter_enqueue_failed');
+    expect([...transfers]).toEqual([]);
+  });
+
+  it('expires an unresolved claim instead of polling forever', async () => {
+    const transfers = net(false);
+    const storage = memStorage();
+    const e = env({}, storage);
+    await post(e);
+    expect(await storage.getAlarm()).toEqual(expect.any(Number));
+    vi.setSystemTime(Date.now() + 25 * 60 * 60 * 1_000);
+    await new StarterGate({ storage }, e as never).alarm();
+    expect([...transfers]).toEqual([]);
+    expect(await storage.getAlarm()).toBeNull();
+  });
 
   it('a paid claim to an account with no NEAR says the starter NEAR was sent', async () => {
     const transfers = net();

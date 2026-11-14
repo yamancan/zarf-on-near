@@ -1,3 +1,5 @@
+export { FaucetQuota } from './quota-object';
+import type { QuotaNamespace } from './quota';
 import { httpRpc, stubCreator, testnetCreator, viewCall, type CampaignCreator } from './creator';
 import { handleFaucet } from './faucet';
 import type { KvLike } from './limits';
@@ -24,6 +26,8 @@ export interface Env {
   TURNSTILE_SECRET?: string; // secret
   PROXY_KEY?: string; // secret shared with proxy/ (near.zarf.to): marks the visitor IP it forwards as trusted
   FAUCET_KV: KvLike;
+  QUOTA: QuotaNamespace;
+  QUOTA_START_DATE: string;
   PER_IP?: RateLimiter; // Workers rate-limit binding: a burst guard in front of Turnstile and the chain
 }
 
@@ -133,11 +137,13 @@ export default {
     const lifetimeS = positive(env.LIFETIME_S), perIp = positive(env.PER_IP_PER_DAY);
     const perEmail = positive(env.PER_EMAIL_PER_DAY), cap = positive(env.DAILY_CAP);
     const local = LOCAL_HOSTS.includes(url.hostname);
+    const quotaStartMs = Date.parse(`${env.QUOTA_START_DATE}T00:00:00Z`);
     const made = env.NETWORK === 'testnet' ? makeCreator(env, url.hostname) : null;
     // Test keys always pass, so off localhost they would switch the human check off.
     const testKeys = isTurnstileTestKey(env.TURNSTILE_SECRET ?? '') || isTurnstileTestKey(env.TURNSTILE_SITE_KEY ?? '');
     if (!made || !amount || !lifetimeS || !perIp || !perEmail || !cap || !env.LIMIT_KEY || !/^https:\/\//.test(env.CLAIM_HOST ?? '') ||
-        !env.TURNSTILE_SECRET || !env.TURNSTILE_SITE_KEY || (testKeys && !local) || !env.PER_IP) {
+        !env.TURNSTILE_SECRET || !env.TURNSTILE_SITE_KEY || (testKeys && !local) || !env.PER_IP || !env.QUOTA || !/^\d{4}-\d{2}-\d{2}$/.test(env.QUOTA_START_DATE ?? '') ||
+        !Number.isFinite(quotaStartMs) || new Date(quotaStartMs).toISOString().slice(0, 10) !== env.QUOTA_START_DATE) {
       return json({ error: 'FAUCET_MISCONFIGURED' }, 500);
     }
     if (env.CREATOR === 'testnet') {
@@ -163,7 +169,7 @@ export default {
     if (human === 'unavailable') return json({ error: 'TURNSTILE_UNAVAILABLE' }, 503);
     if (human === 'failed') return json({ error: 'TURNSTILE_FAILED' }, 403);
     const { status, body } = await handleFaucet(input, ip, {
-      claimHost: env.CLAIM_HOST, amount, lifetimeS, limitKey: env.LIMIT_KEY, kv: env.FAUCET_KV, creator: await made,
+      claimHost: env.CLAIM_HOST, amount, lifetimeS, limitKey: env.LIMIT_KEY, kv: env.FAUCET_KV, quota: env.QUOTA, quotaStartDate: env.QUOTA_START_DATE, creator: await made,
       limits: { perIpPerDay: perIp, perEmailPerDay: perEmail, dailyCap: cap },
     });
     return json(body, status);

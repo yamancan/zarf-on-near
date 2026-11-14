@@ -2,7 +2,7 @@
 // origin is mainnet NEAR USDC. The browser calls 1Click directly (CORS *, no key); the verifier
 // re-reads the quote before it signs (verifier/src/intents.ts).
 
-import { saveReceipt, type BridgeOutcome, type Receipt } from './claim';
+import { safeBridgeStatus, saveReceipt, type BridgeOutcome, type Receipt } from './claim';
 import { PAYOUT_CHAINS, type Fetch, type PayoutChain } from './chains';
 
 export const ONECLICK_API = 'https://1click.chaindefuser.com';
@@ -221,7 +221,7 @@ export async function recheckReceipt(
   const s = await getStatus(r.depositAddress, fetchFn);
   if (!s) return { r, done: false };
   const v = describeStatus(s, r.chainName, r.refundTo ?? 'the sender');
-  const next: Receipt = { ...r, bridge: v.outcome, checkedAt: now, ...(v.outcome === 'paid' && s.amountOutFormatted && /^\d+(\.\d+)?$/.test(s.amountOutFormatted) ? { amountOut: s.amountOutFormatted } : {}) };
+  const next: Receipt = { ...r, bridge: v.outcome, bridgeStatus: safeBridgeStatus(s), checkedAt: now, ...(v.outcome === 'paid' && s.amountOutFormatted && /^\d+(\.\d+)?$/.test(s.amountOutFormatted) ? { amountOut: s.amountOutFormatted } : {}) };
   saveReceipt(contract, campaign, commitment, next, store, now);
   return { r: next, done: v.done };
 }

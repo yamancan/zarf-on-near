@@ -9,6 +9,8 @@
   // Testnet only: the worker refuses mainnet ids, a non-testnet RPC and Turnstile test keys off localhost.
   "vars": {
     "NETWORK": "testnet",
+    // REQUIRED at rollout: next UTC date (YYYY-MM-DD), see QUOTA-ROLLOUT.md. Empty fails closed.
+    "QUOTA_START_DATE": "",
     // Links name near.zarf.to (proxy/, T-029); /try is also served there, so Turnstile accepts that host too.
     "CLAIM_HOST": "https://near.zarf.to",
     "CONTRACT_ID": "zarf-near-1112.testnet",
@@ -27,5 +29,7 @@
   // FAUCET_SENDER_KEY, LIMIT_KEY, TURNSTILE_SECRET.
   // Burst guard per IP before Turnstile and the chain (namespace ids 2001-2003 are the relayer's and verifier's).
   "ratelimits": [{ "name": "PER_IP", "namespace_id": "2004", "simple": { "limit": 3, "period": 10 } }],
+  "durable_objects": { "bindings": [{ "name": "QUOTA", "class_name": "FaucetQuota" }] },
+  "migrations": [{ "tag": "faucet-quota-v1", "new_sqlite_classes": ["FaucetQuota"] }],
   "kv_namespaces": [{ "binding": "FAUCET_KV", "id": "4c8e6091866e45239c9de5144c334a3f" }]
 }

@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
+  import { loadPendingClaim } from '$lib/claim-recovery';
   import { page } from '$app/state';
   import { env } from '$env/dynamic/public';
   import {
@@ -156,6 +158,10 @@
     if (link && linkOk) {
       typed = typedBefore(prev, campaign, commitment); // "Back to Claim" after a failed sign-in keeps the account
       saveAttempt({ campaign, commitment, ...link, destination: '', attemptId: '' });
+    }
+    if (linkOk && loadPendingClaim(TESTNET ? 'testnet' : 'mainnet', env.PUBLIC_CONTRACT_ID ?? '', campaign, commitment)) {
+      void goto(`/claim/${campaign}/${commitment}/receipt`);
+      return;
     }
     if (!link && linkOk && paid) {
       recalling = true;

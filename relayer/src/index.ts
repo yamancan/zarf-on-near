@@ -73,15 +73,31 @@ export default {
       rpc, network: env.NETWORK, contractId: env.CONTRACT_ID, relayerAccountId: env.RELAYER_ACCOUNT_ID,
       key: k, verifierSigners: list(env.VERIFIER_SIGNERS), perIp: env.PER_IP, perCommitment: env.PER_COMMITMENT,
     });
-    if (status === 200 && out.status === 'paid') {
-      // The claim is already paid: nothing here may change or hold up that answer, so every failure is only logged.
+    if ((status === 200 && out.status === 'paid') || (status === 202 && out.status === 'submitted')) {
+      // Persist follow-up before answering: the Durable Object reconciles late payment and retries starter failures.
       try {
         const starter = { enabled: env.STARTER_NEAR, network: env.NETWORK, contractId: env.CONTRACT_ID, gasAccountId: env.GAS_ACCOUNT_ID,
           gasKeySecret: env.GAS_KEY, relayerAccountId: env.RELAYER_ACCOUNT_ID, relayerKeySecret: env.RELAYER_KEY, gate: env.STARTER };
         if (starterAllowed(starter)) {
-          const gate = env.STARTER!.get(env.STARTER!.idFromName('gas'));
-          const sending = gate.fetch(new Request(`https://starter/?d=${encodeURIComponent((body as { destination: string }).destination)}`))
-            .then((r) => r.json() as Promise<StarterOutcome>);
+          const claim = body as { destination: string; commitment: string };
+          const followUp = JSON.stringify({ txHash: out.tx_hash, destination: claim.destination, commitment: claim.commitment,
+            contractId: env.CONTRACT_ID, relayerAccountId: env.RELAYER_ACCOUNT_ID, paid: out.status === 'paid' });
+          const sending = (async (): Promise<StarterOutcome> => {
+            // The transaction hash makes enrollment idempotent. A failed stub must be recreated.
+            for (let attempt = 0; attempt < 3; attempt++) {
+              try {
+                const gate = env.STARTER!.get(env.STARTER!.idFromName('gas'));
+                const response = await gate.fetch(new Request('https://starter/claim', { method: 'POST', body: followUp }));
+                const result = await response.json() as StarterOutcome;
+                if (response.ok && result.result !== 'error') return result;
+              } catch {
+                // Retry only enrollment, never the claim transaction or an ambiguous gas transfer.
+              }
+              if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 100 * 2 ** attempt));
+            }
+            console.log('starter_enqueue_failed');
+            return { result: 'error' };
+          })();
           ctx?.waitUntil(sending.catch(() => {}));
           let timer: ReturnType<typeof setTimeout> | undefined;
           const r = await Promise.race([sending, new Promise<null>((ok) => (timer = setTimeout(() => ok(null), STARTER_WAIT_MS)))]);

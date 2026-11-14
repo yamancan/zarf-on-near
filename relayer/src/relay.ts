@@ -65,6 +65,10 @@ export async function handleRelay(input: unknown, ip: string, d: RelayDeps): Pro
 
   const args = new TextEncoder().encode(JSON.stringify({ campaign_id, commitment, amount, proof, destination, expires_at_ns, signer, signature }));
   try {
+    // Proof is deliberately outside the verifier signature: check it against the immutable on-chain root before spending gas.
+    const campaign = await viewFunction<{ merkle_root?: unknown } | null>(d.rpc, d.contractId, 'get_campaign', { campaign_id });
+    if (!campaign || typeof campaign.merkle_root !== 'string' || !HEX32.test(campaign.merkle_root)) throw new RpcError('invalid campaign root');
+    if (await proofRoot(commitment, amount, proof) !== campaign.merkle_root) return refuse(400, 'E102_INVALID_MERKLE_PROOF');
     return await submit(args, d, true, { destination, campaign_id, commitment });
   } catch (e) {
     // Logs are fixed tags only: never the request, the error text or the tx.
@@ -80,6 +84,26 @@ export async function handleRelay(input: unknown, ip: string, d: RelayDeps): Pro
     }
     throw e;
   }
+}
+
+/** contract/src/lib.rs: SHA256(0 || commitment || u128_le), then sorted SHA256(1 || lo || hi). */
+async function proofRoot(commitment: string, amount: string, proof: string[]): Promise<string> {
+  const leaf = new Uint8Array(49);
+  leaf.set(unhex(commitment, 32), 1);
+  let value = BigInt(amount);
+  for (let i = 0; i < 16; i++, value >>= 8n) leaf[33 + i] = Number(value & 255n);
+  const digestHex = async (bytes: Uint8Array<ArrayBuffer>) =>
+    Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (b) => b.toString(16).padStart(2, '0')).join('');
+  let hash = await digestHex(leaf);
+  for (const sibling of proof) {
+    const node = new Uint8Array(65);
+    node[0] = 1;
+    // Fixed-width lower-case hex has the same ordering as the contract's byte arrays.
+    node.set(unhex(hash <= sibling ? hash : sibling, 32), 1);
+    node.set(unhex(hash <= sibling ? sibling : hash, 32), 33);
+    hash = await digestHex(node);
+  }
+  return hash;
 }
 
 class RelayerMisconfigured extends Error {}

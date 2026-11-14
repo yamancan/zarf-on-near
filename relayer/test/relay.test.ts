@@ -20,7 +20,7 @@ const event = (name: string, commitment = valid.commitment, executor = context.c
 const executed = (...receipts: unknown[]) => ({ status: { SuccessValue: '' }, receipts_outcome: receipts });
 
 type Sent = { signed: Uint8Array };
-function stubRpc(o: { permission?: unknown; nonce?: number; gas?: unknown; state?: string; send?: (n: number) => unknown } = {}) {
+function stubRpc(o: { permission?: unknown; nonce?: number; gas?: unknown; state?: string; campaign?: unknown; send?: (n: number) => unknown } = {}) {
   const stateArgs: unknown[] = [];
   const sent: Sent[] = [];
   const finalities: string[] = [];
@@ -33,6 +33,11 @@ function stubRpc(o: { permission?: unknown; nonce?: number; gas?: unknown; state
         return { nonce: o.nonce ?? 5, block_hash: BLOCK, permission: o.permission ?? fcKey } as T;
       }
       if (method === 'query' && params.request_type === 'view_account') return { amount: '4200000000000000000000000' } as T;
+      if (method === 'query' && params.method_name === 'get_campaign') {
+        const id = JSON.parse(atob(params.args_base64)).campaign_id;
+        const name = claims.valid.find((c) => c.call_args.campaign_id === id)!.campaign as keyof typeof vectors.campaigns;
+        return { result: [...new TextEncoder().encode(JSON.stringify('campaign' in o ? o.campaign : vectors.campaigns[name]))] } as T;
+      }
       if (method === 'query' && params.method_name === 'get_config') {
         return { result: [...new TextEncoder().encode(JSON.stringify({ token_ids: ['usdc.testnet'] }))] } as T;
       }
@@ -136,14 +141,27 @@ describe('handleRelay', () => {
     expect(s.calls()).toBe(0);
   });
 
-  it('relays an honestly signed claim and reports the contract panic code (E102 vector)', async () => {
-    const c = claims.invalid.find((x) => x.expect === 'E102_INVALID_MERKLE_PROOF')!;
-    const failure = { ActionError: { index: 0, kind: { FunctionCallError: { ExecutionError: 'Smart contract panicked: E102_INVALID_MERKLE_PROOF' } } } };
-    const s = stubRpc({ send: () => ({ status: { Failure: failure } }) });
-    const res = await handleRelay({ ...c.call_args }, 'ip', deps({ rpc: s.rpc }));
-    expect(res.status).toBe(409);
-    expect(res.body.error).toBe('E102_INVALID_MERKLE_PROOF');
-    expect(res.body.tx_hash).toMatch(/^[1-9A-HJ-NP-Za-km-z]+$/);
+  it.each(claims.invalid.filter((x) => x.expect === 'E102_INVALID_MERKLE_PROOF'))('rejects a replayed signed approval with an invalid proof before spending gas: $name', async (c) => {
+    const s = stubRpc();
+    for (let i = 0; i < 2; i++) {
+      expect(await handleRelay(c.call_args, 'ip', deps({ rpc: s.rpc }))).toEqual({
+        status: 400, body: { error: 'E102_INVALID_MERKLE_PROOF' },
+      });
+    }
+    expect(s.sent).toEqual([]);
+  });
+
+  it.each(claims.valid)('accepts the contract proof vector $name, including a single leaf', async (c) => {
+    const s = stubRpc({ send: () => executed(event('claim_paid', c.call_args.commitment)) });
+    expect((await handleRelay(c.call_args, 'ip', deps({ rpc: s.rpc }))).status).toBe(200);
+    expect(s.sent).toHaveLength(1);
+  });
+
+  it.each([null, {}, { merkle_root: 'ab' }])('fails closed if campaign/root is unavailable: %j', async (campaign) => {
+    const s = stubRpc({ campaign });
+    const result = await handleRelay(valid, 'ip', deps({ rpc: s.rpc }));
+    expect(result.status).toBeGreaterThanOrEqual(400);
+    expect(s.sent).toEqual([]);
   });
 
   it('rate-limits per IP before parsing, and per commitment', async () => {

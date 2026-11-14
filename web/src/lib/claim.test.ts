@@ -205,6 +205,13 @@ describe('receipt record (reload or reopened link after a paid claim)', () => {
     saveReceipt(K, '7', 'c', { ...r, amount: '-1' }, s);
     expect(loadReceipt(K, '7', 'c', s)).toBeNull();
   });
+  it('restores bridge recovery data without executable URLs or unexpected stored fields', () => {
+    const s = mem();
+    s.setItem(`zarf-near:receipt:${K}/7/c`, JSON.stringify({ ...r, savedAt: Date.now(), chainName: 'Base', bridge: 'failed',
+      bridgeStatus: { status: 'FAILED', refundReason: 'Not delivered', idToken: 'secret',
+        destinationTx: { hash: '0x1234', explorerUrl: 'javascript:alert(1)' } } }));
+    expect(loadReceipt(K, '7', 'c', s)?.bridgeStatus).toEqual({ status: 'FAILED', refundReason: 'Not delivered', destinationTx: { hash: '0x1234' } });
+  });
   it('never throws when storage is blocked', () => {
     const blocked = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); } } as unknown as Storage;
     expect(() => saveReceipt(K, '7', 'c', r, blocked)).not.toThrow();

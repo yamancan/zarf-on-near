@@ -1,5 +1,7 @@
 // Browser-side claim helpers. Byte rules come from spec/claim.md; tests pin them to spec/vectors.json.
 
+import type { StatusView } from './intents';
+
 const enc = new TextEncoder();
 
 export const hex = (b: ArrayBuffer | Uint8Array): string =>
@@ -244,6 +246,7 @@ export interface Receipt {
   depositAddress?: string; // cross-chain: the 1Click deposit address (public), so a reopened link can ask the bridge again
   refundTo?: string; // cross-chain: where a refund goes (the campaign sender)
   checkedAt?: number; // cross-chain: when the bridge last answered (ms)
+  bridgeStatus?: StatusView; // last bridge step, error and destination transaction, preserved across reloads
   savedAt?: number; // when this browser first saved the record; it expires RECEIPT_TTL_MS later
 }
 
@@ -264,7 +267,7 @@ const receiptKey = (contract: string, campaign: string, commitment: string) => `
 // localStorage, not sessionStorage: the recipient often reopens the link from the email in a new tab.
 export function saveReceipt(contract: string, campaign: string, commitment: string, r: Receipt, store?: Storage, now = Date.now()): void {
   try {
-    (store ?? localStorage).setItem(receiptKey(contract, campaign, commitment), JSON.stringify({ ...r, savedAt: r.savedAt ?? now }));
+    (store ?? localStorage).setItem(receiptKey(contract, campaign, commitment), JSON.stringify({ ...r, bridgeStatus: safeBridgeStatus(r.bridgeStatus), savedAt: r.savedAt ?? now }));
   } catch {
     // best effort: without it a reload shows "Already claimed" without the transaction
   }
@@ -284,6 +287,7 @@ export function loadReceipt(contract: string, campaign: string, commitment: stri
     if (r.depositAddress !== undefined && !/^[0-9a-f]{64}$/.test(r.depositAddress)) delete r.depositAddress;
     if (r.refundTo !== undefined && typeof r.refundTo !== 'string') delete r.refundTo;
     if (r.checkedAt !== undefined && typeof r.checkedAt !== 'number') delete r.checkedAt;
+    r.bridgeStatus = safeBridgeStatus(r.bridgeStatus);
     // A cross-chain record without a known outcome is still in transit, whatever else it says.
     return r.chainName ? { ...r, bridge: OUTCOMES.includes(r.bridge!) ? r.bridge : 'in-transit' } : r;
   } catch {
@@ -292,12 +296,30 @@ export function loadReceipt(contract: string, campaign: string, commitment: stri
 }
 
 /** Records the bridge's outcome on a cross-chain receipt already saved; nothing happens without one. */
-export function settleReceipt(contract: string, campaign: string, commitment: string, bridge: BridgeOutcome, amountOut?: string, store?: Storage, now = Date.now()): Receipt | null {
+export function settleReceipt(contract: string, campaign: string, commitment: string, bridge: BridgeOutcome, amountOut?: string, store?: Storage, now = Date.now(), status?: StatusView): Receipt | null {
   const r = loadReceipt(contract, campaign, commitment, store, now);
   if (!r?.chainName) return r;
-  const next = { ...r, bridge, checkedAt: now, ...(bridge === 'paid' && amountOut ? { amountOut } : {}) };
+  const next = { ...r, bridge, checkedAt: now, ...(status ? { bridgeStatus: safeBridgeStatus(status) } : {}), ...(bridge === 'paid' && amountOut ? { amountOut } : {}) };
   saveReceipt(contract, campaign, commitment, next, store, now);
   return next;
+}
+
+/** Browser storage and upstream transaction URLs are untrusted; never restore an executable link. */
+export function safeBridgeStatus(value: unknown): StatusView | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const s = value as StatusView;
+  if (!['PENDING_DEPOSIT', 'KNOWN_DEPOSIT_TX', 'PROCESSING', 'SUCCESS', 'INCOMPLETE_DEPOSIT', 'REFUNDED', 'FAILED'].includes(s.status)) return undefined;
+  const out: StatusView = { status: s.status };
+  if (typeof s.refundReason === 'string') out.refundReason = s.refundReason.slice(0, 2000);
+  if (typeof s.amountOutFormatted === 'string' && /^\d{1,39}(\.\d{1,39})?$/.test(s.amountOutFormatted)) out.amountOutFormatted = s.amountOutFormatted;
+  if (typeof s.destinationTx?.hash === 'string' && /^[a-zA-Z0-9_-]{1,256}$/.test(s.destinationTx.hash)) {
+    out.destinationTx = { hash: s.destinationTx.hash };
+    try {
+      const url = new URL(s.destinationTx.explorerUrl ?? '');
+      if (url.protocol === 'https:' && !url.username && !url.password) out.destinationTx.explorerUrl = url.href;
+    } catch { /* a hash can still be displayed without an explorer URL */ }
+  }
+  return out;
 }
 
 /**

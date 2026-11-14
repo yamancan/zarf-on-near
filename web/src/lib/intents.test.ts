@@ -218,6 +218,18 @@ describe('recheckReceipt (a reopened cross-chain record asks the bridge again, r
     expect(back).toMatchObject({ done: true, r: { bridge: 'refunded' } });
     expect(loadReceipt(K, '7', 'c', s, NOW + 2)!.bridge).toBe('refunded');
   });
+  it('keeps bridge steps, refund reason and destination transaction after a reload', async () => {
+    const s = mem();
+    saveReceipt(K, '7', 'c', rec, s, NOW);
+    await recheckReceipt(K, '7', 'c', rec, json({ status: 'FAILED', swapDetails: {
+      refundReason: 'Destination transfer failed',
+      destinationChainTxHashes: [{ hash: '0x1234', explorerUrl: 'https://basescan.org/tx/0x1234' }],
+    } }), s, NOW + 1);
+    expect(loadReceipt(K, '7', 'c', s, NOW + 2)).toMatchObject({
+      bridge: 'failed', bridgeStatus: { status: 'FAILED', refundReason: 'Destination transfer failed',
+        destinationTx: { hash: '0x1234', explorerUrl: 'https://basescan.org/tx/0x1234' } },
+    });
+  });
   it('a failed read or an unknown address changes nothing (the "last checked" time stays)', async () => {
     const s = mem();
     saveReceipt(K, '7', 'c', { ...rec, checkedAt: NOW }, s, NOW);

@@ -13,7 +13,7 @@ export interface CampaignCreator {
 }
 
 export class CreateError extends Error {
-  constructor(readonly code: 'FAUCET_NOT_PREPAID' | 'CREATE_FAILED') {
+  constructor(readonly code: 'FAUCET_NOT_PREPAID' | 'CREATE_FAILED', readonly definitive = code === 'FAUCET_NOT_PREPAID') {
     super(code);
   }
 }
@@ -97,20 +97,27 @@ export function testnetCreator(d: TestnetCreatorDeps): CampaignCreator {
   return {
     live: true,
     async create(r) {
-      const ak = await d.rpc.call<{ nonce: number | string; block_hash: string }>('query', {
-        request_type: 'view_access_key', finality: 'optimistic', account_id: d.senderId, public_key: d.key.publicKeyStr,
-      });
-      const chainNonce = BigInt(ak.nonce);
-      const nonce = (chainNonce > lastNonce ? chainNonce : lastNonce) + 1n;
-      lastNonce = nonce;
-      const msg = JSON.stringify({ merkle_root: r.merkleRoot, deadline_ns: r.deadlineNs, policy: 'owner', leaf_count: 1 });
-      const { signed, hash } = await signTx(d.key.key, {
-        signerId: d.senderId, publicKey: d.key.publicKey, nonce, receiverId: d.tokenId, blockHash: base58Decode(ak.block_hash),
-        methodName: 'ft_transfer_call',
-        args: new TextEncoder().encode(JSON.stringify({ receiver_id: d.contractId, amount: r.amount, msg })),
-        gas: 200n * TGAS,
-        deposit: 1n, // NEP-141 requires exactly 1 yoctoNEAR
-      });
+      let prepared: Awaited<ReturnType<typeof signTx>>;
+      try {
+        const ak = await d.rpc.call<{ nonce: number | string; block_hash: string }>('query', {
+          request_type: 'view_access_key', finality: 'optimistic', account_id: d.senderId, public_key: d.key.publicKeyStr,
+        });
+        const chainNonce = BigInt(ak.nonce);
+        const nonce = (chainNonce > lastNonce ? chainNonce : lastNonce) + 1n;
+        lastNonce = nonce;
+        const msg = JSON.stringify({ merkle_root: r.merkleRoot, deadline_ns: r.deadlineNs, policy: 'owner', leaf_count: 1 });
+        prepared = await signTx(d.key.key, {
+          signerId: d.senderId, publicKey: d.key.publicKey, nonce, receiverId: d.tokenId, blockHash: base58Decode(ak.block_hash),
+          methodName: 'ft_transfer_call',
+          args: new TextEncoder().encode(JSON.stringify({ receiver_id: d.contractId, amount: r.amount, msg })),
+          gas: 200n * TGAS,
+          deposit: 1n, // NEP-141 requires exactly 1 yoctoNEAR
+        });
+      } catch {
+        // Nothing has been broadcast: releasing the email cannot create a duplicate campaign.
+        throw new CreateError('CREATE_FAILED', true);
+      }
+      const { signed, hash } = prepared;
       const o = await d.rpc.call<Outcome>('send_tx', {
         signed_tx_base64: btoa(String.fromCharCode(...signed)), wait_until: 'EXECUTED_OPTIMISTIC',
       });

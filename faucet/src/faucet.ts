@@ -1,3 +1,4 @@
+import type { QuotaNamespace } from './quota';
 import { canonicalizeEmail, claimLink, commitment, hex, leaf } from './claim';
 import { CreateError, type CampaignCreator } from './creator';
 import { readLink, saveLink, takeQuota, type KvLike, type Limits } from './limits';
@@ -9,6 +10,8 @@ export interface FaucetDeps {
   limits: Limits;
   limitKey: string; // secret: keys the hashed rate-limit counters
   kv: KvLike;
+  quota: QuotaNamespace;
+  quotaStartDate?: string; // UTC activation date; recovery of existing links remains available before it
   creator: CampaignCreator;
   nowMs?: number;
   randomSalt?: () => Uint8Array<ArrayBuffer>; // tests only
@@ -43,8 +46,12 @@ export async function handleFaucet(input: unknown, ip: string, d: FaucetDeps): P
     const mine = typeof token === 'string' && token.length <= 128 && typeof recovery_hash === 'string' && (await sha256hex(token)) === recovery_hash;
     return { status: 200, body: mine ? { ...link, reshown: true } : { reshown: true } };
   }
-  // A failed create spends the IP and day slots but not the email's (see takeQuota).
-  const quota = await takeQuota(d.kv, d.limitKey, d.limits, ip, canonical, nowMs);
+  if (d.quotaStartDate && nowMs < Date.parse(`${d.quotaStartDate}T00:00:00Z`)) {
+    return { status: 503, body: { error: 'QUOTA_UNAVAILABLE' } };
+  }
+  // Reserve before creating; only a definitive failure may release the email's slot.
+  const quota = await takeQuota(d.quota, d.limitKey, d.limits, ip, canonical, nowMs).catch(() => null);
+  if (!quota) return { status: 503, body: { error: 'QUOTA_UNAVAILABLE' } };
   if (!quota.ok) return { status: 429, body: { error: quota.code } };
 
   const salt = d.randomSalt?.() ?? crypto.getRandomValues(new Uint8Array(32));
@@ -56,6 +63,8 @@ export async function handleFaucet(input: unknown, ip: string, d: FaucetDeps): P
   try {
     created = await d.creator.create({ merkleRoot: root, amount: d.amount, deadlineNs });
   } catch (e) {
+    // An RPC timeout may follow a successful broadcast. Keep its reservation; do not allow another create.
+    if (e instanceof CreateError && e.definitive) await quota.cancelEmail().catch(() => console.log('faucet_quota_cancel_failed'));
     if (e instanceof CreateError) return { status: 503, body: { error: e.code } };
     console.log('faucet_create_failed'); // fixed tag: never the error, which could carry request data
     return { status: 503, body: { error: 'CREATE_FAILED' } };
@@ -72,9 +81,9 @@ export async function handleFaucet(input: unknown, ip: string, d: FaucetDeps): P
     ...(d.creator.live ? {} : { stub: true }),
   };
   const recovery = hex(crypto.getRandomValues(new Uint8Array(16)));
-  // Neither write throws; the link is saved first so a spent email counter always has a link to show again.
+  // Pending email quota already prevents another create, even if either persistence step exhausts retries.
   // Only the token's hash is kept (sealed with the link).
   await saveLink(d.kv, d.limitKey, canonical, nowMs, { ...body, recovery_hash: await sha256hex(recovery) });
-  await quota.commitEmail();
+  await quota.commitEmail().catch(() => console.log('faucet_quota_commit_failed'));
   return { status: 200, body: { ...body, recovery_token: recovery } };
 }

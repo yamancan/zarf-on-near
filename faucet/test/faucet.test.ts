@@ -1,3 +1,4 @@
+import { memoryQuota } from './quota-fixture';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import vectors from '../../spec/vectors.json';
 import { canonicalizeEmail, claimLink, commitment, leaf, unhex } from '../src/claim';
@@ -8,9 +9,11 @@ import { base58Encode, encodeTx, parseNearKey } from '../src/near';
 import { usdcText } from '../src/page';
 import { verifyTurnstile } from '../src/turnstile';
 
-const memKv = (): KvLike & { m: Map<string, string> } => {
+vi.mock('cloudflare:workers', () => ({ DurableObject: class { } }));
+
+const memKv = (): KvLike & { m: Map<string, string>; quota: ReturnType<typeof memoryQuota> } => {
   const m = new Map<string, string>();
-  return { m, get: async (k) => m.get(k) ?? null, put: async (k, v) => void m.set(k, v) };
+  return { m, quota: memoryQuota(), get: async (k) => m.get(k) ?? null, put: async (k, v) => void m.set(k, v) };
 };
 
 describe('spec/vectors.json', () => {
@@ -42,7 +45,7 @@ describe('takeQuota', () => {
     const kv = memKv();
     // Each 'ok' stands for a request whose create succeeded, so its email slot is committed too.
     const t = (ip: string, e: string, ms = now) =>
-      takeQuota(kv, 'k', limits, ip, e, ms).then(async (r) => (r.ok ? (await r.commitEmail(), 'ok') : r.code));
+      takeQuota(kv.quota.namespace, 'k', limits, ip, e, ms).then(async (r) => (r.ok ? (await r.commitEmail(), 'ok') : r.code));
     expect(await t('1.1.1.1', 'a@x.io')).toBe('ok');
     expect(await t('2.2.2.2', 'a@x.io')).toBe('RATE_LIMITED_EMAIL');
     expect(await t('1.1.1.1', 'b@x.io')).toBe('ok');
@@ -51,36 +54,45 @@ describe('takeQuota', () => {
     expect(await t('4.4.4.4', 'e@x.io')).toBe('DAILY_CAP_REACHED');
     expect(await t('4.4.4.4', 'e@x.io', now + 86_400_000)).toBe('ok');
   });
+  it('admits only one concurrent request for the last daily slot', async () => {
+    const kv = memKv();
+    const results = await Promise.all(Array.from({ length: 8 }, (_, n) =>
+      takeQuota(kv.quota.namespace, 'k', { ...limits, dailyCap: 1 }, `ip-${n}`, `judge-${n}@x.io`, now)));
+    expect(results.filter((r) => r.ok)).toHaveLength(1);
+  });
+  it('retries rejected counter writes so the next request cannot reuse the daily slot', async () => {
+    const kv = memKv();
+    kv.quota.failWrites(2);
+    expect((await takeQuota(kv.quota.namespace, 'k', { ...limits, dailyCap: 1 }, 'ip', 'a@x.io', now)).ok).toBe(true);
+    expect(await takeQuota(kv.quota.namespace, 'k', { ...limits, dailyCap: 1 }, 'ip2', 'b@x.io', now))
+      .toEqual({ ok: false, code: 'DAILY_CAP_REACHED' });
+  });
   it('a refused request spends nothing', async () => {
     const kv = memKv();
-    const first = await takeQuota(kv, 'k', limits, 'ip', 'a@x.io', now);
+    const first = await takeQuota(kv.quota.namespace, 'k', limits, 'ip', 'a@x.io', now);
     if (first.ok) await first.commitEmail(); // the create succeeded
-    const before = new Map(kv.m);
-    await takeQuota(kv, 'k', limits, 'ip2', 'a@x.io', now);
-    expect(kv.m).toEqual(before);
+    const before = structuredClone(kv.quota.records);
+    await takeQuota(kv.quota.namespace, 'k', limits, 'ip2', 'a@x.io', now);
+    expect(kv.quota.records).toEqual(before);
   });
-  it('spends IP and day slots before the create, the email slot only on commit', async () => {
+  it('reserves email during create and releases only its email slot on cancel', async () => {
     const kv = memKv();
-    const first = await takeQuota(kv, 'k', limits, '1.1.1.1', 'a@x.io', now);
+    const first = await takeQuota(kv.quota.namespace, 'k', limits, '1.1.1.1', 'a@x.io', now);
     expect(first.ok).toBe(true);
-    expect([...kv.m.keys()].filter((k) => k.startsWith('email:'))).toHaveLength(0);
-    expect((await takeQuota(kv, 'k', limits, '2.2.2.2', 'a@x.io', now)).ok).toBe(true); // no commit: email still free
-    if (first.ok) await first.commitEmail();
-    expect(await takeQuota(kv, 'k', limits, '3.3.3.3', 'a@x.io', now)).toEqual({ ok: false, code: 'RATE_LIMITED_EMAIL' });
-  });
-  it('a failed KV write does not fail the request', async () => {
-    const kv = memKv();
-    let throws = 2;
-    const flaky: KvLike = { get: kv.get, put: async (k, v, o) => { if (throws-- > 0) throw new Error('429 one write per second'); return kv.put(k, v, o); } };
-    const r = await takeQuota(flaky, 'k', limits, '1.1.1.1', 'a@x.io', now);
-    expect(r.ok).toBe(true);
-    if (r.ok) await expect(r.commitEmail()).resolves.toBeUndefined();
+    expect(await takeQuota(kv.quota.namespace, 'k', limits, '2.2.2.2', 'a@x.io', now))
+      .toEqual({ ok: false, code: 'RATE_LIMITED_EMAIL' });
+    if (first.ok) await first.cancelEmail();
+    const second = await takeQuota(kv.quota.namespace, 'k', limits, '2.2.2.2', 'a@x.io', now);
+    expect(second.ok).toBe(true);
+    if (second.ok) await second.commitEmail();
+    expect(await takeQuota(kv.quota.namespace, 'k', limits, '3.3.3.3', 'a@x.io', now))
+      .toEqual({ ok: false, code: 'RATE_LIMITED_EMAIL' });
   });
   it('never stores an email or IP in the clear', async () => {
     const kv = memKv();
-    const r = await takeQuota(kv, 'k', limits, '203.0.113.9', 'alice@example.com', now);
+    const r = await takeQuota(kv.quota.namespace, 'k', limits, '203.0.113.9', 'alice@example.com', now);
     if (r.ok) await r.commitEmail();
-    const dump = JSON.stringify([...kv.m]);
+    const dump = JSON.stringify([...kv.quota.records]);
     expect(dump).not.toContain('alice');
     expect(dump).not.toContain('203.0.113.9');
   });
@@ -89,6 +101,7 @@ describe('takeQuota', () => {
 describe('handleFaucet', () => {
   const solo = vectors.campaigns.single.recipients[0];
   const deps = (over: Partial<FaucetDeps> = {}): FaucetDeps => ({
+    quota: memoryQuota().namespace,
     claimHost: 'https://claim.example', amount: solo.amount, lifetimeS: 3600, limitKey: 'k', kv: memKv(),
     limits: { perIpPerDay: 5, perEmailPerDay: 1, dailyCap: 10 }, creator: stubCreator(8n), nowMs: 1_794_484_800_000,
     randomSalt: () => unhex(solo.salt, 32), ...over,
@@ -129,14 +142,15 @@ describe('handleFaucet', () => {
     const kv = memKv();
     let putThrows = 1; // KV rejects one write (one write per second per key)
     const flaky: KvLike = { get: kv.get, put: async (k, v, o) => { if (putThrows-- > 0) throw new Error('429'); return kv.put(k, v, o); } };
-    const failing: CampaignCreator = { live: true, create: async () => { throw new CreateError('CREATE_FAILED'); } };
-    expect(await handleFaucet({ email: 'judge@gmail.com' }, 'ip', deps({ kv: flaky, creator: failing })))
+    const quota = memoryQuota().namespace;
+    const failing: CampaignCreator = { live: true, create: async () => { throw new CreateError('CREATE_FAILED', true); } };
+    expect(await handleFaucet({ email: 'judge@gmail.com' }, 'ip', deps({ kv: flaky, quota, creator: failing })))
       .toEqual({ status: 503, body: { error: 'CREATE_FAILED' } });
-    const again = await handleFaucet({ email: 'judge@gmail.com' }, 'ip', deps({ kv: flaky }));
+    const again = await handleFaucet({ email: 'judge@gmail.com' }, 'ip', deps({ kv: flaky, quota }));
     expect(again.status).toBe(200);
     // Now the email has its link: asking again with its recovery token shows that same link.
     const { recovery_token, ...link } = again.body;
-    expect((await handleFaucet({ email: 'judge@gmail.com', recovery: recovery_token }, 'ip2', deps({ kv: flaky }))).body).toEqual({ ...link, reshown: true });
+    expect((await handleFaucet({ email: 'judge@gmail.com', recovery: recovery_token }, 'ip2', deps({ kv: flaky, quota }))).body).toEqual({ ...link, reshown: true });
   });
 
   it('asking again with the same email and its recovery token shows the same link, and spends no funds or quota', async () => {
@@ -192,8 +206,83 @@ describe('handleFaucet', () => {
   it('if the link write was lost, a repeat still gets RATE_LIMITED_EMAIL (as before), never a second campaign', async () => {
     const kv = memKv();
     const lossy: KvLike = { get: kv.get, put: async (k, v, o) => (k.startsWith('link:') ? undefined : kv.put(k, v, o)) };
-    await handleFaucet({ email: 'a@x.io' }, 'ip', deps({ kv: lossy }));
-    expect(await handleFaucet({ email: 'A@x.io' }, 'ip2', deps({ kv: lossy }))).toEqual({ status: 429, body: { error: 'RATE_LIMITED_EMAIL' } });
+    const d = deps({ kv: lossy });
+    await handleFaucet({ email: 'a@x.io' }, 'ip', d);
+    expect(await handleFaucet({ email: 'A@x.io' }, 'ip2', d)).toEqual({ status: 429, body: { error: 'RATE_LIMITED_EMAIL' } });
+  });
+
+  it('concurrent requests for one email create at most one campaign', async () => {
+    let creates = 0;
+    const d = deps({ creator: { live: true, create: async () => {
+      creates++;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return { campaignId: '8', txHash: 'tx' };
+    } } });
+    const replies = await Promise.all(['ip1', 'ip2'].map((ip) => handleFaucet({ email: 'a@x.io' }, ip, d)));
+    expect(replies.map((r) => r.status).sort()).toEqual([200, 429]);
+    expect(creates).toBe(1);
+  });
+
+  it('does not create a campaign when all quota writes fail', async () => {
+    const memory = memoryQuota();
+    memory.failWrites(3);
+    let creates = 0;
+    const d = deps({ quota: memory.namespace, creator: { live: true, create: async () => {
+      creates++; return { campaignId: '8', txHash: 'tx' };
+    } } });
+    expect(await handleFaucet({ email: 'a@x.io' }, 'ip', d))
+      .toEqual({ status: 503, body: { error: 'QUOTA_UNAVAILABLE' } });
+    expect(creates).toBe(0);
+  });
+
+  it('retains the email reservation after an ambiguous broadcast failure', async () => {
+    let creates = 0;
+    const d = deps({ creator: { live: true, create: async () => {
+      creates++; throw new CreateError('CREATE_FAILED');
+    } } });
+    expect((await handleFaucet({ email: 'a@x.io' }, 'ip', d)).status).toBe(503);
+    expect(await handleFaucet({ email: 'a@x.io' }, 'ip2', d))
+      .toEqual({ status: 429, body: { error: 'RATE_LIMITED_EMAIL' } });
+    expect(creates).toBe(1);
+  });
+
+  it('returns the created link and keeps email blocked if commit retries are exhausted', async () => {
+    const memory = memoryQuota();
+    const kv = memKv();
+    kv.put = async () => {}; // Lost recovery record must not permit another create either.
+    let creates = 0;
+    const d = deps({ kv, quota: memory.namespace, creator: { live: true, create: async () => {
+      creates++; memory.failWrites(3); return { campaignId: '8', txHash: 'tx' };
+    } } });
+    const first = await handleFaucet({ email: 'a@x.io' }, 'ip', d);
+    expect(first.status).toBe(200);
+    expect(first.body.claim_url).toContain('/claim/8/');
+    expect(await handleFaucet({ email: 'a@x.io' }, 'ip2', d))
+      .toEqual({ status: 429, body: { error: 'RATE_LIMITED_EMAIL' } });
+    expect(creates).toBe(1);
+  });
+
+  it('retries a failed sealed-link write so recovery returns the original campaign', async () => {
+    const kv = memKv();
+    const put = kv.put;
+    let fail = true;
+    kv.put = async (key, value, options) => { if (fail) { fail = false; throw new Error('KV temporarily unavailable'); } await put(key, value, options); };
+    const d = deps({ kv });
+    const first = await handleFaucet({ email: 'a@x.io' }, 'ip', d);
+    const recovered = await handleFaucet({ email: 'a@x.io', recovery: first.body.recovery_token }, 'ip2', d);
+    expect(recovered.body.claim_url).toBe(first.body.claim_url);
+    expect(recovered.body.reshown).toBe(true);
+  });
+
+  it('blocks new issuance until the activation UTC day while preserving existing link recovery', async () => {
+    const d = deps();
+    const first = await handleFaucet({ email: 'a@x.io' }, 'ip', d);
+    const blocked = { ...d, quotaStartDate: '2027-01-01' };
+    expect((await handleFaucet({ email: 'a@x.io', recovery: first.body.recovery_token }, 'ip', blocked)).body.claim_url)
+      .toBe(first.body.claim_url);
+    expect(await handleFaucet({ email: 'b@x.io' }, 'ip', blocked))
+      .toEqual({ status: 503, body: { error: 'QUOTA_UNAVAILABLE' } });
+    expect((await handleFaucet({ email: 'b@x.io' }, 'ip', { ...blocked, nowMs: Date.UTC(2027, 0, 1) })).status).toBe(200);
   });
 
   it('503s with the creator code, and on unknown errors', async () => {
@@ -233,6 +322,12 @@ describe('testnet creator (stubbed RPC; nothing is sent)', () => {
     expect(Array.from(signed.subarray(signed.length - 65 - 16, signed.length - 65))).toEqual([1, ...new Array(15).fill(0)]);
   });
 
+  it('classifies failures before transaction broadcast as definitive so email quota can be released', async () => {
+    const rpc = { call: async <T>(): Promise<T> => { throw new Error('view access key unavailable'); } };
+    const creator = testnetCreator({ rpc, senderId: 'f.testnet', key: await parseNearKey(SECRET), tokenId: 'u.testnet', contractId: 'esc.testnet' });
+    await expect(creator.create(req)).rejects.toMatchObject({ code: 'CREATE_FAILED', definitive: true });
+  });
+
   it('maps an E128 failure to FAUCET_NOT_PREPAID and a missing event to CREATE_FAILED', async () => {
     const mk = (outcome: object) => ({
       async call<T>(method: string): Promise<T> {
@@ -268,7 +363,7 @@ describe('worker', () => {
     NETWORK: 'testnet', CREATOR: 'testnet', CLAIM_HOST: 'https://claim.example', CONTRACT_ID: 'esc.testnet', TOKEN_ID: 'usdc.testnet',
     NEAR_RPC_URL: `https://rpc${rpcUrl++}.example`, FAUCET_SENDER_ID: 'faucet.testnet', AMOUNT: '1000000', LIFETIME_S: '600',
     PER_IP_PER_DAY: '3', PER_EMAIL_PER_DAY: '1', DAILY_CAP: '10', TURNSTILE_SITE_KEY: '0x4AAAAAAAsitekey',
-    FAUCET_SENDER_KEY: KEY, LIMIT_KEY: 'k', TURNSTILE_SECRET: 'secret', FAUCET_KV: memKv(), PER_IP: perIp(1000),
+    QUOTA: memoryQuota().namespace, QUOTA_START_DATE: '2026-01-01', FAUCET_SENDER_KEY: KEY, LIMIT_KEY: 'k', TURNSTILE_SECRET: 'secret', FAUCET_KV: memKv(), PER_IP: perIp(1000),
   });
   // Fake of the Workers rate-limit binding: `limit` calls per key, forever (the window is the test).
   const perIp = (limit: number) => {
@@ -313,7 +408,7 @@ describe('worker', () => {
   });
 
   it.each(['NETWORK', 'CREATOR', 'CLAIM_HOST', 'CONTRACT_ID', 'TOKEN_ID', 'NEAR_RPC_URL', 'FAUCET_SENDER_ID', 'AMOUNT', 'LIFETIME_S',
-    'PER_IP_PER_DAY', 'PER_EMAIL_PER_DAY', 'DAILY_CAP', 'TURNSTILE_SITE_KEY', 'FAUCET_SENDER_KEY', 'LIMIT_KEY', 'TURNSTILE_SECRET', 'PER_IP'])(
+    'PER_IP_PER_DAY', 'PER_EMAIL_PER_DAY', 'DAILY_CAP', 'TURNSTILE_SITE_KEY', 'FAUCET_SENDER_KEY', 'LIMIT_KEY', 'TURNSTILE_SECRET', 'PER_IP', 'QUOTA', 'QUOTA_START_DATE'])(
     'without %s it is FAUCET_MISCONFIGURED', async (k) => {
       net();
       const env = fullEnv();
@@ -328,6 +423,9 @@ describe('worker', () => {
     ['a non-https claim host', { CLAIM_HOST: 'http://claim.example' }],
     ['amount 0', { AMOUNT: '0' }],
     ['an unknown creator', { CREATOR: 'mainnet' }],
+    ['an empty activation date', { QUOTA_START_DATE: '' }],
+    ['an invalid activation date', { QUOTA_START_DATE: '2026-13-01' }],
+    ['a nonexistent activation day', { QUOTA_START_DATE: '2026-02-30' }],
   ])('refuses %s', async (_n, over) => {
     net();
     expect((await post({ ...fullEnv(), ...over })).status).toBe(500);

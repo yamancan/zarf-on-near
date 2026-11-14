@@ -6,7 +6,7 @@
   import { env } from '$env/dynamic/public';
   import { AlertTriangle, ArrowUpRight, Check, Clock, Undo2 } from 'lucide-svelte';
   import { CLAIMED_NO_RECORD, claimedAt, middle, shownAmount, type Receipt } from '$lib/claim';
-  import { needsRecheck, nextStep, notReturnedYet, recheckReceipt } from '$lib/intents';
+  import { describeStatus, needsRecheck, nextStep, notReturnedYet, recheckReceipt } from '$lib/intents';
   import BridgeDetails from '$lib/BridgeDetails.svelte';
   import { formatAmount } from '$lib/create/recipients';
   import { UNIT } from '$lib/network';
@@ -82,6 +82,25 @@
   {:else if rec.at}
     <p class="text-xs text-zen-fg-muted">Claimed {claimedAt(rec.at)}</p>
   {/if}
+  {#if rec.chainName}
+    <ol class="w-full flex flex-col gap-3 text-left text-sm border-y-[0.5px] border-zen-border-subtle py-4 my-1">
+      <li class="flex items-center gap-3"><Check class="w-4 h-4 text-zen-success shrink-0" aria-hidden="true" /><span>Claimed on NEAR</span></li>
+      <li class="flex items-center gap-3">
+        {#if kind === 'paid'}<Check class="w-4 h-4 text-zen-success shrink-0" aria-hidden="true" />
+        {:else if kind === 'failed'}<AlertTriangle class="w-4 h-4 text-zen-error shrink-0" aria-hidden="true" />
+        {:else if kind === 'refunded'}<Undo2 class="w-4 h-4 text-zen-error shrink-0" aria-hidden="true" />
+        {:else}<Clock class="w-4 h-4 text-zen-fg-muted shrink-0" aria-hidden="true" />{/if}
+        <span role="status">{rec.bridgeStatus ? describeStatus(rec.bridgeStatus, rec.chainName, rec.refundTo ?? 'the sender').text : kind === 'paid' ? `Arrived on ${rec.chainName}.` : kind === 'refunded' ? 'Returned to the sender.' : 'See the last payout update above.'}</span>
+      </li>
+    </ol>
+    {#if rec.bridgeStatus?.destinationTx}
+      {#if rec.bridgeStatus.destinationTx.explorerUrl}
+        <a href={rec.bridgeStatus.destinationTx.explorerUrl} target="_blank" rel="noopener noreferrer" class="inline-block"><ZenButton variant="secondary" tabindex={-1}>View on {rec.chainName}</ZenButton></a>
+      {:else}
+        <p class="text-xs text-zen-fg-muted">{rec.chainName} transaction <span class="font-mono">{middle(rec.bridgeStatus.destinationTx.hash, 8)}</span></p>
+      {/if}
+    {/if}
+  {/if}
   {#if !rec.txHash}
     <!-- the relayer's answer was lost: the chain says claimed, but this browser never got the hash -->
   {:else if env.PUBLIC_EXPLORER_TX_URL}
@@ -92,7 +111,7 @@
   {:else}
     <p class="text-xs text-zen-fg-muted">Transaction <span class="font-mono">{middle(rec.txHash, 8)}</span></p>
   {/if}
-  {#if rec.depositAddress && (kind === 'failed' || kind === 'refunding')}
-    <BridgeDetails depositAddress={rec.depositAddress} lines={[kind === 'failed' && rec.checkedAt ? notReturnedYet(rec.refundTo ?? 'the sender', claimedAt(rec.checkedAt)) : '']} />
+  {#if rec.depositAddress && (kind === 'failed' || kind === 'refunding' || kind === 'refunded' || kind === 'in-transit')}
+    <BridgeDetails depositAddress={rec.depositAddress} lines={[kind === 'failed' && rec.checkedAt ? notReturnedYet(rec.refundTo ?? 'the sender', claimedAt(rec.checkedAt)) : '', rec.bridgeStatus?.refundReason ? `The bridge said: ${rec.bridgeStatus.refundReason}` : '']} />
   {/if}
 {/if}
