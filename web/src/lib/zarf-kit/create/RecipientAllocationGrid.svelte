@@ -56,7 +56,7 @@
 
     // Keep row numbers visible on phones so the issue list's references remain usable.
     const columns =
-        'grid-cols-[2rem_minmax(0,1fr)_5rem_2rem] sm:grid-cols-[2.5rem_minmax(0,1fr)_7rem_2.5rem]';
+        'grid-cols-[1.25rem_minmax(0,1fr)_2rem] sm:grid-cols-[2.5rem_minmax(0,1fr)_7rem_2.5rem]';
 
     const total = $derived(
         rows.reduce(
@@ -129,7 +129,7 @@
 
 <div class="overflow-hidden rounded-2xl border border-zen-border-subtle bg-zen-bg">
     <div
-        class="grid {columns} items-center gap-2 border-b border-zen-border-subtle bg-zen-fg/[0.02] px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-zen-fg-subtle"
+        class="hidden sm:grid {columns} items-center gap-2 border-b border-zen-border-subtle bg-zen-fg/[0.02] px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-zen-fg-subtle"
     >
         <span>#</span>
         <span>{identifierLabel}</span>
@@ -158,7 +158,7 @@
                     {#if invalid}<AlertTriangle class="hidden h-3 w-3 sm:block" />{/if}
                 </span>
                 <!-- Phones get 16px inputs: iOS Safari zooms the page on focus below that. -->
-                <div class="flex min-w-0 items-center gap-2">
+                <div class="col-span-2 flex min-w-0 items-center gap-2 sm:col-span-1">
                     <input
                         bind:this={identifierInputs[i]}
                         type={identifierInputType}
@@ -171,9 +171,9 @@
                         aria-invalid={badIdentifier}
                         aria-describedby={describedBy(i, 'identifier')}
                         placeholder={identifierPlaceholder}
-                        class="min-w-0 flex-1 rounded bg-transparent px-1.5 py-1 font-mono text-base text-zen-fg focus:outline-none focus-visible:ring-2 focus-visible:ring-zen-fg/70 sm:text-xs {badIdentifier
-                            ? 'text-zen-error'
-                            : ''}"
+                        class="h-9 min-w-0 flex-1 rounded-lg border bg-zen-fg/[0.03] px-2 py-1 font-mono text-base text-zen-fg focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--zen-input-focus)] sm:h-8 sm:text-xs {badIdentifier
+                            ? 'border-zen-error text-zen-error'
+                            : 'border-[var(--zen-input-border)] hover:border-[var(--zen-input-border-hover)]'}"
                     />
                     {#if duplicate}
                         <span
@@ -182,6 +182,8 @@
                         >
                     {/if}
                 </div>
+                <div class="col-start-2 flex min-w-0 items-center gap-2 sm:col-start-auto">
+                <span class="text-xs text-zen-fg-muted sm:hidden" aria-hidden="true">Amount</span>
                 <input
                     bind:this={amountInputs[i]}
                     type="text"
@@ -192,16 +194,17 @@
                     aria-invalid={badAmount}
                     aria-describedby={describedBy(i, 'amount')}
                     placeholder="0"
-                    class="h-8 w-full rounded-lg border bg-zen-fg/[0.03] px-2.5 text-right font-mono text-base tabular-nums text-zen-fg focus:border-zen-fg/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-zen-fg/70 sm:text-xs {badAmount
-                        ? 'border-zen-error/40 text-zen-error'
-                        : 'border-zen-border'}"
+                    class="h-9 min-w-0 w-full rounded-lg border bg-zen-fg/[0.03] px-2.5 text-right font-mono text-base tabular-nums text-zen-fg focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--zen-input-focus)] sm:h-8 sm:text-xs {badAmount
+                        ? 'border-zen-error text-zen-error'
+                        : 'border-[var(--zen-input-border)] hover:border-[var(--zen-input-border-hover)]'}"
                 />
+                </div>
                 {#if hasRows}
                     <button
                         type="button"
                         onclick={() => deleteRow(i)}
                         aria-label={`Remove recipient ${i + 1}`}
-                        class="flex h-8 w-8 items-center justify-center rounded text-zen-fg-faint transition-colors hover:bg-zen-error/10 hover:text-zen-error"
+                        class="flex h-8 w-8 items-center justify-center rounded text-zen-fg-muted transition-colors hover:bg-zen-error/10 hover:text-zen-error"
                     >
                         <Trash2 class="h-3.5 w-3.5" />
                     </button>

@@ -99,7 +99,7 @@
                 rows="5"
                 spellcheck="false"
                 placeholder={pastePlaceholder}
-                class="w-full rounded-lg border border-zen-border-subtle bg-zen-bg p-3 font-mono text-xs text-zen-fg focus:outline-none focus-visible:ring-2 focus-visible:ring-zen-fg/70"
+                class="w-full rounded-lg border border-[var(--zen-input-border)] hover:border-[var(--zen-input-border-hover)] bg-zen-bg p-3 font-mono text-base sm:text-xs text-zen-fg focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--zen-input-focus)]"
             ></textarea>
             <div class="flex items-center gap-2">
                 <ZenButton variant="primary" size="sm" onclick={applyText}>Add to List</ZenButton>
@@ -121,7 +121,7 @@
     {/if}
 
     {#if errors.length > 0}
-        <div role="alert" class="rounded-xl bg-zen-warning/5 p-3 text-xs text-zen-warning">
+        <div role="alert" class="rounded-xl bg-zen-warning-muted p-3 text-xs text-zen-warning-content">
             <div class="flex items-center gap-2 font-semibold">
                 <AlertTriangle class="h-4 w-4" />
                 {errors.length === 1 ? '1 line was skipped' : `${errors.length} lines were skipped`}

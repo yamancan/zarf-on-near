@@ -76,7 +76,7 @@
          lockup and nav on the left, X, divider and theme toggle on the right. NEAR adds the network name where Zarf
          has its wallet button, and keeps Send reachable on phones (critic P1-24) -->
     <header class="h-16 bg-zen-bg border-b-[0.5px] border-zen-border-subtle flex items-center justify-between gap-3 px-4 sm:px-6 sticky top-0 z-50">
-      <div class="flex items-center gap-5 md:gap-8">
+      <div class="flex min-w-0 items-center gap-5 md:gap-8">
         <a href="/" class="group opacity-80 hover:opacity-100 transition-opacity" aria-label="{brand} home">{@render lockup()}</a>
         {#if !recipient}
           <nav class="flex items-center gap-4 md:gap-6" aria-label="Main">
@@ -90,7 +90,7 @@
           </nav>
         {/if}
       </div>
-      <div class="flex items-center gap-4">
+      <div class="flex shrink-0 items-center gap-4">
         <a href="https://x.com/zarfto" target="_blank" rel="noopener noreferrer" aria-label="Follow Zarf on X" class="hidden sm:inline-flex text-zen-fg-subtle hover:text-zen-fg transition-colors">
           <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
             <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"></path>
@@ -119,7 +119,6 @@
               <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"></path>
               </svg>
-              X
             </a>
           {/if}
         </div>

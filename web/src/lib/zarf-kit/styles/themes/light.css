@@ -91,6 +91,13 @@
     --zen-btn-ghost-text: oklch(50% 0.006 290); /* Quiet but readable: >= 4.5:1 on the light ground (T-042) */
     --zen-btn-ghost-text-hover: oklch(35% 0.008 290); /* Stronger on hover */
 
+    --zen-btn-disabled-bg: transparent;
+    --zen-btn-disabled-text: var(--zen-fg-subtle);
+    --zen-btn-disabled-border: var(--zen-border-strong);
+    --zen-input-border: oklch(62% 0.006 290);
+    --zen-input-border-hover: oklch(50% 0.006 290);
+    --zen-input-focus: var(--zen-fg-muted);
+
     /* Danger Button - Destructive actions
      Error color border, solid colors */
     --zen-btn-danger-bg: transparent;

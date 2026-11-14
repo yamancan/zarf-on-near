@@ -1,6 +1,4 @@
 <script lang="ts">
-    import { fade } from 'svelte/transition';
-
     interface Props {
         text?: string;
         position?: 'top' | 'bottom' | 'left' | 'right';
@@ -11,55 +9,76 @@
 
     let isHovered = $state(false);
     let isFocused = $state(false);
+    let dismissed = $state(false);
+    let anchor: HTMLDivElement;
 
     // Show tooltip on hover OR focus for keyboard accessibility
-    let isVisible = $derived(isHovered || isFocused);
+    let isVisible = $derived((isHovered || isFocused) && !dismissed);
+
+    // Cards can clip overflow. Mount the bubble on the page and keep it within
+    // the viewport, including when the trigger moves during scrolling.
+    function place(node: HTMLDivElement, side: Props['position']) {
+        document.body.appendChild(node);
+        function positionBubble() {
+            const a = anchor.getBoundingClientRect();
+            const b = node.getBoundingClientRect();
+            let x = a.left + (a.width - b.width) / 2;
+            let y = side === 'top' ? a.top - b.height - 8 : a.bottom + 8;
+            if (side === 'left' || side === 'right') {
+                x = side === 'left' ? a.left - b.width - 8 : a.right + 8;
+                y = a.top + (a.height - b.height) / 2;
+            }
+            node.style.left = `${Math.max(12, Math.min(x, innerWidth - b.width - 12))}px`;
+            node.style.top = `${Math.max(12, Math.min(y, innerHeight - b.height - 12))}px`;
+        }
+        function escape(event: KeyboardEvent) {
+            if (event.key === 'Escape') dismissed = true;
+        }
+        positionBubble();
+        const observer = new ResizeObserver(positionBubble);
+        observer.observe(node);
+        window.addEventListener('resize', positionBubble);
+        window.addEventListener('scroll', positionBubble, true);
+        window.addEventListener('keydown', escape);
+        return {
+            update(next: Props['position']) { side = next; positionBubble(); },
+            destroy() {
+                observer.disconnect();
+                window.removeEventListener('resize', positionBubble);
+                window.removeEventListener('scroll', positionBubble, true);
+                window.removeEventListener('keydown', escape);
+                node.remove();
+            },
+        };
+    }
 </script>
 
 <div
+    bind:this={anchor}
     class="relative inline-block"
     role="group"
-    onmouseenter={() => (isHovered = true)}
+    onmouseenter={() => { isHovered = true; dismissed = false; }}
     onmouseleave={() => (isHovered = false)}
-    onfocusin={() => (isFocused = true)}
+    onfocusin={() => { isFocused = true; dismissed = false; }}
     onfocusout={() => (isFocused = false)}
 >
     {@render children?.()}
 
     {#if isVisible}
         <div
+            use:place={position}
             role="tooltip"
             aria-live="polite"
-            transition:fade={{ duration: 150 }}
             class="
-                absolute z-50 px-3 py-1.5
+                fixed z-[100] px-3 py-1.5
                 text-xs font-medium
                 text-zen-bg bg-zen-fg
                 rounded-lg shadow-lg
-                w-max max-w-48 whitespace-normal text-center pointer-events-none
-                {position === 'top'
-                ? 'bottom-full left-1/2 -translate-x-1/2 mb-2'
-                : position === 'bottom'
-                  ? 'top-full left-1/2 -translate-x-1/2 mt-2'
-                  : position === 'left'
-                    ? 'right-full top-1/2 -translate-y-1/2 mr-2'
-                    : 'left-full top-1/2 -translate-y-1/2 ml-2'}
+                w-max max-w-[min(16rem,calc(100vw-24px))] whitespace-normal
+                [overflow-wrap:anywhere] text-center pointer-events-none
             "
         >
             {text}
-            <!-- Arrow -->
-            <div
-                class="
-                    absolute w-2 h-2 bg-zen-fg rotate-45
-                    {position === 'top'
-                    ? 'top-full left-1/2 -translate-x-1/2 -mt-1'
-                    : position === 'bottom'
-                      ? 'bottom-full left-1/2 -translate-x-1/2 -mb-1'
-                      : position === 'left'
-                        ? 'left-full top-1/2 -translate-y-1/2 -ml-1'
-                        : 'right-full top-1/2 -translate-y-1/2 -mr-1'}
-                "
-            ></div>
         </div>
     {/if}
 </div>
