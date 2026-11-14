@@ -1,6 +1,6 @@
 # Clean clone -> `make test` and `make demo`. No secrets, no Google login.
 # Needs Node 24 and pnpm 10.30.3 (pinned per package); `pnpm install` needs network access.
-.PHONY: test demo demo-sandbox install verifier relayer web watcher scripts faucet proxy mailer contract
+.PHONY: test demo demo-sandbox install verifier relayer web watcher scripts security faucet proxy mailer contract
 
 PNPM_INSTALL := pnpm install --frozen-lockfile
 
@@ -8,7 +8,7 @@ PNPM_INSTALL := pnpm install --frozen-lockfile
 # Exit 1 if anything that ran failed; a contract skipped for a missing toolchain is not a failure.
 test:
 	@status=""; fail=0; \
-	for t in verifier relayer web watcher scripts proxy mailer; do \
+	for t in verifier relayer web watcher scripts security proxy mailer; do \
 	  if $(MAKE) --no-print-directory $$t; then status="$$status $$t ✓"; else status="$$status $$t ✗"; fail=1; fi; \
 	done; \
 	if [ ! -d faucet ]; then status="$$status faucet NOT RUN (no faucet/)"; \
@@ -53,6 +53,12 @@ mailer:
 scripts:
 	cd relayer && $(PNPM_INSTALL)
 	node --test 'scripts/*.test.mjs'
+
+# Security and release regressions use disposable repositories and synthetic credentials.
+# Requires Python 3.11+, Git and gitleaks. No provider access or hosted release.
+security:
+	python3 scripts/secret-scan.test.py
+	python3 scripts/publish.test.py
 
 # The contract's own tests (contract/Makefile: unit = cargo test, integration = wasm + near-workspaces);
 # skipped with a reason when they cannot run here.
