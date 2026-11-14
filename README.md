@@ -307,4 +307,4 @@ Real-World Money (primary), Open Innovation.
 
 ## License
 
-MIT, see `LICENSE`.
+PolyForm Noncommercial 1.0.0: free for noncommercial use; commercial use needs a license from Trion Labs.

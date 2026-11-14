@@ -43,7 +43,7 @@ proof, the destination and the amount. The README's "How trust works" has the de
 - One person may enter two independent projects if each README names the other (Q-015). Our second
   entry is **ad402-near**: https://github.com/yamancan/ad402-near.
   The two share no code.
-- License: MIT.
+- License: PolyForm Noncommercial 1.0.0 (`LICENSE`).
 
 ## How trust works
 
