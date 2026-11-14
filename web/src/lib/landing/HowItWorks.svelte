@@ -8,6 +8,7 @@
   import AmountPanel from '$lib/AmountPanel.svelte';
   import Avatar from '$lib/Avatar.svelte';
   import ClaimCard from '$lib/ClaimCard.svelte';
+  import { TESTNET } from '$lib/network';
   import ZenCard from '$lib/zarf-kit/components/ui/ZenCard.svelte';
 
   // The landing names no testnet (owner, T-040): the pictures show the product as it reads on mainnet.
@@ -76,21 +77,23 @@
 {/snippet}
 
 <section class="pt-4 md:pt-8 pb-24" aria-label="How it works">
-  <ol class="container mx-auto px-6 max-w-6xl grid md:grid-cols-3 gap-12 md:gap-8">
-    <li>
+  <!-- Three columns from lg: at 768 px three slices were too narrow and collapsed (T-041); below lg one column, phone width -->
+  <ol class="container mx-auto px-6 max-w-6xl grid lg:grid-cols-3 gap-12 lg:gap-8">
+    <li class="w-full max-w-md mx-auto lg:max-w-none">
       {@render slice(grid)}
       <h2 class="text-xl font-semibold mt-6 mb-1.5 tracking-tight text-base-content">Add Emails and Amounts</h2>
       <p class="text-sm text-zen-fg-muted">Pay once, in USDC.</p>
     </li>
-    <li>
+    <li class="w-full max-w-md mx-auto lg:max-w-none">
       {@render slice(claim)}
       <h2 class="text-xl font-semibold mt-6 mb-1.5 tracking-tight text-base-content">They Claim with Google</h2>
       <p class="text-sm text-zen-fg-muted">No gas and no seed phrase.</p>
     </li>
-    <li>
+    <li class="w-full max-w-md mx-auto lg:max-w-none">
       {@render slice(arrived)}
       <h2 class="text-xl font-semibold mt-6 mb-1.5 tracking-tight text-base-content">USDC Arrives</h2>
-      <p class="text-sm text-zen-fg-muted">In their NEAR account, or on the chain they pick.</p>
+      <!-- Payouts to other chains are mainnet only and not yet run with real money: testnet promises the NEAR account only -->
+      <p class="text-sm text-zen-fg-muted">{TESTNET ? 'In their NEAR account.' : 'In their NEAR account, or on the chain they pick.'}</p>
     </li>
   </ol>
 </section>

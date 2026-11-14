@@ -10,6 +10,7 @@
   import { MARKS } from '$lib/chains';
   import { TESTNET, UNAUDITED_LINE } from '$lib/network';
   import { themeStore } from '$lib/zarf-kit/stores/themeStore.svelte';
+  import ZenBadge from '$lib/zarf-kit/components/ui/ZenBadge.svelte';
   import ZenButton from '$lib/zarf-kit/components/ui/ZenButton.svelte';
 
   let { tryUrl }: { tryUrl: string } = $props();
@@ -159,7 +160,7 @@
   onmousemove={handleMouseMove}
   onmouseleave={handleMouseLeave}
   role="presentation"
-  class="relative w-full py-24 md:py-32 flex flex-col items-center justify-center overflow-hidden bg-transparent hero-container"
+  class="relative w-full pt-24 pb-20 md:pt-32 md:pb-24 flex flex-col items-center justify-center overflow-hidden bg-transparent hero-container"
 >
   <!-- 1. Wave grid (spotlight) -->
   <div class="absolute inset-0 pointer-events-none z-0 wave-grid-spotlight" aria-hidden="true"></div>
@@ -201,15 +202,18 @@
       class="flex flex-col sm:flex-row items-center gap-4 mt-6 w-full sm:w-auto transition-all duration-700 ease-out {mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-5'}"
       style="transition-delay: 1200ms;"
     >
-      <!-- "Mainnet!" corner tag: the owner's own choice (T-040), a tag on the button, not a sentence -->
+      <!-- "Mainnet!" corner tag: the owner's own choice (T-040), a tag on the button, not a sentence. The kit's neutral
+           ZenBadge (as FundFromChain's "Mainnet"), on an opaque backing so the button edge does not run through it, and on
+           the straight part of the top edge. -->
       <a href="/create" class="relative block w-full sm:w-auto" aria-label="Send USDC (mainnet)"><ZenButton tabindex={-1} variant="primary" size="lg" class="w-full sm:w-auto">
         {#snippet iconLeft()}<Mark svg={MARKS.usdc} class="w-5 h-5" />{/snippet}
         Send USDC
-      </ZenButton><span class="pointer-events-none absolute -top-2.5 right-3 rounded-full px-2 py-1 text-[10px] font-semibold leading-none tracking-wide bg-zen-success-content text-zen-bg ring-2 ring-zen-bg" aria-hidden="true">Mainnet!</span></a>
+      </ZenButton><span class="pointer-events-none absolute -top-2 right-7 flex rounded-md bg-zen-bg ring-1 ring-zen-fg/10" aria-hidden="true"><ZenBadge size="sm">Mainnet!</ZenBadge></span></a>
       <!-- Glass at rest (T-040): the kit's glass fill and blur (styles/index.css .zen-glass tokens) on the link, in the
-           button's own radius, so the ring spotlight does not show through the transparent secondary button. ZenButton
+           button's own radius, so the ring spotlight does not show through the transparent secondary button. A 5% fg
+           tint raises it from the page in dark mode, where the glass fill alone equals the background (critic). ZenButton
            itself is untouched: its ring, hover and pressed fills sit on top. -->
-      <a href={tryUrl} class="block w-full sm:w-auto rounded-full" style="background-color: oklch(from var(--zen-bg) l c h / var(--zen-glass-bg-opacity, 0.7)); backdrop-filter: blur(var(--zen-glass-blur, 24px)); -webkit-backdrop-filter: blur(var(--zen-glass-blur, 24px));"><ZenButton tabindex={-1} variant="secondary" size="lg" class="w-full sm:w-auto">
+      <a href={tryUrl} class="block w-full sm:w-auto rounded-full" style="background-color: oklch(from var(--zen-bg) l c h / var(--zen-glass-bg-opacity, 0.7)); backdrop-filter: blur(var(--zen-glass-blur, 24px)); -webkit-backdrop-filter: blur(var(--zen-glass-blur, 24px)); box-shadow: inset 0 0 0 999px oklch(from var(--zen-fg) l c h / 0.05);"><ZenButton tabindex={-1} variant="secondary" size="lg" class="w-full sm:w-auto">
         {#snippet iconLeft()}<Mark svg={MARKS.near} class="w-5 h-5" />{/snippet}
         Try on NEAR Testnet
       </ZenButton></a>
