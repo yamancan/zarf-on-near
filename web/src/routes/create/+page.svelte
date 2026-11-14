@@ -2,7 +2,7 @@
   import { onMount, tick } from 'svelte';
   import { env } from '$env/dynamic/public';
   import { takeBackup } from '$lib/create/campaigns';
-  import { buildDraft, claimLink, LONG_LINKS_ABOVE, mailtoHref, messageText, readRecoveryFile, recoveryFile, type Draft } from '$lib/create/campaign';
+  import { buildDraft, claimLink, LONG_LINKS_ABOVE, mailtoHref, messageText, readRecoveryFile, recoveryFile, type Draft, type Recipient } from '$lib/create/campaign';
   import { saveSent } from '$lib/create/campaigns';
   import { getAccount, getCampaignByRoot, getCampaignView, getConfig, getGasPrice, getHeight, getPrepayBalance, getStorageCosts, txOutcome, type ContractConfig } from '$lib/create/chain';
   import {
@@ -21,6 +21,7 @@
   import { getClaimState, nearView, type ClaimState } from '$lib/services';
   import { CIRCLE_LINE, TESTNET, UNIT } from '$lib/network';
   import { ArrowRight, ArrowUpRight, Check, CheckCircle2, ChevronDown, Copy, Download, ExternalLink, Eye, Lock, Mail, Plus, RefreshCw } from 'lucide-svelte';
+  import { emailAll, notifyOne, type MailStatus } from '$lib/create/mailer';
   import ClaimCard, { type ClaimMode } from '$lib/ClaimCard.svelte';
   import Mark from '$lib/Mark.svelte';
   import { MARKS } from '$lib/chains';
@@ -170,6 +171,31 @@
   );
   const links = $derived(linkRows.map(({ r, link }) => `${r.email},${formatAmount(BigInt(r.amount))},${link}`));
   let copiedRow = $state(-1);
+  // "Email All Recipients" (T-039): testnet only, hidden while PUBLIC_MAILER_URL is empty
+  const mailerUrl = env.PUBLIC_MAILER_URL || '';
+  let mail = $state<Record<string, MailStatus>>({});
+  let mailBusy = $state(false);
+  // Rows still worth an email: not claimed or paying (the mailer refuses those anyway)
+  const mailable = $derived(linkRows.filter((_, i) => claims[i] !== 'claimed' && claims[i] !== 'pending').map(({ r }) => r));
+  const mailCounts = $derived.by(() => {
+    const v = mailable.map((r) => mail[r.commitment]);
+    return { done: v.filter((x) => x === 'sent').length, failed: v.filter((x) => x === 'failed').length, started: v.some(Boolean), all: mailable.length };
+  });
+  async function emailRecipients() {
+    if (!result || mailBusy) return;
+    mailBusy = true;
+    const todo = mailable.filter((r) => mail[r.commitment] !== 'sent');
+    try {
+      await emailAll(mailerUrl, result.campaignId, todo, (c, st) => (mail = { ...mail, [c]: st }));
+    } finally {
+      mailBusy = false;
+    }
+  }
+  async function retryEmail(r: Recipient) {
+    if (!result) return;
+    mail = { ...mail, [r.commitment]: 'sending' };
+    mail = { ...mail, [r.commitment]: await notifyOne(mailerUrl, result.campaignId, r) };
+  }
   // Display only (Create still goes through fundCampaign): the sender's test USDC and NEAR, and what this send
   // needs in NEAR. storage_costs and prepay_balance_of give the storage pre-pay exactly as fundCampaign computes
   // it; the fee margin is all the gas fundingTxs attaches at the current gas price. The NEAR check is advisory.
@@ -602,6 +628,7 @@
     skipped = [];
     cleared = null;
     claims = [];
+    mail = {};
     previewRow = 0;
     uiStep = 0;
   }
@@ -934,6 +961,19 @@
           <ZenAlert variant="warning">These links are long; some apps cut them. Send them by email, or copy them carefully.</ZenAlert>
         {/if}
 
+        {#if mailerUrl && mailable.length}
+          <!-- T-039: Zarf emails every link; the per-row mail icon, Copy All and CSV below stay as the manual path -->
+          <div class="space-y-2">
+            <ZenButton variant="primary" onclick={emailRecipients} disabled={mailBusy || mailCounts.done === mailCounts.all}>
+              {#snippet iconLeft()}<Mail class="w-4 h-4" />{/snippet}{mailBusy ? 'Emailing…' : mailCounts.done === mailCounts.all ? 'All Emailed' : 'Email All Recipients'}
+            </ZenButton>
+            <p class="text-xs text-zen-fg-subtle">Zarf sends the emails through Resend; Resend sees each address and its link.</p>
+            {#if mailCounts.started && !mailBusy}
+              <p class="text-sm text-zen-fg-muted" role="status">Emailed {mailCounts.done} of {mailCounts.all}.{mailCounts.failed ? ` ${mailCounts.failed} did not go out: retry below.` : ''}</p>
+            {/if}
+          </div>
+        {/if}
+
         <div class="space-y-3">
           <div class="flex items-center justify-between gap-3">
             <span class="text-sm text-zen-fg-muted inline-flex items-center gap-1.5">
@@ -961,6 +1001,10 @@
                 {#if c === 'claimed'}<ZenBadge variant="success" size="sm">Claimed</ZenBadge>
                 {:else if c === 'pending'}<ZenBadge variant="info" size="sm">Paying</ZenBadge>
                 {:else if c === 'unclaimed'}<ZenBadge variant="default" size="sm">Waiting</ZenBadge>{/if}
+                {#if mail[r.commitment] === 'sent'}<span class="shrink-0 inline-flex items-center gap-1 text-xs text-zen-fg-subtle"><Check class="w-3.5 h-3.5" aria-hidden="true" />Emailed</span>
+                {:else if mail[r.commitment] === 'sending'}<span class="shrink-0 text-xs text-zen-fg-subtle">Sending…</span>
+                {:else if mail[r.commitment] === 'closed'}<span class="shrink-0 text-xs text-zen-fg-subtle">Closed</span>
+                {:else if mail[r.commitment] === 'failed'}<ZenButton variant="ghost" size="xs" onclick={() => retryEmail(r)}>{#snippet iconLeft()}<RefreshCw class="w-3.5 h-3.5" />{/snippet}Retry</ZenButton>{/if}
                 <Tooltip text={copiedRow === i ? 'Copied' : 'Copy Message'} position="top">
                   <button type="button" class="inline-flex items-center justify-center w-8 h-8 rounded-full text-zen-fg-subtle hover:text-zen-fg hover:bg-zen-fg/5" aria-label={copiedRow === i ? 'Copied' : 'Copy Message'} onclick={() => copyOne(i)}>
                     {#if copiedRow === i}<Check class="w-3.5 h-3.5" aria-hidden="true" />{:else}<Copy class="w-3.5 h-3.5" aria-hidden="true" />{/if}
