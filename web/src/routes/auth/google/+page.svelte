@@ -14,10 +14,15 @@
   let back = $state('');
 
   onMount(() => {
+    const callbackPresent = new URLSearchParams(location.hash.slice(1)).size > 0;
     const cb = parseCallback(location.hash);
     history.replaceState(history.state, '', location.pathname); // the id_token leaves the address bar and history at once
     const attempt = loadAttempt();
     if (attempt?.campaign && attempt.commitment) back = `/claim/${attempt.campaign}/${attempt.commitment}`;
+    if (!callbackPresent) {
+      failed = { title: 'Open Your Claim Link', line: 'Open your claim link to start signing in.', cancelled: true };
+      return;
+    }
     // Cancelling is not an error: the claim waits (flow canvas). The amount comes from this tab's own link.
     const waiting = attempt && /^[1-9]\d{0,38}$/.test(attempt.amount) ? `Your ${formatAmount(BigInt(attempt.amount))} ${UNIT} is still waiting.` : 'Your claim is still waiting.';
     if ('error' in cb) {
@@ -45,7 +50,7 @@
         {#if back}
           <a href={back} class="block w-full sm:w-auto"><ZenButton tabindex={-1} variant="primary" class="w-full sm:w-auto">Back to Claim</ZenButton></a>
         {:else}
-          <a href="/" class="text-xs text-zen-fg-subtle underline underline-offset-2 hover:text-zen-fg">About Zarf</a>
+          <a href="/" class="text-xs text-zen-fg-muted underline underline-offset-2 hover:text-zen-fg">About Zarf</a>
         {/if}
         {#if failed.code}
           <details class="group text-xs text-zen-fg-muted">

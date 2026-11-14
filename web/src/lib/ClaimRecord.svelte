@@ -11,6 +11,7 @@
   import { formatAmount } from '$lib/create/recipients';
   import { UNIT } from '$lib/network';
   import Amount from '$lib/Amount.svelte';
+  import AmountPanel from '$lib/AmountPanel.svelte';
   import Medallion from '$lib/Medallion.svelte';
   import ZenButton from '$lib/zarf-kit/components/ui/ZenButton.svelte';
 
@@ -50,20 +51,24 @@
 {:else if kind === 'refunded'}<Medallion icon={Undo2} tone="error" />
 {:else if kind === 'failed'}<Medallion icon={AlertTriangle} tone="error" />{/if}
 <h1 class="text-xl font-semibold tracking-tight">{heading}</h1>
+{#if kind === 'paid'}
+  <AmountPanel label="Paid Out" value={shown.value} unit={shown.unit} />
+{:else}
 <Amount
-  label={kind === 'unknown' ? 'This Link Held' : kind === 'paid' ? 'Paid Out' : kind === 'in-transit' ? 'On Its Way' : kind === 'refunded' ? 'Returned to the Sender' : kind === 'refunding' ? 'Going Back to the Sender' : 'Not Delivered'}
+  label={kind === 'unknown' ? 'This Link Held' : kind === 'in-transit' ? 'On Its Way' : kind === 'refunded' ? 'Returned to the Sender' : kind === 'refunding' ? 'Going Back to the Sender' : 'Not Delivered'}
   value={shown.value}
   unit={shown.unit}
   struck={kind === 'refunded'}
 />
+{/if}
 {#if !rec}
   <p class="text-sm text-zen-fg-muted max-w-xs">{CLAIMED_NO_RECORD}</p>
 {:else}
   <p class="text-sm text-zen-fg-muted max-w-xs" role="status">
     {#if kind === 'paid'}
-      to <span class="font-mono text-zen-fg" title={rec.destination}>{middle(rec.destination, rec.chainName ? 6 : 8)}</span>{#if rec.chainName}{' '}on {rec.chainName}{/if}
+      to <span class="font-mono text-zen-fg break-all">{rec.destination}</span>{#if rec.chainName}{' '}on {rec.chainName}{/if}
     {:else if kind === 'in-transit'}
-      to <span class="font-mono text-zen-fg" title={rec.destination}>{middle(rec.destination)}</span> on {rec.chainName}. Claimed on NEAR; the bridge has not confirmed the payout yet.
+      to <span class="font-mono text-zen-fg break-all">{rec.destination}</span> on {rec.chainName}. Claimed on NEAR; the bridge has not confirmed the payout yet.
     {:else if kind === 'refunded'}
       The bridge could not pay it out on {rec.chainName} and returned it to {rec.refundTo ?? 'the sender'} on NEAR. {nextStep('refunded')}
     {:else if kind === 'refunding'}

@@ -16,7 +16,6 @@
   import Tooltip from '$lib/zarf-kit/components/ui/Tooltip.svelte';
   import ZenBadge from '$lib/zarf-kit/components/ui/ZenBadge.svelte';
   import Note from '$lib/Note.svelte';
-  import PageHeader from '$lib/zarf-kit/components/ui/PageHeader.svelte';
   import ZenAlert from '$lib/zarf-kit/components/ui/ZenAlert.svelte';
   import ZenButton from '$lib/zarf-kit/components/ui/ZenButton.svelte';
   import ZenCard from '$lib/zarf-kit/components/ui/ZenCard.svelte';
@@ -58,9 +57,13 @@
 
   const view = <T,>(method: string, args: object) => nearView<T>(rpc!, contract!, method, args, 'optimistic');
 
-  onMount(async () => {
+  onMount(() => { void setup(); });
+
+  async function setup() {
+    setupError = '';
+    walletReady = false;
     if (!rpc || !contract) {
-      setupError = 'This site is not fully set up yet (PUBLIC_NEAR_RPC_URL, PUBLIC_CONTRACT_ID).';
+      setupError = 'Campaigns are not available here yet. Please try again later.';
       return;
     }
     try {
@@ -71,9 +74,9 @@
       wallet.onChange((a) => { if (a === account) return; account = a; if (a) void load(); }); // sign-in/out NEAR Connect reports in this page (T-032)
       if (account) await load();
     } catch {
-      setupError = 'Could not read the contract. Try again in a minute.';
+      setupError = "Couldn't load your campaigns. Please try again.";
     }
-  });
+  }
 
   async function load() {
     error = '';
@@ -167,13 +170,12 @@
      gutters, a header row with PageHeader on the left and the primary action on the right -->
 <div class="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 h-full flex flex-col gap-8">
   <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
-  <!-- No subtitle (T-023 waste list item 13); the kit PageHeader takes the empty string -->
-  <PageHeader title="My Campaigns" description="" />
+    <h1 class="text-3xl font-light tracking-tight text-zen-fg">My Campaigns</h1>
     <div class="flex flex-wrap items-center justify-between sm:justify-end gap-4">
       <!-- The connected account sits beside the primary action, where Zarf's navbar keeps its wallet button -->
       {#if account}
         <span class="flex items-center gap-2 text-sm">
-          <Avatar name={account} /><span class="hidden sm:inline font-mono truncate max-w-40">{account}</span>
+          <Avatar name={account} /><span class="font-mono truncate max-w-40" title={account}>{account}</span>
           <ZenButton variant="ghost" size="sm" disabled={!!busy} onclick={async () => { await wallet?.signOut(); account = null; rows = null; }}>Disconnect</ZenButton>
         </span>
       {/if}
@@ -194,7 +196,12 @@
   </div>
 
   {#if setupError}
-    <ZenAlert variant="error">{setupError}</ZenAlert>
+    <ZenAlert variant="error">
+      {setupError}
+      {#snippet actions()}
+        {#if rpc && contract}<ZenButton variant="secondary" size="sm" onclick={setup}>Try Again</ZenButton>{/if}
+      {/snippet}
+    </ZenAlert>
   {:else if !walletReady}
     <Note tone="pending">Loading…</Note>
   {:else if !account}
@@ -232,8 +239,10 @@
         {@const ms = Number(BigInt(r.c.deadline_ns) / 1_000_000n)}
         {@const left = timeLeft(ms, now)}
         {@const label = sentLabel(sent.get(r.id))}
+        {@const createdAt = sent.get(r.id)?.createdAt}
         <section class="py-6 flex flex-col gap-4" aria-label="Campaign {r.id}">
-          <!-- Who it went to leads when this browser sent it, else the amount; the campaign number sits in Details (T-023 item 11) -->
+          <p class="text-xs text-zen-fg-muted">Campaign #{r.id}{#if createdAt} · Created {new Date(createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}{/if}</p>
+          <!-- The visible number distinguishes sends even when their amounts match. -->
           <div class="flex items-center justify-between gap-3">
             {#if label}
               <span class="min-w-0 text-base font-medium break-words">{label}</span>
