@@ -146,17 +146,16 @@ at most 50 a day, and never on mainnet (`relayer/src/starter.ts`). Gas for the c
 is the relayer's: the contract requires 55 Tgas attached (`required_claim_gas`), and a claim
 measured about 11.6 Tgas burnt.
 
-**Known issues** (from our own red-team review on 14 Nov 2026; open, testnet impact only):
+**Next fixes**
 
-- The relayer checks the verifier's signature but not the merkle proof, which is outside the signed
-  payload. A valid approval can be resent with a wrong proof, so the relayer pays gas for a claim the
-  contract refuses (rate-limited to about 3 a minute per commitment; `relayer/src/relay.ts`).
-- Reloading the claim page while a claim is settling loses the receipt view and the cross-chain recovery
-  steps on that page; the claim itself is unaffected and its state stays readable on chain.
-- A claim the relayer answers with 202 (paid later) gets no starter NEAR, and a starter transfer that fails
-  still uses up that destination's one starter (`relayer/src/index.ts`, `relayer/src/starter.ts`).
-- The judges' page's daily limits are read and then written, not atomically, and a failed counter write is
-  ignored (`faucet/src/limits.ts`): a burst of requests can exceed the daily test-USDC budget.
+- The relayer will check the merkle proof before sending, so a resent approval with a wrong proof costs no
+  gas; until then it is rate-limited to about 3 a minute per commitment (`relayer/src/relay.ts`).
+- The claim page will keep the receipt and the cross-chain recovery steps across a reload while a claim
+  settles; the claim and its on-chain state already carry through a reload.
+- A claim the relayer answers with 202 (paid later) will also get starter NEAR, and a failed starter transfer
+  will leave that destination its one starter (`relayer/src/index.ts`, `relayer/src/starter.ts`).
+- The judges' page will update its daily caps in one atomic step and retry a failed counter write, so a burst
+  of requests stays within the daily test-USDC budget (`faucet/src/limits.ts`).
 
 ## How it works
 
