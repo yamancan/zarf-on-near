@@ -198,6 +198,7 @@ measured about 11.6 Tgas burnt.
 | Judges' page | `faucet/` | Cloudflare Worker behind `/try`: Turnstile, per-IP/per-email/daily limits, then a one-recipient test-USDC campaign and its claim link |
 | Watcher | `watcher/` | Cron Worker: alerts on a proposed upgrade, owner or verifier-key change, the escrow's code hash or any access key on it, and a changed live claim page (`watcher/README.md`) |
 | Proxy | `proxy/` | `near.zarf.to`: passes `/try` (with its script, font and API) and `/health` to the judges' page, everything else to the claim app |
+| Mailer | `mailer/` | Email All Recipients: emails each recipient their claim link through Resend, only for a leaf whose Merkle proof reaches a live, funded, unclaimed campaign on chain; one mail per commitment, capped per campaign, per day and per sender; stores commitments only |
 
 ## Run it
 
