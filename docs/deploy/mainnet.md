@@ -8,15 +8,18 @@ Roles: the **contract operator** runs the escrow side (`scripts/deploy.sh`), the
 hosting (`scripts/mainnet-keys.mjs`, `scripts/deploy-mainnet-hosting.sh`, `docs/deploy/mainnet-hosting.md`).
 Nothing starts until step 0 is complete.
 
-**What is deployed.** Contract 0.1.2: the reviewed `contract/` tree (later commits change only scripts and docs). Release wasm 316,408 B, sha256 `3f703dd7808b25b990dd8623f3603b47a5325ec139e5186344da00f308493bd5`,
+**What is deployed.** Contract 0.1.2: the reviewed `contract/` tree (later commits change only scripts
+and docs). Release wasm 316,408 B, sha256
+`3f703dd7808b25b990dd8623f3603b47a5325ec139e5186344da00f308493bd5`,
 **code hash `5GdxDSB4sGW9Ewod4Q4Na613C2sLQjVfFjLbbZbKt6N8`**: the same as testnet `zarf-near-1112.testnet`,
 rebuilt on the deploy host with the same result. If `deploy.sh` builds a different hash,
 stop. Hosting is the reviewed web build (or the reviewed head at the time).
 
 **No owner, escrow or relayer full-access key ever exists on the deploy host.** Every signed step runs on
-the owner's own machine, off the deploy host, from an *owner kit* that `deploy.sh` writes (the release wasm plus `owner-steps.sh`, no
-secret in it). The deploy host keeps only the verifier seed S and the relayer's claim-only key R, which the
-Workers need, and checks the result with read-only views (`VERIFY_ONLY=1`).
+the owner's own machine, off the deploy host, from an *owner kit* that `deploy.sh` writes (the release
+wasm plus `owner-steps.sh`, no secret in it). The deploy host keeps only the verifier seed S and the
+relayer's claim-only key R, which the Workers need, and checks the result with read-only views
+(`VERIFY_ONLY=1`).
 
 | # | Who | Step | Done when |
 | --- | --- | --- | --- |
@@ -34,8 +37,8 @@ Workers need, and checks the result with read-only views (`VERIFY_ONLY=1`).
 | 6 | owner (+ both agents watching) | Demo: on `https://zarf-near-claim.sparkling-queen-5e77.workers.dev/create`, from `<owner>.near`: a 2-3 USDC campaign, deadline ≈ 45 days (the contract requires ≥ 30 days on mainnet; the verifier keys are valid 60 days), prepay as the page computes (≈ 0.05 NEAR). Then one claim of ≥ 1 USDC with payout to **Base**, to the owner's own Base wallet (not an exchange). Live 1Click quotes: 1 USDC loses ≈ 1.25%, 3 USDC ≈ 1.09%; the page refuses a worst case over 5% | claim and payout tx hashes recorded below |
 | 7 | owner | Explorer checks (below) | ticked |
 
-Step 0d, the backup verifier key, on the owner's machine, off the deploy host (Node 18+; the seed file is created mode 600 and never
-overwritten; the line prints only the public key S2):
+Step 0d, the backup verifier key, on the owner's machine, off the deploy host (Node 18+; the seed file
+is created mode 600 and never overwritten; the line prints only the public key S2):
 
 ```bash
 node -e 'const c=require("crypto"),fs=require("fs"),{privateKey:k,publicKey:p}=c.generateKeyPairSync("ed25519");fs.writeFileSync(process.argv[1],k.export({format:"der",type:"pkcs8"}).subarray(-32).toString("hex"),{mode:0o600,flag:"wx"});console.log(p.export({format:"der",type:"spki"}).subarray(-32).toString("hex"))' <offline-storage>/zarf-mainnet-verifier-backup.seed
@@ -55,12 +58,14 @@ scripts/deploy.sh                    # hardware-wallet owner: add OWNER_SIGN='si
 
 The relayer key file is read only to derive R; the verifier seed is never read (`SIGNER_PUBKEY` is given).
 
-**If S leaks.** The owner calls `remove_agent(S)` from the owner's machine and the web operator redeploys the verifier
-with the S2 seed (`SIGNER_SEED`) and `VERIFIER_SIGNERS` = S2. Every campaign created after `new` snapshots
-both keys, so live campaigns keep paying out. Without S2, removing S would freeze them until their deadline.
+**If S leaks.** The owner calls `remove_agent(S)` from the owner's machine and the web operator
+redeploys the verifier with the S2 seed (`SIGNER_SEED`) and `VERIFIER_SIGNERS` = S2. Every campaign created
+after `new` snapshots both keys, so live campaigns keep paying out. Without S2, removing S would freeze
+them until their deadline.
 
 Later: the verifier keys expire after 60 days. Before that, the owner adds new keys with `add_owner_key`
-(from the owner's machine), which take effect after the 1 h delay; campaigns snapshot the keys valid through their deadline.
+(from the owner's machine), which take effect after the 1 h delay; campaigns snapshot the keys valid
+through their deadline.
 
 ### Mainnet record
 
@@ -108,7 +113,8 @@ funds `<owner>.near` with about 5.0 NEAR and the guardian with 0.1 NEAR.
   `near contract call-function as-read-only escrow.<owner>.near get_config json-args '{}' network-config mainnet now`
   (expect `"network":"mainnet"`, `"upgrade_delay_ns":"3600000000000"`, the guardian's account).
 - The owner key was never on the deploy host. Upgrades, settings, owner and key changes are signed on
-  the owner's machine, off the deploy host. The deploy host holds only S (the verifier's signing seed) and R (can only call `claim`).
+  the owner's machine, off the deploy host. The deploy host holds only S (the verifier's signing seed) and
+  R (can only call `claim`).
 - **Residual, accepted with Mode W:** S on the deploy host (and in the verifier Worker) can still move funds
   through forged claims. `claim` pays any destination that carries a valid S signature, so whoever holds S
   can claim every unclaimed allocation of every live campaign to their own account, given the claim links

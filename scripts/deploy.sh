@@ -10,7 +10,8 @@
 # Mainnet (and OWNER_ON_MAC=1 on testnet) signs nothing on this host: no owner, escrow or relayer
 # full-access key is ever read here. It builds the wasm and writes an owner kit (the wasm plus
 # owner-steps.sh) that the owner runs on their own machine, off the deploy host, with near-cli-rs
-# (keys in the local key store or on a hardware wallet); then VERIFY_ONLY=1 checks the result from here with read-only RPC views.
+# (keys in the local key store or on a hardware wallet); then VERIFY_ONLY=1 checks the result from
+# here with read-only RPC views.
 #
 # Required env:
 #   CONTRACT_ID      account to deploy to (testnet: its full-access key in ~/.near-credentials)
@@ -250,8 +251,9 @@ if [[ ${OWNER_ON_MAC:-} == 1 ]]; then
   {
     echo '#!/usr/bin/env bash'
     echo "# Owner kit for $CONTRACT_ID ($NETWORK), written by scripts/deploy.sh on $(date -u +%FT%TZ)."
-    echo '# Run on YOUR own machine, not on the deploy host: every step signs with a key that only your machine holds'
-    echo '# (local key store or a hardware wallet). Resume after a failure with FROM=<step> bash owner-steps.sh.'
+    echo '# Run on YOUR own machine, not on the deploy host: every step signs with a key that only'
+    echo '# your machine holds (local key store or a hardware wallet). Resume after a failure with'
+    echo '# FROM=<step> bash owner-steps.sh.'
     for v in NETWORK CONTRACT_ID OWNER_ID RELAYER_ID USDC_ID; do printf '%s=%q\n' "$v" "${!v}"; done
     printf '%s=%q\n' R "$R" WASM_SHA256 "$wasm_sha" OWNER_SIGN "$owner_sign" INIT_ARGS "$(make_init_args)" \
       ESCROW_NEAR "${ESCROW_NEAR:-3.5 NEAR}" RELAYER_NEAR "${RELAYER_NEAR:-1 NEAR}"

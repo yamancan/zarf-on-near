@@ -16,8 +16,9 @@ Public data only. Keys live on the deploy host, mode 600, never in this repo.
 | Relayer | https://zarf-near-relayer-testnet.sparkling-queen-5e77.workers.dev (`GET /health`) |
 | NEAR RPC | https://test.rpc.fastnear.com |
 
-The three Workers are deployed with `wrangler deploy --env testnet` from the committed release head. Secrets go in with `wrangler secret put`, piped from files on the deploy host;
-their values are never printed or stored in the repo.
+The three Workers are deployed with `wrangler deploy --env testnet` from the committed release head.
+Secrets go in with `wrangler secret put`, piped from files on the deploy host; their values are never
+printed or stored in the repo.
 
 | Service | Version | From |
 | --- | --- | --- |
@@ -118,7 +119,8 @@ The 0.1.1 above was built from an uncommitted tree, so no commit matched the liv
 `contract_source_metadata.link` was null. 0.1.2 adds `repository` to `contract/Cargo.toml` (near-sdk
 reads it as the NEP-330 `link`) and was built from a clean, pushed revision
 (Rust 1.86.0, cargo-near 0.23.0, `cargo near build non-reproducible-wasm --no-abi`; unit tests
-71/71). Wasm 316,408 B, sha256 `3f703dd7808b25b990dd8623f3603b47a5325ec139e5186344da00f308493bd5`
+71/71). Wasm 316,408 B, sha256
+`3f703dd7808b25b990dd8623f3603b47a5325ec139e5186344da00f308493bd5`
 (base58 `5GdxDSB4sGW9Ewod4Q4Na613C2sLQjVfFjLbbZbKt6N8`). The code grew 32 B, so `apply_upgrade`
 attached 0.0005 NEAR (0.00032 needed).
 

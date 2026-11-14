@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 // Recorded 2026-11-10 from GET /v0/status for a real, never-funded mainnet quote (spike S3).
 import recorded from './fixtures/1click-status-pending.json';
+// A real signed 1Click quote. Its signed fields are kept separate from the status fixture above so that
+// fixture can use a placeholder recipient without changing a signature that covers it.
+import signedQuote from '../../web/src/lib/create/fixtures/oneclick-dry-exact-output.json';
 import {
   checkIntentsStatus, ed25519B58, PAYOUT_ASSETS, recipientFits, fetchIntentsStatus, IntentsError, quoteSignedBytes, verifyQuoteSignature, type IntentsClaim,
 } from '../src/intents';
@@ -203,6 +206,7 @@ describe('T-001: the loss check is exact, no truncation (Duo P2)', () => {
 });
 
 describe('verifyQuoteSignature (1Click quote signature)', () => {
+  const signedStatus = { quoteResponse: signedQuote };
   const sigCode = async (status: unknown, signer?: string): Promise<string | undefined> => {
     try {
       await verifyQuoteSignature(status, signer);
@@ -214,7 +218,7 @@ describe('verifyQuoteSignature (1Click quote signature)', () => {
   };
   type Resp = { quoteResponse: Record<string, unknown> & { quoteRequest: Record<string, unknown>; quote: Record<string, unknown> } };
   const edit = (fn: (s: Resp) => void): unknown => {
-    const s = structuredClone(recorded) as unknown as Resp;
+    const s = structuredClone(signedStatus) as unknown as Resp;
     fn(s);
     return s;
   };
@@ -231,17 +235,20 @@ describe('verifyQuoteSignature (1Click quote signature)', () => {
   };
 
   it("accepts the recorded quote: 1Click's real signature under the pinned key", async () => {
-    expect(await sigCode(recorded)).toBeUndefined();
+    expect(await sigCode(signedStatus)).toBeUndefined();
+  });
+
+  it('accepts the unsigned deposit address of a dry quote', async () => {
+    expect(await sigCode(edit((s) => (s.quoteResponse.quote.depositAddress = 'f'.repeat(64))))).toBeUndefined();
   });
 
   it.each([
-    ['depositAddress', (s: Resp) => (s.quoteResponse.quote.depositAddress = 'e'.repeat(64))],
     ['minAmountOut', (s: Resp) => (s.quoteResponse.quote.minAmountOut = '1')],
-    ['deadline', (s: Resp) => (s.quoteResponse.quote.deadline = '2030-01-01T00:00:00.000Z')],
+    ['request deadline', (s: Resp) => (s.quoteResponse.quoteRequest.deadline = '2030-01-01T00:00:00.000Z')],
     ['recipient', (s: Resp) => (s.quoteResponse.quoteRequest.recipient = '0x' + '1'.repeat(40))],
     ['refundTo', (s: Resp) => (s.quoteResponse.quoteRequest.refundTo = 'someone.near')],
     ['amount', (s: Resp) => (s.quoteResponse.quoteRequest.amount = '1')],
-    ['timestamp', (s: Resp) => (s.quoteResponse.timestamp = '2026-11-11T13:02:16.077Z')],
+    ['timestamp', (s: Resp) => (s.quoteResponse.timestamp = '2026-11-13T16:18:02.236Z')],
   ])('refuses a quote whose signed %s was changed', async (_, fn) => {
     expect(await sigCode(edit(fn))).toBe('INTENTS_BAD_SIGNATURE');
   });
@@ -280,7 +287,7 @@ describe('verifyQuoteSignature (1Click quote signature)', () => {
     (dry as Resp).quoteResponse.quote.depositAddress = 'f'.repeat(64);
     expect(await sigCode(dry, pub)).toBeUndefined();
     // The real 1Click signature does not verify under another key.
-    expect(await sigCode(recorded, pub)).toBe('INTENTS_BAD_SIGNATURE');
+    expect(await sigCode(signedStatus, pub)).toBe('INTENTS_BAD_SIGNATURE');
   });
 });
 

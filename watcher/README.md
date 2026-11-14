@@ -16,9 +16,9 @@ A Cloudflare cron Worker that runs every 2 minutes and sends an alert to `ALERT_
   script is re-hashed within ceil(scripts / 30) runs (47 scripts: 2 runs, 4 min), plus 10 drawn at random from
   the rest, so an origin that knows the schedule cannot tell which skipped paths are safe in a given slot. A
   changed HTML, a changed, redirected or unserved script, or any script a fetched file names that is not
-  recorded, is reported by path. This check catches drift and outsiders only: it fetches one fixed claim path, and a hostile
-  claim Worker controls what it returns. A change reverted before a run looks is not seen either. Anyone
-  holding the account's deploy token can also redeploy or delete the watcher itself;
+  recorded, is reported by path. This check catches drift and outsiders only: it fetches one fixed claim
+  path, and a hostile claim Worker controls what it returns. A change reverted before a run looks is not
+  seen either. Anyone holding the account's deploy token can also redeploy or delete the watcher itself;
 - **it cannot check**: the RPC or the page cannot be read, or the config is empty. A run that executes and
   cannot check alerts, so silence from a run means "checked and clean". A watcher that does not run at all
   (cron off, Worker deleted, account or billing stopped, a run that throws, a webhook that fails) is silent

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# One testnet release of the integrated head (T-030): verifier, relayer (GAS_KEY + starter NEAR on), web (+ watcher
-# refresh), faucet, a smoke curl of near.zarf.to, then main fast-forwarded to this commit. The owner runs it; agents never do.
+# One testnet release of the integrated head: verifier, relayer (GAS_KEY + starter NEAR on), web (+ watcher
+# refresh), faucet, a smoke curl of near.zarf.to, then main fast-forwarded to this commit. The owner runs it;
+# agents never do.
 #   bash scripts/release-testnet.sh           # from a clean checkout of origin/main
 #   DRY=1 bash scripts/release-testnet.sh     # print every command, run none (no token read, no network)
 #   RESUME=1 ROLLBACK=<first run's file> bash scripts/release-testnet.sh
@@ -80,8 +81,8 @@ run "test \"\$(git rev-parse HEAD)\" = \"\$(git rev-parse origin/main)\" || { ec
 run "git merge-base --is-ancestor origin/main HEAD || { echo 'origin/main moved: this checkout is no longer a fast-forward' >&2; exit 1; }"
 run "git rev-parse -q --verify $FAUCET_REF >/dev/null"
 run "test -r $GAS_CREDS"
-# The watcher refresh (step 3) fingerprints https://near.zarf.to: its proxy comes from T-029's deploy-near-zarf-to.sh.
-run "curl -sf -o /dev/null --max-time 20 https://near.zarf.to/ || { echo 'near.zarf.to does not answer: run T-029 deploy-near-zarf-to.sh first' >&2; exit 1; }"
+# The watcher refresh (step 3) fingerprints https://near.zarf.to, which is served through proxy/.
+run "curl -sf -o /dev/null --max-time 20 https://near.zarf.to/ || { echo 'near.zarf.to does not answer: deploy the proxy first' >&2; exit 1; }"
 run "(cd verifier && pnpm install --frozen-lockfile >/dev/null && $(wr) whoami 2>/dev/null | grep -q $ACCOUNT) || { echo 'the token does not see account $ACCOUNT' >&2; exit 1; }"
 if [[ -n $RESUME ]]; then
   run "test -d web/.svelte-kit/output/client || { echo 'no web build in this tree: a resume needs the build that was deployed' >&2; exit 1; }"
@@ -128,8 +129,8 @@ remember "$faucet_dir/faucet" zarf-near-faucet-testnet
 run "cd $faucet_dir/faucet && $(wr) deploy"
 run "git worktree remove --force $faucet_dir"
 
-# near.zarf.to (T-029): its proxy and the faucet's PROXY_KEY come from T-029's deploy-near-zarf-to.sh. This script
-# never creates, deletes or rewrites PROXY_KEY: `wrangler deploy` keeps a Worker's existing secrets.
+# near.zarf.to: the proxy owns the faucet's PROXY_KEY. This script never creates, deletes or rewrites
+# PROXY_KEY: `wrangler deploy` keeps a Worker's existing secrets.
 
 begin "5 smoke: near.zarf.to (proxy → web, faucet) and the faucet on workers.dev"
 for u in https://near.zarf.to/ https://near.zarf.to/create https://near.zarf.to/campaigns https://near.zarf.to/try https://near.zarf.to/try.js \

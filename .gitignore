@@ -31,3 +31,11 @@ conversations/
 transcripts/
 *.jsonl
 *.har
+
+# Local credential stores
+.git-credentials
+.aws/
+.ssh/
+secrets.*
+*.jks
+*.keystore
