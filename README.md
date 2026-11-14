@@ -133,7 +133,7 @@ Deployment history and RPC verification commands: `docs/deploy/testnet.md`.
   the commitment, then signs. The commitment and amount become public when the claim is submitted on chain.
 - **Upgrade window and guardian.** On mainnet `new` refuses an `upgrade_delay_ns` outside 10 min to 1 h, and
   `scripts/deploy.sh` requires a guardian and an offline backup verifier key; on mainnet the owner will hold
-  the guardian himself, in a separate account. The watcher also alerts on an owner change, a verifier-key change, a claim
+  the guardian in a separate account. The watcher also alerts on an owner change, a verifier-key change, a claim
   page that differs from what was deployed, and, read from the protocol rather than the contract's own
   views, an escrow code hash other than the expected one or any access key on the escrow.
 - **The escrow account has no full-access key.** Every full-access key is deleted after deploy and `new`
@@ -341,8 +341,7 @@ deciding design and scope.
 
 </details>
 
-**Same team, separate entry: ad402-near**, a sponsor rail that pays a user per sponsor card
-into a NEAR account, https://github.com/yamancan/ad402-near <!-- TODO(Q-015): set the final public URL before submission -->.
+**Same team, separate entry: ad402**, a sponsor rail that pays a user per sponsor card into a NEAR account.
 The two projects share no code.
 
 ## Tracks
