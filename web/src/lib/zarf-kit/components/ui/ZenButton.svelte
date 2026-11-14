@@ -73,6 +73,7 @@
             shadow-[var(--zen-shadow-button)]
             hover:shadow-[var(--zen-shadow-button-hover)]
             active:shadow-[var(--zen-shadow-button-active)]
+            disabled:bg-transparent disabled:text-zen-fg disabled:ring-zen-border disabled:shadow-none
         `,
         /** Secondary: Alternative paths - Transparent with visible border */
         secondary: `

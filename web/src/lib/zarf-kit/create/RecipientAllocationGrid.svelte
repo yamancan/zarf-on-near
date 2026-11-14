@@ -171,7 +171,7 @@
                         aria-invalid={badIdentifier}
                         aria-describedby={describedBy(i, 'identifier')}
                         placeholder={identifierPlaceholder}
-                        class="min-w-0 flex-1 rounded bg-transparent px-1.5 py-1 font-mono text-base text-zen-fg focus:outline-none focus:ring-1 focus:ring-zen-fg/30 sm:text-xs {badIdentifier
+                        class="min-w-0 flex-1 rounded bg-transparent px-1.5 py-1 font-mono text-base text-zen-fg focus:outline-none focus-visible:ring-2 focus-visible:ring-zen-fg/70 sm:text-xs {badIdentifier
                             ? 'text-zen-error'
                             : ''}"
                     />
@@ -192,7 +192,7 @@
                     aria-invalid={badAmount}
                     aria-describedby={describedBy(i, 'amount')}
                     placeholder="0"
-                    class="h-8 w-full rounded-lg border bg-zen-fg/[0.03] px-2.5 text-right font-mono text-base tabular-nums text-zen-fg focus:border-zen-fg/40 focus:outline-none sm:text-xs {badAmount
+                    class="h-8 w-full rounded-lg border bg-zen-fg/[0.03] px-2.5 text-right font-mono text-base tabular-nums text-zen-fg focus:border-zen-fg/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-zen-fg/70 sm:text-xs {badAmount
                         ? 'border-zen-error/40 text-zen-error'
                         : 'border-zen-border'}"
                 />

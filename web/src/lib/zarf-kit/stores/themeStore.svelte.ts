@@ -68,8 +68,10 @@ function restore() {
             const themeName = THEME_MAP[saved];
             document.documentElement.setAttribute('data-theme', themeName);
         } else {
-            // Default theme
-            persist(DEFAULT_THEME);
+            // T-042 (craft finding 8): no saved choice follows the device; nothing is saved until the person picks one
+            const device: Theme = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : DEFAULT_THEME;
+            currentTheme = device;
+            document.documentElement.setAttribute('data-theme', THEME_MAP[device]);
         }
     } catch (error) {
         warn('[ThemeStore] Failed to restore theme:', error);

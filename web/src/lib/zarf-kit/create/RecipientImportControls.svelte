@@ -99,7 +99,7 @@
                 rows="5"
                 spellcheck="false"
                 placeholder={pastePlaceholder}
-                class="w-full rounded-lg border border-zen-border-subtle bg-zen-bg p-3 font-mono text-xs text-zen-fg focus:outline-none focus:ring-1 focus:ring-zen-fg/30"
+                class="w-full rounded-lg border border-zen-border-subtle bg-zen-bg p-3 font-mono text-xs text-zen-fg focus:outline-none focus-visible:ring-2 focus-visible:ring-zen-fg/70"
             ></textarea>
             <div class="flex items-center gap-2">
                 <ZenButton variant="primary" size="sm" onclick={applyText}>Add to List</ZenButton>

@@ -88,8 +88,8 @@
     --zen-btn-ghost-bg: transparent;
     --zen-btn-ghost-bg-hover: oklch(92% 0.004 290); /* Very subtle fill */
     --zen-btn-ghost-bg-active: oklch(88% 0.005 290); /* Slightly more fill */
-    --zen-btn-ghost-text: oklch(60% 0.006 290); /* Faint (low contrast) */
-    --zen-btn-ghost-text-hover: oklch(45% 0.008 290); /* Muted (visible) */
+    --zen-btn-ghost-text: oklch(50% 0.006 290); /* Quiet but readable: >= 4.5:1 on the light ground (T-042) */
+    --zen-btn-ghost-text-hover: oklch(35% 0.008 290); /* Stronger on hover */
 
     /* Danger Button - Destructive actions
      Error color border, solid colors */

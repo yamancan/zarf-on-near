@@ -108,7 +108,7 @@
             {error}
         </div>
     {:else if hint}
-        <div id={hintId} class="pt-1 pl-1 text-xs text-zen-fg-subtle">
+        <div id={hintId} class="pt-1 pl-1 text-xs text-zen-fg-muted">
             {hint}
         </div>
     {/if}

@@ -36,7 +36,7 @@
                 text-xs font-medium
                 text-zen-bg bg-zen-fg
                 rounded-lg shadow-lg
-                whitespace-nowrap pointer-events-none
+                w-max max-w-48 whitespace-normal text-center pointer-events-none
                 {position === 'top'
                 ? 'bottom-full left-1/2 -translate-x-1/2 mb-2'
                 : position === 'bottom'

@@ -119,7 +119,7 @@
   const whyOff = $derived(
     !link || check !== 'ok' || busy ? ''
       : mode === 'chain' ? 'Pick a chain and paste your address first.'
-      : mode === 'new' ? 'Create your Face ID account first.'
+      : mode === 'new' ? (implicit && !passkeyPrf ? 'Download your key and confirm it is saved.' : passkeyOn ? 'Create your Face ID account first.' : 'Create your NEAR account first.')
       : acct?.state === 'found' ? 'Confirm the account above first.' : 'Enter your NEAR account first.',
   );
   const ready = $derived(

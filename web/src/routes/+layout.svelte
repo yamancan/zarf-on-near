@@ -97,7 +97,8 @@
           </svg>
         </a>
         <div class="hidden sm:block w-px h-4 bg-zen-border" aria-hidden="true"></div>
-        <span class="inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium text-zen-fg-muted"><Mark svg={MARKS.near} class="w-4 h-4" />{network}</span>
+        <!-- T-042: below sm only the mark, so the 36 px theme button never clips at 360 px (craft finding 1) -->
+        <span class="inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium text-zen-fg-muted" title={network}><Mark svg={MARKS.near} class="w-4 h-4" /><span class="sr-only sm:not-sr-only">{network}</span></span>
         <div class="w-px h-4 bg-zen-border" aria-hidden="true"></div>
         <ThemeToggle />
       </div>
