@@ -593,12 +593,13 @@ describe('judges page presentation', () => {
     expect(hostile).not.toContain('"><script>');
   });
 
-  it('first screen: the amount block, "Zarf pays the gas", the gallery link, and a full-width human check', async () => {
+  it('first screen: the amount block, "Zarf pays the gas", no gallery link, and a full-width human check', async () => {
     const { default: worker } = await import('../src/index');
     const html = await (await worker.fetch(new Request('https://f.example/try'), { AMOUNT: '500000' } as never)).text();
     expect(html).toContain('<h1>Try Zarf</h1>');
     expect(html).toContain('Test USDC has no value, and Zarf pays the NEAR gas.');
-    expect(html).toMatch(/<a href="https:\/\/zarf-near-claim-preview\.[^"]+\/gallery\/" target="_blank" rel="noopener noreferrer">See every screen<\/a>/);
+    expect(html).not.toContain('See every screen');
+    expect(html).not.toContain('/gallery/');
     expect(html).toContain('<div class="ts"><div class="cf-turnstile" data-sitekey="" data-size="flexible"');
   });
 

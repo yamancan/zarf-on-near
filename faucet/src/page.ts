@@ -16,8 +16,6 @@ const SUN = '<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2
 const MOON = '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>';
 const CHEVRON = '<path d="m6 9 6 6 6-6"/>';
 const X_ICON = '<svg class="icon" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>';
-// The screenshot gallery (preview worker): every screen of the flow, for a judge who wants to look first.
-const GALLERY = 'https://zarf-near-claim-preview.sparkling-queen-5e77.workers.dev/gallery/';
 
 /** Token base units (6 decimals) as a decimal string, e.g. "500000" -> "0.5"; null unless a positive integer. */
 export const usdcText = (amount: string): string | null => {
@@ -233,7 +231,6 @@ const html = (siteKey: string, claimHost: string, usdc: string | null) => `<!doc
     </div>
     <div id="out" role="status" aria-live="polite"></div>
     <p class="hint">No NEAR account needed: you can create one when you claim.</p>
-    <p class="hint">Want to look first? <a href="${GALLERY}" target="_blank" rel="noopener noreferrer">See every screen</a>.</p>
     <details>
       <summary>How this works ${ICON(CHEVRON)}</summary>
       <ul class="more">
