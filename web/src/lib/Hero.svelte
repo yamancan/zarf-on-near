@@ -2,13 +2,15 @@
   // Ported from the main repo's landing hero (packages/ui/lib/components/landing/Hero.svelte): the ring
   // spotlight, the hash canvas, the 16 px blur that clears the text, the staggered reveal and the status line,
   // with the same values. Differences: the headline is the core line (no rotating word), the hashes are NEAR
-  // style (hex) instead of Stellar strkeys, the eyebrow carries no chain logo, the CTAs are this app's, and (design
-  // spec 3.5) the hero is its content plus py-24/32 with no 90vh minimum and no scroll cue.
+  // style (hex) instead of Stellar strkeys, the eyebrow is "Built for NEAR Hackathon" in the "Built on Stellar"
+  // lockup's shape (T-040), the CTAs are this app's, and (design spec 3.5) the hero is its content plus py-24/32
+  // with no 90vh minimum and no scroll cue. The landing names no testnet except CTA 2 (owner, T-040).
   import { onMount } from 'svelte';
   import Mark from '$lib/Mark.svelte';
   import { MARKS } from '$lib/chains';
   import { TESTNET, UNAUDITED_LINE } from '$lib/network';
   import { themeStore } from '$lib/zarf-kit/stores/themeStore.svelte';
+  import ZenBadge from '$lib/zarf-kit/components/ui/ZenBadge.svelte';
   import ZenButton from '$lib/zarf-kit/components/ui/ZenButton.svelte';
 
   let { tryUrl }: { tryUrl: string } = $props();
@@ -158,7 +160,7 @@
   onmousemove={handleMouseMove}
   onmouseleave={handleMouseLeave}
   role="presentation"
-  class="relative w-full py-24 md:py-32 flex flex-col items-center justify-center overflow-hidden bg-transparent hero-container"
+  class="relative w-full pt-24 pb-20 md:pt-32 md:pb-24 flex flex-col items-center justify-center overflow-hidden bg-transparent hero-container"
 >
   <!-- 1. Wave grid (spotlight) -->
   <div class="absolute inset-0 pointer-events-none z-0 wave-grid-spotlight" aria-hidden="true"></div>
@@ -173,6 +175,15 @@
   ></div>
 
   <div class="relative z-30 text-center max-w-4xl px-6 flex flex-col items-center gap-5 md:gap-6">
+    <!-- The one eyebrow: the main repo hero's "Built on Stellar" lockup (Hero.svelte:285-314), same classes, NEAR's mark.
+         Not a link: there is no hackathon page to send people to. -->
+    <div class="transition-all duration-700 ease-out {mounted ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'}" style="transition-delay: 150ms;">
+      <span class="inline-flex items-center gap-2 rounded-full border border-zen-fg/10 bg-zen-fg/[0.04] backdrop-blur-md pl-3.5 pr-4 py-1.5">
+        <Mark svg={MARKS.near} class="w-3.5 h-3.5 text-zen-fg/70" />
+        <span class="text-[10px] font-semibold tracking-[0.28em] uppercase text-zen-fg/55">Built for NEAR Hackathon</span>
+      </span>
+    </div>
+
     <h1
       class="text-4xl sm:text-5xl md:text-6xl font-bold tracking-tighter text-zen-fg leading-[1.12] [text-wrap:balance] transition-opacity duration-1000 ease-out {mounted ? 'opacity-100' : 'opacity-0'}"
       style="transition-delay: 400ms;"
@@ -191,19 +202,25 @@
       class="flex flex-col sm:flex-row items-center gap-4 mt-6 w-full sm:w-auto transition-all duration-700 ease-out {mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-5'}"
       style="transition-delay: 1200ms;"
     >
-      <a href="/create" class="block w-full sm:w-auto"><ZenButton tabindex={-1} variant="primary" size="lg" class="w-full sm:w-auto">
+      <!-- "Mainnet!" corner tag: the owner's own choice (T-040), a tag on the button, not a sentence. The kit's neutral
+           ZenBadge (as FundFromChain's "Mainnet"), on an opaque backing so the button edge does not run through it, and on
+           the straight part of the top edge. -->
+      <a href="/create" class="relative block w-full sm:w-auto" aria-label="Send USDC (mainnet)"><ZenButton tabindex={-1} variant="primary" size="lg" class="w-full sm:w-auto">
         {#snippet iconLeft()}<Mark svg={MARKS.usdc} class="w-5 h-5" />{/snippet}
         Send USDC
-      </ZenButton></a>
-      <a href={tryUrl} class="block w-full sm:w-auto"><ZenButton tabindex={-1} variant="secondary" size="lg" class="w-full sm:w-auto">
+      </ZenButton><span class="pointer-events-none absolute -top-2 right-7 flex rounded-md bg-zen-bg ring-1 ring-zen-fg/10" aria-hidden="true"><ZenBadge size="sm">Mainnet!</ZenBadge></span></a>
+      <!-- Glass at rest (T-040): the kit's glass fill and blur (styles/index.css .zen-glass tokens) on the link, in the
+           button's own radius, so the ring spotlight does not show through the transparent secondary button. A 5% fg
+           tint raises it from the page in dark mode, where the glass fill alone equals the background (critic). ZenButton
+           itself is untouched: its ring, hover and pressed fills sit on top. -->
+      <a href={tryUrl} class="block w-full sm:w-auto rounded-full" style="background-color: oklch(from var(--zen-bg) l c h / var(--zen-glass-bg-opacity, 0.7)); backdrop-filter: blur(var(--zen-glass-blur, 24px)); -webkit-backdrop-filter: blur(var(--zen-glass-blur, 24px)); box-shadow: inset 0 0 0 999px oklch(from var(--zen-fg) l c h / 0.05);"><ZenButton tabindex={-1} variant="secondary" size="lg" class="w-full sm:w-auto">
         {#snippet iconLeft()}<Mark svg={MARKS.near} class="w-5 h-5" />{/snippet}
         Try on NEAR Testnet
       </ZenButton></a>
     </div>
 
-    <!-- T-032: on testnet one honest line on what pays here; on mainnet the unaudited note (T-001) -->
-    {#if TESTNET}<p class="text-xs text-zen-fg-subtle max-w-md">On testnet, claims pay test USDC on NEAR.</p>
-    {:else}<p class="text-xs text-zen-fg-subtle max-w-md">{UNAUDITED_LINE}</p>{/if}
+    <!-- Mainnet keeps the unaudited note (T-001); the landing carries no testnet line (owner, T-040) -->
+    {#if !TESTNET}<p class="text-xs text-zen-fg-subtle max-w-md">{UNAUDITED_LINE}</p>{/if}
   </div>
 
 </div>
