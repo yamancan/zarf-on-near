@@ -212,7 +212,7 @@
               ? 'opacity-100 blur-none scale-100'
               : 'opacity-0 blur-sm scale-75'}"><Mark svg={c.svg} class="w-full h-full text-zen-fg" /></span
           >{/each}</span
-      > chain.
+      >&nbsp;chain.
     </h1>
 
     <p
