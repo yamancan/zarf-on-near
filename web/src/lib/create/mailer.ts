@@ -5,7 +5,7 @@ import type { Recipient } from './campaign';
 
 /**
  * What a row shows after its call. 'claimed' and 'closed' are final; 'failed' offers a retry; 'waiting' = the mailer
- * has not confirmed an earlier send yet (it retries it itself after ten minutes); 'limit' = a daily or quota limit,
+ * has not confirmed an earlier send yet (a retry after ten minutes resends it with the same idempotency key); 'limit' = a daily or quota limit,
  * or the mailer is not set up: the batch stops and the manual path is the way on.
  */
 export type MailStatus = 'sending' | 'sent' | 'claimed' | 'closed' | 'failed' | 'waiting' | 'limit';

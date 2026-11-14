@@ -980,7 +980,7 @@
             </ZenButton>
             <p class="text-sm text-zen-fg-muted">Zarf sends the emails through Resend; Resend sees each address and its link.</p>
             {#if mailCounts.tried && !mailBusy}
-              <p class="text-sm text-zen-fg-muted" role="status">Emailed {mailCounts.done} of {mailCounts.tried}.{mailCounts.limit ? ' Email limit reached for today: use Copy All Links for the rest.' : ''}{mailCounts.failed ? ` ${mailCounts.failed} not sent: retry below.` : ''}{mailCounts.waiting ? ` ${mailCounts.waiting} awaiting confirmation; the mailer retries within ten minutes.` : ''}</p>
+              <p class="text-sm text-zen-fg-muted" role="status">Emailed {mailCounts.done} of {mailCounts.tried}.{mailCounts.limit ? ' Email limit reached for today: use Copy All Links for the rest.' : ''}{mailCounts.failed ? ` ${mailCounts.failed} not sent: retry below.` : ''}{mailCounts.waiting ? ` ${mailCounts.waiting} awaiting confirmation: retry in ten minutes if no email arrives.` : ''}</p>
             {:else if mailCounts.skipped}
               <p class="text-sm text-zen-fg-muted">{mailCounts.skipped} already claimed or paying: no email for {mailCounts.skipped === 1 ? 'it' : 'them'}.</p>
             {/if}
@@ -1021,7 +1021,7 @@
                 {#if mail[r.commitment] === 'sent'}<span class="shrink-0 inline-flex items-center gap-1 text-xs text-zen-fg-subtle"><Check class="w-3.5 h-3.5" aria-hidden="true" />Emailed</span>
                 {:else if mail[r.commitment] === 'sending'}<span class="shrink-0 text-xs text-zen-fg-subtle">Sending…</span>
                 {:else if mail[r.commitment] === 'closed'}<span class="shrink-0 text-xs text-zen-fg-subtle">Closed</span>
-                {:else if mail[r.commitment] === 'waiting'}<span class="shrink-0 text-xs text-zen-fg-subtle">Awaiting confirmation</span>
+                {:else if mail[r.commitment] === 'waiting'}<span class="shrink-0 text-xs text-zen-fg-subtle">Awaiting confirmation</span><ZenButton variant="ghost" size="xs" onclick={() => retryEmail(r)}>{#snippet iconLeft()}<RefreshCw class="w-3.5 h-3.5" />{/snippet}<span aria-hidden="true">Retry</span><span class="sr-only">Retry email to {r.email}</span></ZenButton>
                 {:else if mail[r.commitment] === 'limit'}<span class="shrink-0 text-xs text-zen-fg-subtle">Not sent</span>
                 {:else if mail[r.commitment] === 'failed' && c !== 'claimed' && c !== 'pending'}<ZenButton variant="ghost" size="xs" onclick={() => retryEmail(r)}>{#snippet iconLeft()}<RefreshCw class="w-3.5 h-3.5" />{/snippet}<span aria-hidden="true">Retry</span><span class="sr-only">Retry email to {r.email}</span></ZenButton>{/if}
                 <Tooltip text={copiedRow === i ? 'Copied' : 'Copy Message'} position="top">
@@ -1058,7 +1058,7 @@
       {#if shown}
         <aside class="w-full min-w-0 lg:flex-1 lg:max-w-2xl lg:sticky lg:top-24 space-y-6" aria-label="The message for {shown.r.email}">
           {#if mailerUrl && zarfMail}
-            <!-- T-039: exactly the email the mailer sends (lib/create/claimEmail.ts), from Zarf <claim@send.zarf.to> -->
+            <!-- T-039: exactly the email the mailer sends (lib/create/claimEmail.ts), from Zarf <claim@zarf.to> -->
             <div>
               <div class="mb-4 ml-1 flex items-center gap-1.5 text-sm text-zen-fg-muted"><Mail class="w-4 h-4" aria-hidden="true" />What Zarf Emails</div>
               {@render messageCard(zarfMail.email, zarfMail.m)}
