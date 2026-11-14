@@ -18,7 +18,7 @@ Zarf link is useless without that person's Google account.
   (accounts, keys and versions: `docs/deploy/testnet.md`)
 - The hackathon judges have access to this repository.
 
-> Status: live on NEAR testnet. A real Google claim has run end to end on the hosted app. The
+> Status at submission (14 Nov 2026): live on NEAR testnet, not yet deployed on NEAR mainnet. A real Google claim has run end to end on the hosted app. The
 > cross-chain payout and funding (NEAR Intents) are built but have not run with real money yet. The
 > evidence table below says what has run.
 
@@ -84,6 +84,7 @@ Read this before using it with real money.
   than the contract's own views, an escrow code hash other than the expected one or any access key on the
   escrow. Only a guardian can stop a proposal made with a stolen owner key, so `scripts/deploy.sh` refuses
   mainnet without a guardian and without an offline backup verifier key; the testnet escrow has no guardian.
+  On mainnet the owner will hold the guardian himself, in a separate account; that does not help if both keys are stolen together.
 - **The escrow account has no full-access key.** Every full-access key is deleted after deploy and
   `new` (`spec/claim.md`, "Upgrades and ownership"), so nobody can sign as the escrow and move its
   tokens; the only way to change the code is the delayed upgrade. On testnet `zarf-near-1112.testnet` holds no access key
@@ -218,7 +219,7 @@ make demo      # the claim flow end to end
 something that ran failed. Expected on a machine without the Rust toolchain:
 
 ```text
-SUMMARY: verifier ✓ relayer ✓ web ✓ watcher ✓ scripts ✓ proxy ✓ faucet ✓ contract NOT RUN (cargo missing)
+SUMMARY: verifier ✓ relayer ✓ web ✓ watcher ✓ scripts ✓ proxy ✓ mailer ✓ faucet ✓ contract NOT RUN (cargo missing)
 ```
 
 `make test` runs the contract's tests (`contract/Makefile`: unit, then near-workspaces
