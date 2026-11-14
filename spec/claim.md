@@ -42,7 +42,8 @@ commitment_i    = HMAC-SHA256(key = salt_i, msg = canonical_email)      // 32 by
   - `a`: the amount in base units, decimal (`u128`).
   - `p`: the merkle proof, the sibling hashes concatenated in order (32 bytes each) and
     encoded as base64url without padding. An empty proof is an empty string.
-  The fragment never reaches a server. The claim app sends `salt`, `amount` and `proof` only
+  The fragment never reaches the claim site's server. (If the sender uses Email All Recipients, the mailer and
+  Resend see the whole link once, to send it.) The claim app sends `salt`, `amount` and `proof` only
   in the POST to the verifier, together with the id_token. It removes the fragment with
   `history.replaceState` right after reading it, and the verifier never logs `salt`.
 - **The leaf list is not published.** The claim app rebuilds the root from

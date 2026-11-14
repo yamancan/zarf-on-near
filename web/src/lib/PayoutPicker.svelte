@@ -1,7 +1,7 @@
 <script lang="ts">
   // "USDC on another chain": a chain-logo picker + address, then a dry 1Click quote shown before sign-in.
   // The real quote (and its deposit address, which the sign-in binds) is taken on "Sign in", mainnet only. On testnet
-  // the same picker shows a live mainnet price (dry quote) and `choice` stays null, so the claim says Mainnet Only.
+  // the picker explains mainnet availability without asking for an address; `choice` stays null.
   import { onMount } from 'svelte';
   import { formatAmount } from '$lib/create/recipients';
   import { ChevronDown } from 'lucide-svelte';
@@ -55,7 +55,8 @@
     quote = null;
     quoteError = '';
     tooSmall = false;
-    if (capError || !a || !recipient || a.chain.addressError(recipient)) return;
+    quoting = false;
+    if (!mainnet || capError || !a || !recipient || a.chain.addressError(recipient)) return;
     const tag = `${a.assetId}|${recipient}`;
     quoting = true;
     const t = setTimeout(async () => {
@@ -63,8 +64,7 @@
         const pre = a.chain.preflight ? await a.chain.preflight(recipient) : null;
         if (pre) throw new QuoteError(pre);
         const deadline = new Date(Date.now() + QUOTE_LIFETIME_MS).toISOString();
-        // Testnet: 1Click is mainnet-only and refuses a .testnet refund account, so the sample price refunds to "near".
-        const q = await getQuote(true, { amount, assetId: a.assetId, recipient, refundTo: mainnet ? refundTo : 'near', deadline });
+        const q = await getQuote(true, { amount, assetId: a.assetId, recipient, refundTo, deadline });
         if (`${asset?.assetId}|${address.trim()}` !== tag) return; // the field changed meanwhile
         if (!withinLossBound(amount, q.minAmountOut, a.decimals)) {
           quoteError = `The bridge's cost for this payout could be more than 2% of it, our limit. Small payouts often are. Claim it to a NEAR account instead: that has no such limit.`;
@@ -100,6 +100,9 @@
   };
 </script>
 
+{#if !mainnet}
+  <p class="text-sm text-zen-fg-muted">Nothing is sent on testnet. Other chains require mainnet; choose a NEAR account to receive these funds.</p>
+{/if}
 {#if capError}
   <Note tone="error">{capError}</Note>
   {#if onUseNear}<ZenButton variant="secondary" size="sm" class="self-start" onclick={onUseNear}>Use a NEAR Account</ZenButton>{/if}
@@ -108,7 +111,7 @@
 {:else if !assets}
   <Note tone="pending">Loading chains…</Note>
 {:else}
-  <p class="text-xs text-zen-fg-subtle">Very small payouts may be refused when the bridge's cost is above 2%. Claiming to a NEAR account has no such limit.</p>
+  {#if mainnet}<p class="text-xs text-zen-fg-muted">Very small payouts may be refused when the bridge's cost is above 2%. Claiming to a NEAR account has no such limit.</p>{/if}
   <!-- One eyebrow per screen ("Send To" above): the chain and address fields carry their names for screen readers -->
   <span id="chain-l" class="sr-only">Chain</span>
   <!-- The chains as their logos (blue-team gap 4): one tap, no menu -->
@@ -125,7 +128,7 @@
       ><span class="w-6 h-6" aria-hidden="true">{@html chainLogo(a.chain)}</span><span class="w-full truncate text-center">{a.chain.name}</span></button>
     {/each}
   </div>
-  {#if asset}
+  {#if asset && mainnet}
     <ZenInput
       id="addr"
       aria-label="{asset.chain.name} address"
@@ -149,7 +152,7 @@
       {:else if quote}
         <p class="quote text-sm text-zen-fg tabular-nums" role="status">
           <span class="font-semibold">≈ {twoDecimals(quote.q.amountOutFormatted)} USDC</span>
-          <span class="text-zen-fg-subtle">· about {quote.q.timeEstimate} s{mainnet ? '' : ' · live mainnet price'}</span>
+          <span class="text-zen-fg-muted">· about {quote.q.timeEstimate} s</span>
         </p>
       {/if}
       <details class="group text-xs text-zen-fg-subtle">
@@ -163,11 +166,7 @@
               {cost(quote.q, asset.decimals)} USDC. A fresh quote is taken when you sign in.
             </p>
           {/if}
-          {#if mainnet}
-            <p class="text-xs text-zen-fg-subtle">If the bridge does not complete the payout by its deadline, it refunds <span class="font-mono">{refundTo}</span> on NEAR (the sender), not this address.</p>
-          {:else}
-            <p class="text-xs text-zen-fg-subtle">Payouts to other chains run on mainnet only. On testnet this is a live mainnet price, and nothing is sent.</p>
-          {/if}
+          <p class="text-xs text-zen-fg-muted">If the bridge does not complete the payout by its deadline, it refunds <span class="font-mono">{refundTo}</span> on NEAR (the sender), not this address.</p>
         </div>
       </details>
     </div>

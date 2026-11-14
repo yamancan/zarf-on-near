@@ -70,7 +70,7 @@
             </div>
         {/if}
         {#if children}
-            <div class="text-sm opacity-90">
+            <div class="text-sm opacity-90 [overflow-wrap:anywhere]">
                 {@render children()}
             </div>
         {/if}

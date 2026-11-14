@@ -75,8 +75,8 @@
       <span class="inline-flex items-center gap-1.5 whitespace-nowrap">
         {#if left}<span class="tabular-nums" title={deadline ? `Claim by ${deadline}` : undefined}>{left}</span>{/if}
         {#if !preview}
-          <Tooltip text="Never on chain; our verifier sees it once." position="bottom">
-            <button type="button" class="inline-flex items-center justify-center w-6 h-6 rounded-full text-zen-fg-subtle hover:text-zen-fg" aria-label="Who sees the email: the email never goes on chain. Our verifier sees it once, to check this claim.">
+          <Tooltip text="Never on chain; our verifier sees it when you claim. If Zarf emailed you this link, our mailer and Resend saw it too." position="bottom">
+            <button type="button" class="inline-flex items-center justify-center w-6 h-6 rounded-full text-zen-fg-subtle hover:text-zen-fg" aria-label="Who sees the email: the email never goes on chain. Our verifier sees it when you claim. If Zarf emailed you this link, our mailer and Resend saw it too.">
               <Info class="w-3.5 h-3.5" aria-hidden="true" />
             </button>
           </Tooltip>
@@ -85,13 +85,13 @@
     </p>
   </div>
 
-  <div class="flex items-center gap-3">
+  <div class="flex min-w-0 items-center gap-3">
     <span class="sr-only">Claim amount</span>
     <Mark svg={MARKS.usdc} class="w-10 h-10" />
     <!-- Figure and unit trimmed to cap height, so the mark centres on the digits; the unit shares their baseline -->
-    <span class="flex items-baseline gap-2">
-      <span class="text-5xl font-semibold tracking-tight text-zen-fg tabular-nums [text-box:trim-both_cap_alphabetic]">{amount}</span>
-      <span class="text-base text-zen-fg-muted leading-none [text-box:trim-both_cap_alphabetic]">{unit}</span>
+    <span class="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-3">
+      <span class="max-w-full break-all text-4xl sm:text-5xl font-semibold tracking-tight text-zen-fg tabular-nums [text-box:trim-both_cap_alphabetic]">{amount}</span>
+      <span class="whitespace-nowrap text-base text-zen-fg-muted leading-none [text-box:trim-both_cap_alphabetic]">{unit}</span>
     </span>
   </div>
 
@@ -114,7 +114,7 @@
           >
             {#if value === 'existing'}<Mark svg={MARKS.near} class="w-4 h-4" />
             {:else if value === 'new'}{#if text === 'Face ID'}<ScanFace class="w-4 h-4 shrink-0" aria-hidden="true" />{:else}<UserPlus class="w-4 h-4 shrink-0" aria-hidden="true" />{/if}
-            {:else}<span class="inline-flex gap-0.5 shrink-0 transition-opacity {mode === value ? '' : 'opacity-60'}">{#each CHAIN_MARKS as c (c.key)}<Mark svg={c.logo} class="w-4 h-4" />{/each}</span>{/if}
+            {:else}<span class="inline-flex gap-0.5 shrink-0 transition-opacity {mode === value ? '' : 'opacity-60'}">{#each CHAIN_MARKS as c (c.key)}<span class="flex h-4 w-4 items-center justify-center"><Mark svg={c.logo} class={c.key === 'base' ? 'w-3 h-3' : 'w-4 h-4'} /></span>{/each}</span>{/if}
             <span class="truncate">{text}</span>
           </button>
         {/each}

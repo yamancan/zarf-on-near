@@ -8,7 +8,6 @@
  * @module stores/themeStore
  */
 
-// zarf-near: the two @zarf/core imports become SvelteKit's browser flag and console.warn; nothing else changes.
 import { browser } from '$app/environment';
 const warn = (...a: unknown[]) => console.warn(...a);
 import type { Theme } from './types';
@@ -27,6 +26,7 @@ const THEME_MAP: Record<Theme, string> = {
 // ============================================================================
 
 let currentTheme = $state<Theme>(DEFAULT_THEME);
+let stopFollowingSystem: (() => void) | undefined;
 
 // ============================================================================
 // Derived Values
@@ -40,41 +40,48 @@ const isLight = $derived(currentTheme === 'light');
 // ============================================================================
 
 /**
- * Persist theme to localStorage and apply to document
+ * Apply independently of storage: blocked storage must not prevent the toggle.
  */
+function apply(theme: Theme) {
+    currentTheme = theme;
+    document.documentElement.setAttribute('data-theme', THEME_MAP[theme]);
+}
+
 function persist(theme: Theme) {
     if (!browser) return;
 
     try {
         localStorage.setItem(STORAGE_KEY, theme);
-        const themeName = THEME_MAP[theme];
-        document.documentElement.setAttribute('data-theme', themeName);
     } catch (error) {
         warn('[ThemeStore] Failed to persist theme:', error);
     }
 }
 
 /**
- * Restore theme from localStorage
+ * Follow the device until an explicit choice is saved. Returns the mount cleanup.
  */
 function restore() {
     if (!browser) return;
+    stopFollowingSystem?.();
+    stopFollowingSystem = undefined;
 
     try {
-        const saved = localStorage.getItem(STORAGE_KEY) as Theme;
-
-        if (saved && ['dark', 'light'].includes(saved)) {
-            currentTheme = saved;
-            const themeName = THEME_MAP[saved];
-            document.documentElement.setAttribute('data-theme', themeName);
-        } else {
-            // Default theme
-            persist(DEFAULT_THEME);
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved === 'dark' || saved === 'light') {
+            apply(saved);
+            return;
         }
     } catch (error) {
         warn('[ThemeStore] Failed to restore theme:', error);
-        persist(DEFAULT_THEME);
     }
+
+    const preference = window.matchMedia('(prefers-color-scheme: dark)');
+    const follow = () => apply(preference.matches ? 'dark' : 'light');
+    follow();
+    preference.addEventListener('change', follow);
+    const stop = () => preference.removeEventListener('change', follow);
+    stopFollowingSystem = stop;
+    return stop;
 }
 
 // ============================================================================
@@ -83,6 +90,10 @@ function restore() {
 
 function setTheme(theme: Theme) {
     currentTheme = theme;
+    if (!browser) return;
+    stopFollowingSystem?.();
+    stopFollowingSystem = undefined;
+    apply(theme);
     persist(theme);
 }
 

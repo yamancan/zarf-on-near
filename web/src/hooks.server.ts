@@ -39,7 +39,7 @@ export function connectOrigins(urls: (string | undefined)[]): string {
 export const handle: Handle = async ({ event, resolve }) => {
   const res = await resolve(event);
   const csp = res.headers.get('Content-Security-Policy');
-  const extra = connectOrigins([env.PUBLIC_VERIFIER_URL, env.PUBLIC_RELAYER_URL, env.PUBLIC_NEAR_RPC_URL, ONECLICK_API]);
+  const extra = connectOrigins([env.PUBLIC_VERIFIER_URL, env.PUBLIC_RELAYER_URL, env.PUBLIC_MAILER_URL, env.PUBLIC_NEAR_RPC_URL, ONECLICK_API]);
   let policy = csp && extra ? csp.replace("connect-src 'self'", `connect-src 'self' ${extra}`) : csp;
   if (policy && isWalletPage(event.url.pathname)) policy = senderPolicy(policy);
   if (policy) res.headers.set('Content-Security-Policy', policy);

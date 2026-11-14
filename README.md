@@ -97,7 +97,9 @@ Read this before using it with real money.
   that did pay leaves the pooled balance short, and the last claim or `reclaim` of any campaign in that token
   comes up short by that amount (`settle` in `contract/src/lib.rs`).
 - **The salt is in the claim link's fragment** (`#s=<salt>&a=<amount>&p=<proof>`), which the claim site's server never
-  receives. At claim time it goes only to the verifier, which never logs it. The sender's recovery
+  receives. At claim time it goes only to the verifier, which never logs it. If the sender uses Email All
+  Recipients, the mailer (`mailer/`) and Resend, our email provider, also see each address and its link; the mailer
+  stores only the commitment. The sender's recovery
   file and link list hold every salt. A leaked link lets its holder test one guessed email against
   one commitment; it does not let anyone claim without that Google account.
 - **The relayer pays gas and nothing else.** It signs with a NEAR function-call key limited to the

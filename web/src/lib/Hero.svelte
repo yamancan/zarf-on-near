@@ -2,13 +2,16 @@
   // Ported from the main repo's landing hero (packages/ui/lib/components/landing/Hero.svelte): the ring
   // spotlight, the hash canvas, the 16 px blur that clears the text, the staggered reveal and the status line,
   // with the same values. Differences: the headline is the core line (no rotating word), the hashes are NEAR
-  // style (hex) instead of Stellar strkeys, the eyebrow carries no chain logo, the CTAs are this app's, and (design
-  // spec 3.5) the hero is its content plus py-24/32 with no 90vh minimum and no scroll cue.
+  // style (hex) instead of Stellar strkeys, the eyebrow is "Built for NEAR Hackathon" in the "Built on Stellar"
+  // lockup's shape (T-040), the CTAs are this app's, and (design spec 3.5) the hero is its content plus py-24/32
+  // with no 90vh minimum and no scroll cue. The landing body names no testnet except CTA 2; the
+  // header keeps its "NEAR Testnet" label (owner, T-040). "any chain" carries the rotating chain mark (CHAIN_LOOP).
   import { onMount } from 'svelte';
   import Mark from '$lib/Mark.svelte';
-  import { MARKS } from '$lib/chains';
+  import { MARKS, PAYOUT_CHAINS } from '$lib/chains';
   import { TESTNET, UNAUDITED_LINE } from '$lib/network';
   import { themeStore } from '$lib/zarf-kit/stores/themeStore.svelte';
+  import ZenBadge from '$lib/zarf-kit/components/ui/ZenBadge.svelte';
   import ZenButton from '$lib/zarf-kit/components/ui/ZenButton.svelte';
 
   let { tryUrl }: { tryUrl: string } = $props();
@@ -26,6 +29,20 @@
   const HIDDEN_DATA = ['Private Claim'];
 
   let mouse = { x: -999, y: -999 };
+
+  // "any chain" (owner, T-040): five chain marks take turns in the headline, the main repo hero's rotating slot
+  // (stacked grid cell, fade + blur, 2.6 s). Stellar is the owner's explicit choice although this app pays no Stellar
+  // address; the rest are payout chains (lib/chains.ts). The words carry the meaning; the marks are aria-hidden.
+  const payoutLogo = (key: string) => PAYOUT_CHAINS.find((c) => c.key === key)!.logo;
+  const STELLAR = '<svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24"><path d="M12.003 1.716c-1.37 0-2.7.27-3.948.78A10.18 10.18 0 0 0 2.66 7.901a10.136 10.136 0 0 0-.797 3.954c0 .258.01.516.027.775a1.942 1.942 0 0 1-1.055 1.88L0 14.934v1.902l2.463-1.26.072-.032v.005l.77-.39.758-.385.066-.039 14.807-7.56 1.666-.847 3.392-1.732V2.694L17.792 5.86 3.744 13.025l-.104.055-.017-.115a8.286 8.286 0 0 1-.071-1.105c0-2.255.88-4.377 2.474-5.977a8.462 8.462 0 0 1 2.71-1.820 8.513 8.513 0 0 1 3.2-.654h.067a8.41 8.41 0 0 1 4.09 1.055l1.628-.83.126-.066a10.11 10.11 0 0 0-5.845-1.853zM24 7.143 5.047 16.808l-1.666.847L0 19.382v1.902l3.282-1.671 2.91-1.485 14.058-7.153.105-.055.016.115c.05.369.072.743.072 1.11 0 2.255-.88 4.383-2.475 5.978a8.461 8.461 0 0 1-2.71 1.82 8.305 8.305 0 0 1-3.2.654h-.06c-1.441 0-2.86-.369-4.102-1.061l-.066.033-1.683.857c.594.418 1.232.776 1.903 1.062a10.11 10.11 0 0 0 3.947.797 10.09 10.09 0 0 0 7.17-2.975 10.136 10.136 0 0 0 2.969-7.18c0-.259-.005-.523-.027-.781a1.942 1.942 0 0 1 1.055-1.88L24 9.044z"/></svg>';
+  const CHAIN_LOOP = [
+    { name: 'Stellar', svg: STELLAR },
+    { name: 'Base', svg: payoutLogo('base') },
+    { name: 'Ethereum', svg: payoutLogo('eth') },
+    { name: 'Solana', svg: payoutLogo('sol') },
+    { name: 'Arbitrum', svg: payoutLogo('arb') },
+  ];
+  let chainIdx = $state(0);
 
   interface Point {
     x: number;
@@ -145,7 +162,10 @@
       if (!reduceMotion) initPoints();
     });
     resizeObserver.observe(container);
+    // Under reduced motion the mark still changes, without the transition (as in the main repo).
+    const chainTimer = setInterval(() => (chainIdx = (chainIdx + 1) % CHAIN_LOOP.length), 2600);
     return () => {
+      clearInterval(chainTimer);
       cancelAnimationFrame(raf);
       if (animationId) cancelAnimationFrame(animationId);
       resizeObserver.disconnect();
@@ -158,7 +178,7 @@
   onmousemove={handleMouseMove}
   onmouseleave={handleMouseLeave}
   role="presentation"
-  class="relative w-full py-24 md:py-32 flex flex-col items-center justify-center overflow-hidden bg-transparent hero-container"
+  class="relative w-full pt-24 pb-20 md:pt-32 md:pb-24 flex flex-col items-center justify-center overflow-hidden bg-transparent hero-container"
 >
   <!-- 1. Wave grid (spotlight) -->
   <div class="absolute inset-0 pointer-events-none z-0 wave-grid-spotlight" aria-hidden="true"></div>
@@ -173,11 +193,26 @@
   ></div>
 
   <div class="relative z-30 text-center max-w-4xl px-6 flex flex-col items-center gap-5 md:gap-6">
+    <!-- The one eyebrow: the main repo hero's "Built on Stellar" lockup (Hero.svelte:285-314), same classes, NEAR's mark.
+         Not a link: there is no hackathon page to send people to. -->
+    <div class="transition-all duration-700 ease-out {mounted ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'}" style="transition-delay: 150ms;">
+      <span class="inline-flex items-center gap-2 rounded-full border border-zen-fg/10 bg-zen-fg/[0.04] backdrop-blur-md pl-3.5 pr-4 py-1.5">
+        <Mark svg={MARKS.near} class="w-3.5 h-3.5 text-zen-fg/70" />
+        <span class="text-[10px] font-semibold tracking-[0.28em] uppercase text-zen-fg/55">Built for NEAR Hackathon</span>
+      </span>
+    </div>
+
     <h1
       class="text-4xl sm:text-5xl md:text-6xl font-bold tracking-tighter text-zen-fg leading-[1.12] [text-wrap:balance] transition-opacity duration-1000 ease-out {mounted ? 'opacity-100' : 'opacity-0'}"
       style="transition-delay: 400ms;"
     >
-      Send USDC to any email, from any chain.
+      Send USDC to any email, from any <span class="inline-grid align-[-0.08em] w-[0.78em] h-[0.78em]" aria-hidden="true"
+        >{#each CHAIN_LOOP as c, i (c.name)}<span
+            class="col-start-1 row-start-1 transition-all duration-500 ease-out motion-reduce:transition-none {i === chainIdx
+              ? 'opacity-100 blur-none scale-100'
+              : 'opacity-0 blur-sm scale-75'}"><Mark svg={c.svg} class="w-full h-full text-zen-fg" /></span
+          >{/each}</span
+      >&nbsp;chain.
     </h1>
 
     <p
@@ -191,19 +226,25 @@
       class="flex flex-col sm:flex-row items-center gap-4 mt-6 w-full sm:w-auto transition-all duration-700 ease-out {mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-5'}"
       style="transition-delay: 1200ms;"
     >
-      <a href="/create" class="block w-full sm:w-auto"><ZenButton tabindex={-1} variant="primary" size="lg" class="w-full sm:w-auto">
+      <!-- "Mainnet!" corner tag: the owner's own choice (T-040), a tag on the button, not a sentence. The kit's neutral
+           ZenBadge (as FundFromChain's "Mainnet"), on an opaque backing so the button edge does not run through it, and on
+           the straight part of the top edge. -->
+      <a href="/create" class="relative block w-full sm:w-auto" aria-label="Send USDC (mainnet)"><ZenButton tabindex={-1} variant="primary" size="lg" class="w-full sm:w-auto">
         {#snippet iconLeft()}<Mark svg={MARKS.usdc} class="w-5 h-5" />{/snippet}
         Send USDC
-      </ZenButton></a>
-      <a href={tryUrl} class="block w-full sm:w-auto"><ZenButton tabindex={-1} variant="secondary" size="lg" class="w-full sm:w-auto">
+      </ZenButton><span class="pointer-events-none absolute -top-2 right-7 flex rounded-md bg-zen-bg ring-1 ring-zen-fg/10" aria-hidden="true"><ZenBadge size="sm">Mainnet!</ZenBadge></span></a>
+      <!-- Glass at rest (T-040): the kit's glass fill and blur (styles/index.css .zen-glass tokens) on the link, in the
+           button's own radius, so the ring spotlight does not show through the transparent secondary button. A 5% fg
+           tint raises it from the page in dark mode, where the glass fill alone equals the background (critic). ZenButton
+           itself is untouched: its ring, hover and pressed fills sit on top. -->
+      <a href={tryUrl} class="block w-full sm:w-auto rounded-full" style="background-color: oklch(from var(--zen-bg) l c h / var(--zen-glass-bg-opacity, 0.7)); backdrop-filter: blur(var(--zen-glass-blur, 24px)); -webkit-backdrop-filter: blur(var(--zen-glass-blur, 24px)); box-shadow: inset 0 0 0 999px oklch(from var(--zen-fg) l c h / 0.05);"><ZenButton tabindex={-1} variant="secondary" size="lg" class="w-full sm:w-auto">
         {#snippet iconLeft()}<Mark svg={MARKS.near} class="w-5 h-5" />{/snippet}
         Try on NEAR Testnet
       </ZenButton></a>
     </div>
 
-    <!-- T-032: on testnet one honest line on what pays here; on mainnet the unaudited note (T-001) -->
-    {#if TESTNET}<p class="text-xs text-zen-fg-subtle max-w-md">On testnet, claims pay test USDC on NEAR.</p>
-    {:else}<p class="text-xs text-zen-fg-subtle max-w-md">{UNAUDITED_LINE}</p>{/if}
+    <!-- Mainnet keeps the unaudited note (T-001); the landing carries no testnet line (owner, T-040) -->
+    {#if !TESTNET}<p class="text-xs text-zen-fg-subtle max-w-md">{UNAUDITED_LINE}</p>{/if}
   </div>
 
 </div>
